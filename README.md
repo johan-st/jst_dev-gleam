@@ -1,24 +1,25 @@
 # jst_dev
+monorepo with 3 gleam projects
 
-[![Package Version](https://img.shields.io/hexpm/v/jst_dev)](https://hex.pm/packages/jst_dev)
-[![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/jst_dev/)
+## Client
+run by vite with vite-gleam
 
-```sh
-gleam add jst_dev@1
+### commands
+
+```bash
+# start dev server
+gleam run -m lustre/dev start
+
+# list commands 
+gleam run -m lustre/dev -- --help
+
 ```
-```gleam
-import jst_dev
 
-pub fn main() {
-  // TODO: An example of the project in use
-}
-```
+### references
+- gleez is a shadcn inspired component library
+  - [website](https://gleez.netlify.app/)
+  - [repo](https://github.com/MAHcodes/gleez)
 
-Further documentation can be found at <https://hexdocs.pm/jst_dev>.
+## Common
 
-## Development
-
-```sh
-gleam run   # Run the project
-gleam test  # Run the tests
-```
+## Server
