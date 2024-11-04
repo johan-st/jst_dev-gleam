@@ -1,0 +1,5 @@
+node_modules
+*.beam
+*.ez
+/build/client/build
+erl_crash.dump

@@ -1,14 +1,14 @@
 import gleam/dynamic
 import gleam/int
-import gleam/result
 import gleam/list
+import gleam/result
 import lustre
 import lustre/attribute
+import decipher
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/event
 import lustre/element/html
-import decipher
 
 pub fn main() {
   let app = lustre.application(init, update, view)
@@ -17,7 +17,6 @@ pub fn main() {
   Nil
 }
 
-// MODEL
 type Model =
   List(#(String, Int))
 
@@ -28,7 +27,6 @@ fn init(_) -> #(Model, Effect(Msg)) {
   #(model, effect)
 }
 
-// UPDATE
 type Msg {
   ServerSavedList(Result(Nil, String))
   UserAddedProduct(name: String)
@@ -45,7 +43,6 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   }
 }
 
-// VIEW
 fn view(model: Model) -> Element(Msg) {
   let styles = [
     #("max-width", "30ch"),

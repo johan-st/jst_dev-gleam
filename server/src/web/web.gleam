@@ -1,7 +1,7 @@
 import wisp
 
 pub type Context {
-  Context(static_directory: String)
+  Context(static_directory: String, host: String, port: Int)
 }
 
 pub fn middleware(
@@ -13,7 +13,11 @@ pub fn middleware(
   use <- wisp.log_request(req)
   use <- wisp.rescue_crashes
   use req <- wisp.handle_head(req)
-  use <- wisp.serve_static(req, under: "/static", from: ctx.static_directory)
+  use <- wisp.serve_static(
+    req,
+    under: "/",
+    from: ctx.static_directory,
+  )
 
   handle_request(req)
 }
