@@ -1,14 +1,17 @@
+import decipher
 import gleam/dynamic
 import gleam/int
+import gleam/io
 import gleam/list
 import gleam/result
 import lustre
 import lustre/attribute
-import decipher
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
-import lustre/event
 import lustre/element/html
+import lustre/event
+import page/page.{type Page}
+import user/user.{type User}
 
 pub fn main() {
   let app = lustre.application(init, update, view)
@@ -17,91 +20,113 @@ pub fn main() {
   Nil
 }
 
-type Model =
-  List(#(String, Int))
+type Model {
+  Model(page: Page, user: User)
+}
+
+fn initial_model() -> Model {
+  Model(page.Loading, user.Guest)
+}
 
 fn init(_) -> #(Model, Effect(Msg)) {
-  let model = []
+  let model = initial_model()
   let effect = effect.none()
 
   #(model, effect)
 }
 
 type Msg {
-  ServerSavedList(Result(Nil, String))
-  UserAddedProduct(name: String)
-  UserSavedList
-  UserUpdatedQuantity(name: String, amount: Int)
+  PageLoaded(Result(User, String))
+  UserClickedReload
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
+  let _ = io.debug(msg)
   case msg {
-    ServerSavedList(_) -> todo
-    UserAddedProduct(_) -> todo
-    UserSavedList -> todo
-    UserUpdatedQuantity(_, _) -> todo
+    UserClickedReload -> {
+      let model = Model(page.Loading, model.user)
+      let effect = effect.none()
+
+      #(model, effect)
+    }
+    PageLoaded(Ok(user)) -> {
+      let model = Model(page.Home, user)
+      let effect = effect.none()
+
+      #(model, effect)
+    }
+    PageLoaded(Error(error)) -> {
+      let model = Model(page.Error(error), model.user)
+      let effect = effect.none()
+
+      #(model, effect)
+    }
   }
 }
 
 fn view(model: Model) -> Element(Msg) {
-  let styles = [
-    #("max-width", "30ch"),
-    #("margin", "0 auto"),
-    #("display", "flex"),
-    #("flex-direction", "column"),
-    #("gap", "1em"),
-  ]
-
-  html.div([attribute.style(styles)], [
-    view_grocery_list(model),
-    view_new_item(),
-    html.div([], [html.button([], [html.text("Sync")])]),
-  ])
+  case model.page {
+    page.Loading -> view_loading()
+    page.Home -> view_home(model)
+    page.Error(error) -> view_error(error)
+  }
 }
 
-fn view_new_item() -> Element(Msg) {
-  let handle_click = fn(event) {
-    let path = ["target", "previousElementSibling", "value"]
-
-    event
-    |> decipher.at(path, dynamic.string)
-    |> result.map(UserAddedProduct)
+fn view_loading() -> Element(Msg) {
+  let handle_click_ok = fn(_event) { Ok(PageLoaded(Ok(user.Guest))) }
+  let handle_click_err = fn(_event) {
+    Ok(PageLoaded(Error("you chose violence")))
   }
 
   html.div([], [
-    html.input([]),
-    html.button([event.on("click", handle_click)], [html.text("Add")]),
-  ])
-}
-
-fn view_grocery_list(model: Model) -> Element(Msg) {
-  let styles = [#("display", "flex"), #("flex-direction", "column-reverse")]
-
-  element.keyed(html.div([attribute.style(styles)], _), {
-    use #(name, quantity) <- list.map(model)
-    let item = view_grocery_item(name, quantity)
-
-    #(name, item)
-  })
-}
-
-fn view_grocery_item(name: String, quantity: Int) -> Element(Msg) {
-  let handle_input = fn(e) {
-    event.value(e)
-    |> result.nil_error
-    |> result.then(int.parse)
-    |> result.map(UserUpdatedQuantity(name, _))
-    |> result.replace_error([])
-  }
-
-  html.div([attribute.style([#("display", "flex"), #("gap", "1em")])], [
-    html.span([attribute.style([#("flex", "1")])], [html.text(name)]),
-    html.input([
-      attribute.style([#("width", "4em")]),
-      attribute.type_("number"),
-      attribute.value(int.to_string(quantity)),
-      attribute.min("0"),
-      event.on("input", handle_input),
+    html.text("Loading..."),
+    html.button([event.on("click", handle_click_err)], [html.text("error")]),
+    html.button([event.on("click", handle_click_ok)], [
+      html.text("ok, with guest"),
     ]),
   ])
 }
+
+fn view_home(model: Model) -> Element(Msg) {
+  let handle_click = fn(_event) { Ok(UserClickedReload) }
+
+  html.div([], [
+    view_user(model.user),
+    html.button([event.on("click", handle_click)], [html.text("Reload")]),
+  ])
+}
+
+fn view_user(user: User) -> Element(Msg) {
+  case user {
+    user.Guest -> html.div([], [html.text("Hello, guest!")])
+  }
+}
+
+fn view_error(error: String) -> Element(Msg) {
+  let handle_click = fn(_event) { Ok(UserClickedReload) }
+
+  html.div([], [
+    html.div([], [html.text("error, " <> error)]),
+    html.button([event.on("click", handle_click)], [html.text("Reload")]),
+  ])
+}
+// fn view_grocery_item(name: String, quantity: Int) -> Element(Msg) {
+//   let handle_input = fn(e) {
+//     event.value(e)
+//     |> result.nil_error
+//     |> result.then(int.parse)
+//     |> result.map(UserUpdatedQuantity(name, _))
+//     |> result.replace_error([])
+//   }
+
+//   html.div([attribute.style([#("display", "flex"), #("gap", "1em")])], [
+//     html.span([attribute.style([#("flex", "1")])], [html.text(name)]),
+//     html.input([
+//       attribute.style([#("width", "4em")]),
+//       attribute.type_("number"),
+//       attribute.value(int.to_string(quantity)),
+//       attribute.min("0"),
+//       event.on("input", handle_input),
+//     ]),
+//   ])
+// }
