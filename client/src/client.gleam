@@ -4,13 +4,17 @@ import gleam/int
 import gleam/io
 import gleam/list
 import gleam/result
+import gleam/string
+import gleam/uri.{type Uri}
 import lustre
 import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
+import modem
 import page/page.{type Page}
+import page/url_shortener
 import user/user.{type User}
 
 pub fn main() {
@@ -25,17 +29,29 @@ type Model {
 }
 
 fn initial_model() -> Model {
-  Model(page.Loading, user.Guest)
+  let page = case modem.initial_uri() {
+    Ok(uri) -> page.from_uri(uri)
+    Error(_) -> page.Loading
+  }
+  let user = user.Guest
+
+  Model(page, user)
 }
 
 fn init(_) -> #(Model, Effect(Msg)) {
   let model = initial_model()
-  let effect = effect.none()
+  let effect = modem.init(on_route_change)
 
   #(model, effect)
 }
 
+fn on_route_change(uri: Uri) -> Msg {
+  let page = page.from_uri(uri)
+  OnRouteChange(page)
+}
+
 type Msg {
+  OnRouteChange(page.Page)
   PageLoaded(Result(User, String))
   UserClickedReload
 }
@@ -43,6 +59,7 @@ type Msg {
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   let _ = io.debug(msg)
   case msg {
+    OnRouteChange(page) -> #(Model(..model, page: page), effect.none())
     UserClickedReload -> {
       let model = Model(page.Loading, model.user)
       let effect = effect.none()
@@ -65,11 +82,24 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 }
 
 fn view(model: Model) -> Element(Msg) {
-  case model.page {
+  let main_content = case model.page {
     page.Loading -> view_loading()
     page.Home -> view_home(model)
+    page.Debug -> html.text(string.inspect(model))
     page.Error(error) -> view_error(error)
+    page.UrlShortener(model) -> view_url_shortener(model)
   }
+  html.div([], [
+    html.header([], [
+      html.nav([], [
+        html.a([attribute.href("/")], [element.text("Go home")]),
+        html.a([attribute.href("/dbg")], [element.text("Go to debug")]),
+        html.a([attribute.href("/url")], [element.text("Go to url shortener")]),
+      ]),
+    ]),
+    main_content,
+    html.footer([], [html.text("Footer")]),
+  ])
 }
 
 fn view_loading() -> Element(Msg) {
@@ -99,6 +129,8 @@ fn view_home(model: Model) -> Element(Msg) {
 fn view_user(user: User) -> Element(Msg) {
   case user {
     user.Guest -> html.div([], [html.text("Hello, guest!")])
+    user.Authenticated(user_info) ->
+      html.div([], [html.text("Hello, " <> string.inspect(user_info))])
   }
 }
 
@@ -108,6 +140,13 @@ fn view_error(error: String) -> Element(Msg) {
   html.div([], [
     html.div([], [html.text("error, " <> error)]),
     html.button([event.on("click", handle_click)], [html.text("Reload")]),
+  ])
+}
+
+fn view_url_shortener(model: url_shortener.Model) -> Element(Msg) {
+  html.div([], [
+    html.text("Url shortener"),
+    html.text("Model: " <> string.inspect(model)),
   ])
 }
 // fn view_grocery_item(name: String, quantity: Int) -> Element(Msg) {

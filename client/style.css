@@ -18,14 +18,13 @@ a {
   color: #646cff;
   text-decoration: inherit;
 }
+
 a:hover {
   color: #535bf2;
 }
 
 body {
   margin: 0;
-  display: flex;
-  place-items: center;
   min-width: 320px;
   min-height: 100vh;
 }
@@ -36,30 +35,41 @@ h1 {
 }
 
 #app {
+  display: grid;
+  grid:
+    "header" auto
+    "main" 1fr
+    "footer" auto
+    / 1fr;
+
   max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
   text-align: center;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
+header {
+  grid-area: header;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2em;
 }
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.vanilla:hover {
-  filter: drop-shadow(0 0 2em #f7df1eaa);
-}
-
-.card {
-  padding: 2em;
+nav {
+  display: flex;
+  gap: 1em;
 }
 
-.read-the-docs {
+main {
+  grid-area: main;
+  display: flex;
+  flex-direction: column;
+  gap: 2em;
+}
+
+footer {
+  grid-area: footer;
+  margin-top: 2em;
+  padding: 1em;
+  font-size: 0.8em;
   color: #888;
 }
 
@@ -74,23 +84,12 @@ button {
   cursor: pointer;
   transition: border-color 0.25s;
 }
+
 button:hover {
   border-color: #646cff;
 }
+
 button:focus,
 button:focus-visible {
   outline: 4px auto -webkit-focus-ring-color;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
 }
