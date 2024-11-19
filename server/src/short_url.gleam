@@ -1,3 +1,6 @@
+import gleam/option.{ Some}
+import gleam/uri.{Uri}
+
 import wisp
 
 pub type ShortUrl {
@@ -16,7 +19,35 @@ pub fn list_public() -> Result(List(ShortUrl), Nil) {
   ])
 }
 
-pub fn create(desired_url long: String) -> Result(ShortUrl, Nil) {
-  Public(8, long, wisp.random_string(4))
-  |> Ok
+pub type ShortUrlError {
+  BadUrl
+}
+
+//   Uri(
+//     scheme: Some("https"),
+//     userinfo: None,
+//     host: Some("example.com"),
+//     port: Some(1234),
+//     path: "/a/b",
+//     query: Some("query=true"),
+//     fragment: Some("fragment")
+//   )
+pub fn create(desired_url long: String) -> Result(ShortUrl, ShortUrlError) {
+  case uri.parse(long) {
+    Ok(Uri(
+      scheme: Some(_),
+      userinfo: _,
+      host: Some(_),
+      port: _,
+      path: _,
+      query: _,
+      fragment: _,
+    )) -> {
+      Ok(Public(8, long, wisp.random_string(4)))
+    }
+    _ -> {
+      wisp.log_debug("Failed to parse URL: " <> long)
+      Error(BadUrl)
+    }
+  }
 }

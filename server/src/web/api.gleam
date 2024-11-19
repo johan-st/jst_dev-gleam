@@ -5,7 +5,7 @@ import gleam/io
 import gleam/list
 import gleam/string
 import gleam/string_builder.{type StringBuilder}
-import short_url
+import short_url.{BadUrl}
 import wisp.{type Request, type Response}
 
 pub fn router(
@@ -18,18 +18,22 @@ pub fn router(
   case path {
     ["v1", "short_urls"] ->
       case req.method {
-        Get ->
+        Get -> {
+          req
+          |> wisp.set_max_body_size(0)
+          |> wisp.set_max_files_size(0)
           case short_url.list_public() {
             Ok(short_urls) ->
               wisp.ok() |> wisp.string_body(string.inspect(short_urls))
             Error(_) -> wisp.internal_server_error()
           }
+        }
         Post -> {
           // Max body of 1 MB 
           // and Disable file uploads (needed?)
           let req =
             req
-            |> wisp.set_max_body_size(1024 * 1024)
+            |> wisp.set_max_body_size(1024 * 2)
             |> wisp.set_max_files_size(0)
           use json <- wisp.require_json(req)
 
@@ -38,8 +42,12 @@ pub fn router(
 
           case decoder(json) {
             Ok(PostRoot(desired_url)) -> {
-              let assert Ok(short) = short_url.create(desired_url)
-              wisp.created() |> wisp.string_body(string.inspect(short))
+              case short_url.create(desired_url) {
+                Ok(short) ->
+                  wisp.created() |> wisp.string_body(string.inspect(short))
+                Error(BadUrl) ->
+                  wisp.bad_request() |> wisp.string_body("Invalid URL")
+              }
             }
             Error(decode_errors) -> {
               wisp.log_notice(string.inspect(decode_errors))

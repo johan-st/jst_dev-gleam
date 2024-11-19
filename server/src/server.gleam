@@ -38,6 +38,9 @@ pub fn main() {
     _ -> wisp.set_logger_level(wisp.InfoLevel)
   }
 
+  // DEBUG: Set the log level to debug
+  wisp.set_logger_level(wisp.DebugLevel)
+
   wisp.log_debug("creating server context")
   let ctx = context.server_context()
 

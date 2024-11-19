@@ -16,7 +16,7 @@ pub fn handle_request(req: Request, ctx: Context) -> Response {
 fn spa(req: Request, ctx: Context) -> Response {
   use <- wisp.require_method(req, Get)
   wisp.ok()
-  |> wisp.set_body(File(ctx.static_directory <> "/index.html"))
+  |> wisp.set_body(File(ctx.client_directory <> "/index.html"))
 }
 
 fn api_docs(req: Request, ctx: Context) -> Response {
