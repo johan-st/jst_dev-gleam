@@ -93,3 +93,12 @@ button:focus,
 button:focus-visible {
   outline: 4px auto -webkit-focus-ring-color;
 }
+
+/* URL SHORTENER */
+.url_shortener__form {
+  display: flex;
+  gap: 1em;
+  justify-content: center;
+  flex-direction: column;
+  padding: 2rem;
+}

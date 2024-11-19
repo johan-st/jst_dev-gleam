@@ -1,53 +1,59 @@
+import context
 import gleam/erlang/os
 import gleam/erlang/process
-import gleam/int
-import gleam/io
-import gleam/result
 import mist
 import web/router
-import web/web.{Context}
 import wisp
 import wisp/wisp_mist
 
 pub fn main() {
   wisp.configure_logger()
-  // TODO: set a environment variable to configure the secret key base for consistency between boots and nodes.
-  let secret_key_base = wisp.random_string(64)
 
-  // A context is constructed holding the static directory path.
-  let static_directory = static_directory()
-  let assert Ok(host) =
-    os.get_env("HOST")
-    |> result.or(Ok("localhost"))
-  let assert Ok(port) =
-    os.get_env("PORT")
-    |> result.map(int.parse)
-    |> result.flatten
-    |> result.or(Ok(8000))
-  let ctx = Context(static_directory: static_directory, host: host, port: port)
+  case os.get_env("LOG_LEVEL") {
+    // system is unusable (all hands on deck!)
+    Ok("emergency") -> wisp.set_logger_level(wisp.EmergencyLevel)
 
-  wisp.log_info("Starting server")
-  io.debug(ctx)
+    // indicates a condition that should be corrected immediately (on call)
+    Ok("alert") -> wisp.set_logger_level(wisp.AlertLevel)
 
+    // indicates a serious error (triage issue at earliest convenience)
+    Ok("critical") -> wisp.set_logger_level(wisp.CriticalLevel)
+
+    // indicates a failure that might impact the system or data integrity (evaluate issue, plan action)
+    Ok("error") -> wisp.set_logger_level(wisp.ErrorLevel)
+
+    // indicates a potential problem, action advised (monitor issue, evaluate)
+    Ok("warn") -> wisp.set_logger_level(wisp.WarningLevel)
+
+    // might require action (monitor issue)
+    Ok("notice") -> wisp.set_logger_level(wisp.NoticeLevel)
+
+    // information abount normal operation (normal operation)
+    Ok("info") -> wisp.set_logger_level(wisp.InfoLevel)
+
+    // includes technical details (debugging)
+    Ok("debug") -> wisp.set_logger_level(wisp.DebugLevel)
+
+    // if not set..
+    _ -> wisp.set_logger_level(wisp.InfoLevel)
+  }
+
+  wisp.log_debug("creating server context")
+  let ctx = context.server_context()
+
+  wisp.log_debug("creating router")
   // The handle_request function is partially applied with the context to make
   // the request handler function that only takes a request.
   let handler = router.handle_request(_, ctx)
 
+  wisp.log_debug("starting server")
   let assert Ok(_) =
-    wisp_mist.handler(handler, secret_key_base)
+    wisp_mist.handler(handler, ctx.secret_key_base)
     |> mist.new
     |> mist.bind(ctx.host)
     |> mist.port(ctx.port)
     |> mist.start_http
 
+  wisp.log_debug("server started, sleeping forever")
   process.sleep_forever()
-}
-
-pub fn static_directory() -> String {
-  // The priv directory is where we store non-Gleam and non-Erlang files,
-  // including static assets to be served.
-  // This function returns an absolute path and works both in development and in
-  // production after compilation.
-  let assert Ok(priv_directory) = wisp.priv_directory("server")
-  priv_directory <> "/static"
 }

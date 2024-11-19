@@ -1,5 +1,4 @@
 pub type User {
-  Guest
   Authenticated(UserInfo)
 }
 

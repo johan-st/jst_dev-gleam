@@ -1,21 +1,23 @@
-import decipher
-import gleam/dynamic
-import gleam/int
+// import decipher
+// import gleam/dynamic
+// import gleam/int
+// import gleam/list
+// import gleam/result
+// import gleam/string
+// import gleam/uri.{type Uri}
 import gleam/io
-import gleam/list
-import gleam/result
-import gleam/string
-import gleam/uri.{type Uri}
 import lustre
-import lustre/attribute
+import lustre/attribute.{href}
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
-import lustre/element/html
+import lustre/element/html.{a, div, footer, header, input, nav, text, form}
+
 import lustre/event
-import modem
-import page/page.{type Page}
-import page/url_shortener
-import user/user.{type User}
+
+// import modem
+// import page/page.{type Page}
+// import page/url_shortener
+// import user/user.{type User}
 
 pub fn main() {
   let app = lustre.application(init, update, view)
@@ -25,128 +27,98 @@ pub fn main() {
 }
 
 type Model {
-  Model(page: Page, user: User)
-}
-
-fn initial_model() -> Model {
-  let page = case modem.initial_uri() {
-    Ok(uri) -> page.from_uri(uri)
-    Error(_) -> page.Loading
-  }
-  let user = user.Guest
-
-  Model(page, user)
+  Model(url_to_shorten: String, url_shortened: String, submitted: Bool)
 }
 
 fn init(_) -> #(Model, Effect(Msg)) {
-  let model = initial_model()
-  let effect = modem.init(on_route_change)
-
-  #(model, effect)
-}
-
-fn on_route_change(uri: Uri) -> Msg {
-  let page = page.from_uri(uri)
-  OnRouteChange(page)
+  let model = Model(url_to_shorten: "", url_shortened: "", submitted: False)
+  let effects = effect.none()
+  #(model, effects)
 }
 
 type Msg {
-  OnRouteChange(page.Page)
-  PageLoaded(Result(User, String))
-  UserClickedReload
+  UserUpdatedLong(String)
+  UserUpdatedShort(String)
+  UserClickedSubmit
 }
 
+// fn(Dynamic) -> Result(Msg, List(DecodeError))
+
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
-  let _ = io.debug(msg)
-  case msg {
-    OnRouteChange(page) -> #(Model(..model, page: page), effect.none())
-    UserClickedReload -> {
-      let model = Model(page.Loading, model.user)
+  case io.debug(msg) {
+    UserUpdatedLong(url) -> {
+      let model = Model(url, model.url_shortened, model.submitted)
       let effect = effect.none()
-
       #(model, effect)
     }
-    PageLoaded(Ok(user)) -> {
-      let model = Model(page.Home, user)
-      let effect = effect.none()
 
+    UserUpdatedShort(url) -> {
+      let model = Model(model.url_to_shorten, url, model.submitted)
+      let effect = effect.none()
       #(model, effect)
     }
-    PageLoaded(Error(error)) -> {
-      let model = Model(page.Error(error), model.user)
-      let effect = effect.none()
 
+    UserClickedSubmit -> {
+      let model = Model(model.url_to_shorten, model.url_shortened, True)
+      let effect = effect.none()
       #(model, effect)
     }
   }
 }
 
 fn view(model: Model) -> Element(Msg) {
-  let main_content = case model.page {
-    page.Loading -> view_loading()
-    page.Home -> view_home(model)
-    page.Debug -> html.text(string.inspect(model))
-    page.Error(error) -> view_error(error)
-    page.UrlShortener(model) -> view_url_shortener(model)
-  }
-  html.div([], [
-    html.header([], [
-      html.nav([], [
-        html.a([attribute.href("/")], [element.text("Go home")]),
-        html.a([attribute.href("/dbg")], [element.text("Go to debug")]),
-        html.a([attribute.href("/url")], [element.text("Go to url shortener")]),
+  let main_content = view_url_shortener(model)
+
+  div([], [
+    header([], [
+      nav([], [
+        a([href("/")], [text("Go home")]),
+        a([href("/dbg")], [text("Go to debug")]),
+        a([href("/url")], [text("Go to url shortener")]),
       ]),
     ]),
     main_content,
-    html.footer([], [html.text("Footer")]),
+    footer([], [text("Footer")]),
   ])
 }
 
-fn view_loading() -> Element(Msg) {
-  let handle_click_ok = fn(_event) { Ok(PageLoaded(Ok(user.Guest))) }
-  let handle_click_err = fn(_event) {
-    Ok(PageLoaded(Error("you chose violence")))
-  }
-
-  html.div([], [
-    html.text("Loading..."),
-    html.button([event.on("click", handle_click_err)], [html.text("error")]),
-    html.button([event.on("click", handle_click_ok)], [
-      html.text("ok, with guest"),
+fn view_url_shortener(model: Model) -> Element(Msg) {
+  form([attribute.class("url_shortener__form")], [
+    text("Url shortener"),
+    view_input_text(
+      "url_to_shorten",
+      "Original",
+      model.url_to_shorten,
+      UserUpdatedLong,
+    ),
+    view_input_text(
+      "url_shortened",
+      "Short",
+      model.url_shortened,
+      UserUpdatedShort,
+    ),
+    input([
+      event.on_submit(UserClickedSubmit),
+      attribute.type_("submit"),
+      attribute.value("Submit"),
     ]),
   ])
 }
 
-fn view_home(model: Model) -> Element(Msg) {
-  let handle_click = fn(_event) { Ok(UserClickedReload) }
-
-  html.div([], [
-    view_user(model.user),
-    html.button([event.on("click", handle_click)], [html.text("Reload")]),
-  ])
-}
-
-fn view_user(user: User) -> Element(Msg) {
-  case user {
-    user.Guest -> html.div([], [html.text("Hello, guest!")])
-    user.Authenticated(user_info) ->
-      html.div([], [html.text("Hello, " <> string.inspect(user_info))])
-  }
-}
-
-fn view_error(error: String) -> Element(Msg) {
-  let handle_click = fn(_event) { Ok(UserClickedReload) }
-
-  html.div([], [
-    html.div([], [html.text("error, " <> error)]),
-    html.button([event.on("click", handle_click)], [html.text("Reload")]),
-  ])
-}
-
-fn view_url_shortener(model: url_shortener.Model) -> Element(Msg) {
-  html.div([], [
-    html.text("Url shortener"),
-    html.text("Model: " <> string.inspect(model)),
+fn view_input_text(
+  id: String,
+  lable: String,
+  value: String,
+  msg: fn(String) -> Msg,
+) -> Element(Msg) {
+  element.fragment([
+    html.label([attribute.for(id)], [html.text(lable)]),
+    input([
+      attribute.id(id),
+      attribute.type_("text"),
+      attribute.value(value),
+      event.on_input(msg),
+    ]),
   ])
 }
 // fn view_grocery_item(name: String, quantity: Int) -> Element(Msg) {

@@ -3,7 +3,7 @@ import gleam from "vite-gleam";
 
 export default defineConfig({
     build: {
-        outDir: "../server/priv/static",
+        outDir: "../server/priv/client",
         emptyOutDir: true,
         rollupOptions: {
             // input: {
