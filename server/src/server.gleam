@@ -2,11 +2,35 @@ import context
 import gleam/erlang/os
 import gleam/erlang/process
 import mist
+import repo/repo
 import web/router
 import wisp
 import wisp/wisp_mist
 
 pub fn main() {
+  logger_setup()
+  wisp.log_debug("creating server context")
+  let ctx = context.server_context()
+  // let _db = repo.init(ctx)
+
+  wisp.log_debug("creating router")
+  // The handle_request function is partially applied with the context to make
+  // the request handler function that only takes a request.
+  let handler = router.handle_request(_, ctx)
+
+  wisp.log_debug("starting server")
+  let assert Ok(_) =
+    wisp_mist.handler(handler, ctx.secret_key_base)
+    |> mist.new
+    |> mist.bind(ctx.host)
+    |> mist.port(ctx.port)
+    |> mist.start_http
+
+  wisp.log_debug("server started, sleeping forever")
+  process.sleep_forever()
+}
+
+fn logger_setup() {
   wisp.configure_logger()
 
   case os.get_env("LOG_LEVEL") {
@@ -35,28 +59,9 @@ pub fn main() {
     Ok("debug") -> wisp.set_logger_level(wisp.DebugLevel)
 
     // if not set..
-    _ -> wisp.set_logger_level(wisp.InfoLevel)
+    _ -> {
+      wisp.log_error("No log level set, defaulting to debug")
+      wisp.set_logger_level(wisp.DebugLevel)
+    }
   }
-
-  // DEBUG: Set the log level to debug
-  wisp.set_logger_level(wisp.DebugLevel)
-
-  wisp.log_debug("creating server context")
-  let ctx = context.server_context()
-
-  wisp.log_debug("creating router")
-  // The handle_request function is partially applied with the context to make
-  // the request handler function that only takes a request.
-  let handler = router.handle_request(_, ctx)
-
-  wisp.log_debug("starting server")
-  let assert Ok(_) =
-    wisp_mist.handler(handler, ctx.secret_key_base)
-    |> mist.new
-    |> mist.bind(ctx.host)
-    |> mist.port(ctx.port)
-    |> mist.start_http
-
-  wisp.log_debug("server started, sleeping forever")
-  process.sleep_forever()
 }

@@ -1,8 +1,12 @@
+import dot_env
 import gleam/erlang/os
 import gleam/int
+import gleam/io
 import gleam/result
+import repo/repo.{type Repo}
 import wisp
 
+// TODO: isolate database context to repo module
 pub type Context {
   Context(
     secret_key_base: String,
@@ -10,12 +14,19 @@ pub type Context {
     client_directory: String,
     host: String,
     port: Int,
+    db_uri: String,
+    db_token: String,
+    repo: fn() -> Repo,
   )
 }
 
 pub fn server_context() -> Context {
-  let assert Ok(priv_directory) = wisp.priv_directory("server")
+  dot_env.new()
+  |> dot_env.set_path("./.env")
+  |> dot_env.set_debug(True)
+  |> dot_env.load()
 
+  let assert Ok(priv_directory) = wisp.priv_directory("server")
   let secret_key_base = case os.get_env("SECRET_KEY_BASE") {
     Ok(secret_key_base) -> secret_key_base
     _ -> {
@@ -35,6 +46,8 @@ pub fn server_context() -> Context {
     |> result.map(int.parse)
     |> result.flatten
     |> result.or(Ok(8000))
+  let assert Ok(db_uri) = os.get_env("TURSO_PUBLIC_URL")
+  let assert Ok(db_token) = os.get_env("TURSO_PUBLIC_TOKEN")
 
   Context(
     secret_key_base: secret_key_base,
@@ -42,5 +55,8 @@ pub fn server_context() -> Context {
     client_directory: priv_directory <> "/client",
     host: host,
     port: port,
+    db_uri: db_uri,
+    db_token: db_token,
+    repo: repo.init(),
   )
 }
