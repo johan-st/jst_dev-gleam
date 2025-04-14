@@ -1,0 +1,10 @@
+.env
+
+# nats credentials
+*.creds
+
+# nats persistent data
+/data
+
+# build, test, run etc..
+/tmp
