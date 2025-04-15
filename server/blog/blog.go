@@ -14,14 +14,12 @@ import (
 	"github.com/nats-io/nats.go/micro"
 )
 
-var blog *Blog
-
 type Blog struct {
-	js    jetstream.JetStream
-	kv    jetstream.KeyValue
-	l     *jst_log.Logger
-	ctx   context.Context
-	slugs []string
+	js   jetstream.JetStream
+	kv   jetstream.KeyValue
+	l    *jst_log.Logger
+	ctx  context.Context
+	talk *talk.Talk
 }
 
 type BlogArticle struct {
@@ -30,15 +28,11 @@ type BlogArticle struct {
 	Content string `json:"content"`
 }
 
-func Start(ctx context.Context, talk *talk.Talk, l *jst_log.Logger) error {
-	if blog != nil {
-		return fmt.Errorf("blog already started")
-	}
-
+func New(ctx context.Context, talk *talk.Talk, l *jst_log.Logger) (*Blog, error) {
 	// Create JetStream streams
 	js, err := jetstream.New(talk.Conn)
 	if err != nil {
-		return fmt.Errorf("create JetStream: %w", err)
+		return nil, fmt.Errorf("create JetStream: %w", err)
 	}
 
 	kv, err := js.CreateKeyValue(ctx, jetstream.KeyValueConfig{
@@ -56,35 +50,57 @@ func Start(ctx context.Context, talk *talk.Talk, l *jst_log.Logger) error {
 		// Compression: true,
 	})
 	if err != nil {
-		return fmt.Errorf("create key value: %w", err)
+		// TODO: if err is bucket already exists we should try to update the config
+		return nil, fmt.Errorf("create key value: %w", err)
 	}
 
-	blog = &Blog{
-		js:  js,
-		kv:  kv,
-		l:   l,
-		ctx: ctx,
-	}
+	return &Blog{
+		js:   js,
+		kv:   kv,
+		l:    l,
+		ctx:  ctx,
+		talk: talk,
+	}, nil
 
-	go updatesWatcher(ctx, kv, l.WithBreadcrumb("updates"))
+}
+func (b *Blog) Start() error {
+
+	go b.updatesWatcher(b.ctx, b.kv, b.l.WithBreadcrumb("updates"))
 
 	// start service
-	group := talk.Service.AddGroup("blog")
+	metadata := map[string]string{}
+	metadata["location"] = "unknown"
+	metadata["environment"] = "development"
+	svc, err := micro.AddService(b.talk.Conn, micro.Config{
+		Name:        "blog",
+		Version:     "1.0.0",
+		Description: "Managing blog posts",
+		Metadata:    metadata,
+	})
+	if err != nil {
+		return fmt.Errorf("add service")
+	}
 	// Use group to add endpoints
-	group.AddEndpoint("validate", blog.HandleValidate())
-	group.AddEndpoint("add", blog.HandleAdd())
-	group.AddEndpoint("list", blog.HandleList())
-	group.AddEndpoint("get", blog.HandleGet())
-	// group.AddEndpoint("update", blog.HandleUpdate())
-	// group.AddEndpoint("delete", blog.HandleDelete())
+	if err := svc.AddEndpoint("validate", b.HandleValidate()); err != nil {
+		return fmt.Errorf("add endpoinr (validate): %w", err)
+	}
+	if err := svc.AddEndpoint("add", b.HandleAdd()); err != nil {
+		return fmt.Errorf("add endpoint (add): %w", err)
+	}
+	if err := svc.AddEndpoint("list", b.HandleList()); err != nil {
+		return fmt.Errorf("add endpoint (list): %w", err)
+	}
+	if err := svc.AddEndpoint("get", b.HandleGet()); err != nil {
+		return fmt.Errorf("add endpoint (get): %w", err)
+	}
 
 	return nil
 }
 
-func updatesWatcher(ctx context.Context, kv jetstream.KeyValue, l *jst_log.Logger) {
+func (b *Blog) updatesWatcher(ctx context.Context, kv jetstream.KeyValue, l *jst_log.Logger) {
 	watcher, err := kv.WatchAll(ctx)
 	if err != nil {
-		l.Error("watch key value: %w", err)
+		l.Error("watchAll: %w", err)
 		return
 	}
 	defer watcher.Stop()
@@ -92,15 +108,15 @@ func updatesWatcher(ctx context.Context, kv jetstream.KeyValue, l *jst_log.Logge
 	for {
 		select {
 		case <-ctx.Done():
-			l.Info("updates watcher shutting down: %v", ctx.Err())
+			l.Info("shutting down: %v", ctx.Err())
 			return
 		case update, ok := <-watcher.Updates():
 			if !ok {
-				l.Info("updates channel closed, exiting watcher")
+				l.Info("channel closed, exiting")
 				return
 			}
 			if update == nil {
-				l.Debug("update is nil, continue..")
+				l.Debug("we are up to date")
 				continue
 			}
 			op := update.Operation()
@@ -112,7 +128,7 @@ func updatesWatcher(ctx context.Context, kv jetstream.KeyValue, l *jst_log.Logge
 			case jetstream.KeyValuePurge:
 				l.Debug("UPDATE - %s:%d", update.Key(), update.Revision())
 			default:
-				l.Debug("update %s, on %s:%d", op, update.Key(), update.Revision())
+				l.Debug("UNKNOWN update (%s), on %s:%d", op, update.Key(), update.Revision())
 			}
 		}
 	}
@@ -129,7 +145,7 @@ func (b *Blog) HandleValidate() micro.HandlerFunc {
 		err := json.Unmarshal(req.Data(), &article)
 		if err != nil {
 			l.Info("blog validate request: %w", err)
-			req.Respond([]byte(fmt.Sprintf("Invalid format. failed to parse json: %w", err)))
+			req.Respond([]byte(fmt.Sprintf("invalid: %s", err.Error())))
 			return
 		}
 		req.Respond([]byte("ok"))
@@ -138,6 +154,11 @@ func (b *Blog) HandleValidate() micro.HandlerFunc {
 
 func (b *Blog) HandleAdd() micro.HandlerFunc {
 	l := b.l.WithBreadcrumb("add")
+	type req struct {
+		Slug    string `json:"slug"`
+		Title   string `json:"title"`
+		Content string `json:"content"`
+	}
 	return func(req micro.Request) {
 		l.Info("blog add request")
 		ctx, cancel := context.WithTimeout(b.ctx, 250*time.Millisecond)

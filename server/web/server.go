@@ -27,7 +27,7 @@ type Server struct {
 }
 
 // NewServer creates a new HTTP server instance
-func NewServer(lParent *jst_log.Logger, kv nats.KeyValue) *Server {
+func NewServer(lParent *jst_log.Logger, kv nats.KeyValue, os nats.ObjectStore) *Server {
 	l := lParent.WithBreadcrumb("HttpServer")
 	l.Debug("NewServer")
 	return &Server{

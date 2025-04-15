@@ -1,10 +1,12 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
 	"jst_dev/server/jst_log"
+	"jst_dev/server/talk"
 
 	"github.com/nats-io/nats.go"
 
@@ -16,76 +18,122 @@ type Page struct {
 	Content string `json:"content"`
 }
 
-func Init(nc *nats.Conn, lParent *jst_log.Logger) error {
-	l := lParent.WithBreadcrumb("Init")
-	l.Debug("Init")
-	l.Debug("get jetstream")
-	js, err := nc.JetStream()
+type Web struct {
+	l              *jst_log.Logger
+	ctx            context.Context
+	talk           *talk.Talk
+	routesKv       nats.KeyValue
+	assetsObjStore nats.ObjectStore
+	svc            micro.Service
+}
+
+func New(ctx context.Context, talk *talk.Talk, l *jst_log.Logger) (*Web, error) {
+	return &Web{
+		l:              l,
+		ctx:            ctx,
+		talk:           talk,
+		routesKv:       nil,
+		assetsObjStore: nil,
+	}, nil
+}
+
+func (w *Web) Start() error {
+	// grab jetstream
+	js, err := w.talk.Conn.JetStream()
 	if err != nil {
-		return err
+		return fmt.Errorf("get jetstream: %w", err)
 	}
 
-	l.Debug("create kv")
-	kvConfig := nats.KeyValueConfig{
-		Bucket:      "web_routes",
-		Description: "web pages by path",
+	// pages kv store
+	kvPagesConfig := nats.KeyValueConfig{
+		Bucket:       "web_routes",
+		Description:  "web pages by path. e.g. about -> /about, about.me -> /about/me",
+		Storage:      nats.FileStorage,
+		MaxValueSize: 1024 * 1024 * 10, // 10MB
+		History:      64,
+	}
+	pagesKv, err := js.CreateKeyValue(&kvPagesConfig)
+	if err != nil {
+		w.l.Error(fmt.Sprintf("Create pages kv store %s:%s", kvPagesConfig.Bucket, err.Error()))
+		return err
+	}
+	w.routesKv = pagesKv
+
+	// assets object store
+
+	kvAssetsConfig := nats.ObjectStoreConfig{
+		Bucket:      "web_assets",
+		Description: "web assets by hash", // TODO: metadata?
 		Storage:     nats.FileStorage,
-		History:     64,
+		MaxBytes:    1024 * 1024 * 1024 * 10, // 10GB
+		Compression: true,
+		// TTL:         time.Hour * 24 * 356,
 	}
-	kv, err := js.CreateKeyValue(&kvConfig)
-
+	assetsObjStore, err := js.CreateObjectStore(&kvAssetsConfig)
 	if err != nil {
-		l.Error(fmt.Sprintf("Create kv store %s:%s", kvConfig.Bucket, err.Error()))
+		w.l.Error(fmt.Sprintf("Create assets kv store %s:%s", kvAssetsConfig.Bucket, err.Error()))
 		return err
 	}
+	w.assetsObjStore = assetsObjStore
 
-	err = registerService(lParent, nc, kv)
-	if err != nil {
-		l.Error(fmt.Sprintf("registerService:%e", err))
-		return err
+	// service registration
+	metadata := map[string]string{}
+	metadata["location"] = "unknown"
+	metadata["environment"] = "development"
+	svc, err := micro.AddService(w.talk.Conn, micro.Config{
+		Name:        "web",
+		Version:     "1.0.0",
+		Description: "serving web requests. Routes and Assets",
+		Metadata:    metadata,
+	})
+
+	routesSvcGroup := svc.AddGroup("routes")
+	if err := routesSvcGroup.AddEndpoint("routes_info", w.handleRoutesInfo()); err != nil {
+		return fmt.Errorf("add routes endpoint (info): %w", err)
+	}
+	if err := routesSvcGroup.AddEndpoint("routes_register", w.handleRoutesRegister()); err != nil {
+		return fmt.Errorf("add routes endpoint (register): %w", err)
+	}
+	if err := routesSvcGroup.AddEndpoint("routes_remove", w.handleRoutesRemove()); err != nil {
+		return fmt.Errorf("add routes endpont (remove): %w", err)
 	}
 
-	srv := NewServer(lParent, kv)
+	assetsSvcGroup := svc.AddGroup("assets")
+	if err := assetsSvcGroup.AddEndpoint("assets_list", w.handleTodo("list", "")); err != nil {
+		return fmt.Errorf("add assets endpont (list): %w", err)
+	}
+	if err := assetsSvcGroup.AddEndpoint("assets_get", w.handleTodo("get", "")); err != nil {
+		return fmt.Errorf("add assets endpont (get): %w", err)
+	}
+	if err := assetsSvcGroup.AddEndpoint("assets_put", w.handleTodo("put", "")); err != nil {
+		return fmt.Errorf("add assets endpont (put): %w", err)
+	}
+	if err := assetsSvcGroup.AddEndpoint("assets_delete", w.handleTodo("delete", "")); err != nil {
+		return fmt.Errorf("add assets endpont (delete): %w", err)
+	}
+
+	// start server
+	srv := NewServer(w.l, w.routesKv, w.assetsObjStore)
 	go srv.Start(8080)
 	return nil
 }
 
-func registerService(lParent *jst_log.Logger, nc *nats.Conn, pages nats.KeyValue) error {
-	l := lParent.WithBreadcrumb("registerService")
-	l.Debug("registerServices")
-
-	l.Debug("add service Web")
-	svc, err := micro.AddService(nc, micro.Config{
-		Name:    "Web",
-		Version: "0.0.1",
-		Endpoint: &micro.EndpointConfig{
-			Subject: "svc.web",
-			Handler: micro.HandlerFunc(statusHandler(l, pages)),
-		},
-	})
-	if err != nil {
-		l.Error(fmt.Sprintf("AddService:%e", err))
-		return err
+func (w *Web) handleTodo(name, msg string) micro.HandlerFunc {
+	l := w.l.WithBreadcrumb(name)
+	if msg == "" {
+		msg = fmt.Sprintf("todo: implement %s", name)
+	}
+	return func(req micro.Request) {
+		l.Debug("called with %s", req.Data())
+		req.Respond([]byte(msg))
 	}
 
-	l.Debug("add group web")
-	web := svc.AddGroup("svc.web")
-
-	l.Debug("Add endpoints")
-	web.AddEndpoint("page_add", micro.HandlerFunc(addPageHandler(lParent, pages)))
-	web.AddEndpoint("page_list", micro.HandlerFunc(listRoutesHandler(lParent, pages)))
-	web.AddEndpoint("page_get", micro.HandlerFunc(getPageHandler(lParent, pages)))
-	web.AddEndpoint("page_update", micro.HandlerFunc(updatePageHandler(lParent, pages)))
-	web.AddEndpoint("page_delete", micro.HandlerFunc(deletePageHandler(lParent, pages)))
-
-	l.Debug("done")
-	return nil
 }
 
-func statusHandler(lParent *jst_log.Logger, kv nats.KeyValue) micro.HandlerFunc {
-	l := lParent.WithBreadcrumb("status")
+func (w *Web) handleRoutesInfo() micro.HandlerFunc {
+	l := w.l.WithBreadcrumb("status")
 	return func(req micro.Request) {
-		keysLister, err := kv.ListKeys()
+		keysLister, err := w.routesKv.ListKeys()
 		if err != nil {
 			l.Error(fmt.Sprintf("ListKeys:%e", err))
 			req.Respond([]byte(err.Error()))
@@ -103,82 +151,61 @@ func statusHandler(lParent *jst_log.Logger, kv nats.KeyValue) micro.HandlerFunc 
 	}
 }
 
-func addPageHandler(lParent *jst_log.Logger, kv nats.KeyValue) micro.HandlerFunc {
-	l := lParent.WithBreadcrumb("page_add")
+func (w *Web) handleRoutesRegister() micro.HandlerFunc {
 	return func(req micro.Request) {
-		l.Debug(string(req.Data()))
+		w.l.Debug(string(req.Data()))
 		var page Page
 		err := json.Unmarshal(req.Data(), &page)
 		if err != nil {
-			l.Error(fmt.Sprintf("Unmarshaling page: %s", err.Error()))
+			w.l.Warn(fmt.Sprintf("Unmarshaling page: %s", err.Error()))
 			req.Respond([]byte(fmt.Sprintf("Unmarshaling page: %s", err.Error())))
 			return
 		}
-		kv.Put(page.Path, []byte(page.Content))
+		w.routesKv.Put(page.Path, []byte(page.Content))
 		req.Respond([]byte("OK"))
 	}
 }
 
-// get page by path (from request)
-func getPageHandler(lParent *jst_log.Logger, kv nats.KeyValue) micro.HandlerFunc {
-	l := lParent.WithBreadcrumb("page_get")
+func (w *Web) handlerRoutesGetContent() micro.HandlerFunc {
 	return func(req micro.Request) {
-		l.Debug(string(req.Data()))
+		w.l.Debug(string(req.Data()))
 		path := string(req.Data())
-		page, err := kv.Get(path)
+		page, err := w.routesKv.Get(path)
 		if err != nil {
-			l.Error(fmt.Sprintf("Get page: %s", err.Error()))
-			req.Respond([]byte(fmt.Sprintf("Get page: %s", err.Error())))
+			w.l.Error(fmt.Sprintf("Get page: %s", err.Error()))
+			req.Error("404", "route not found", []byte(fmt.Sprintf("Get page error: %s", err.Error())))
 			return
 		}
 		req.Respond(page.Value())
 	}
 }
 
-func updatePageHandler(lParent *jst_log.Logger, kv nats.KeyValue) micro.HandlerFunc {
-	l := lParent.WithBreadcrumb("page_update")
+func (w *Web) handlerRoutesUpdate() micro.HandlerFunc {
 	return func(req micro.Request) {
-		l.Debug(string(req.Data()))
+		w.l.Debug(string(req.Data()))
 		var page Page
 		err := json.Unmarshal(req.Data(), &page)
 		if err != nil {
-			l.Error(fmt.Sprintf("Unmarshaling page: %s", err.Error()))
+			w.l.Error(fmt.Sprintf("Unmarshaling page: %s", err.Error()))
 			req.Respond([]byte(fmt.Sprintf("Unmarshaling page: %s", err.Error())))
 			return
 		}
-		kv.Put(page.Path, []byte(page.Content))
-		req.Respond([]byte("OK"))
-	}
-}
-
-func deletePageHandler(lParent *jst_log.Logger, kv nats.KeyValue) micro.HandlerFunc {
-	l := lParent.WithBreadcrumb("page_delete")
-	return func(req micro.Request) {
-		l.Debug(string(req.Data()))
-		path := string(req.Data())
-		kv.Delete(path)
-		req.Respond([]byte("OK"))
-	}
-}
-
-func listRoutesHandler(lParent *jst_log.Logger, kv nats.KeyValue) micro.HandlerFunc {
-	l := lParent.WithBreadcrumb("page_list")
-	return func(req micro.Request) {
-		l.Debug(string(req.Data()))
-		keys, err := kv.ListKeys()
+		rev, err := w.routesKv.Put(page.Path, []byte(page.Content))
 		if err != nil {
-			l.Error(err.Error())
-			req.Respond([]byte(err.Error()))
-			return
+			req.Error("000", "failed to put", []byte(fmt.Sprintf("the route '%s' was not registered update. (%s)", page.Path, err.Error())))
 		}
-		routes := []string{}
-		for route := range keys.Keys() {
-			routes = append(routes, route)
+		req.Respond([]byte(fmt.Sprintf("%d", rev)))
+	}
+}
+
+func (w *Web) handleRoutesRemove() micro.HandlerFunc {
+	return func(req micro.Request) {
+		w.l.Debug(string(req.Data()))
+		path := string(req.Data())
+		err := w.routesKv.Delete(path)
+		if err != nil {
+			req.Error("404", "key not found", []byte(fmt.Sprintf("the '%s' is not registered in routes. (%s)", path, err.Error())))
 		}
-		routesBytes := []byte{}
-		for _, route := range routes {
-			routesBytes = append(routesBytes, []byte(route+"\n")...)
-		}
-		req.Respond(routesBytes)
+		req.Respond([]byte("OK"))
 	}
 }

@@ -7,7 +7,6 @@ import (
 
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
-	"github.com/nats-io/nats.go/micro"
 )
 
 func MessagingHandler(nc *nats.Conn) {
@@ -28,11 +27,11 @@ type Conf struct {
 }
 
 type Talk struct {
-	Conn    *nats.Conn
-	Service micro.Service
-	ns      *server.Server
-	l       *jst_log.Logger
-	conf    Conf
+	Conn *nats.Conn
+	// Service micro.Service
+	ns   *server.Server
+	l    *jst_log.Logger
+	conf Conf
 }
 
 func New(conf Conf, l *jst_log.Logger) (*Talk, error) {
@@ -60,7 +59,7 @@ func New(conf Conf, l *jst_log.Logger) (*Talk, error) {
 		ns.ConfigureLogger()
 	}
 
-	return &Talk{Conn: nil, Service: nil, ns: ns, l: l}, nil
+	return &Talk{Conn: nil, ns: ns, l: l}, nil
 }
 
 func (t *Talk) Start() error {
@@ -86,17 +85,6 @@ func (t *Talk) Start() error {
 		return fmt.Errorf("connect to NATS: %w", err)
 	}
 	t.Conn = nc
-
-	// Initialize micro service
-	service, err := micro.AddService(nc, micro.Config{
-		Name:        "jst",
-		Version:     "1.0.0",
-		Description: "server for jst.dev and related services",
-	})
-	if err != nil {
-		return fmt.Errorf("add micro service: %w", err)
-	}
-	t.Service = service
 
 	return nil
 }
