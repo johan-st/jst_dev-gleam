@@ -65,7 +65,11 @@ func New(ctx context.Context, talk *talk.Talk, l *jst_log.Logger) (*Blog, error)
 }
 func (b *Blog) Start() error {
 
-	go b.updatesWatcher(b.ctx, b.kv, b.l.WithBreadcrumb("updates"))
+	watcher, err := b.kv.WatchAll(b.ctx)
+	if err != nil {
+		return fmt.Errorf("watchAll: %w", err)
+	}
+	go b.updatesWatcher(b.ctx, watcher, b.l.WithBreadcrumb("updates"))
 
 	// start service
 	metadata := map[string]string{}
@@ -97,20 +101,14 @@ func (b *Blog) Start() error {
 	return nil
 }
 
-func (b *Blog) updatesWatcher(ctx context.Context, kv jetstream.KeyValue, l *jst_log.Logger) {
-	watcher, err := kv.WatchAll(ctx)
-	if err != nil {
-		l.Error("watchAll: %w", err)
-		return
-	}
-	defer watcher.Stop()
-
+func (b *Blog) updatesWatcher(ctx context.Context, w jetstream.KeyWatcher, l *jst_log.Logger) {
+	defer w.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			l.Info("shutting down: %v", ctx.Err())
 			return
-		case update, ok := <-watcher.Updates():
+		case update, ok := <-w.Updates():
 			if !ok {
 				l.Info("channel closed, exiting")
 				return
