@@ -9,15 +9,6 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-func MessagingHandler(nc *nats.Conn) {
-	nc.Subscribe("health", func(m *nats.Msg) {
-		err := m.Respond([]byte("OK"))
-		if err != nil {
-			fmt.Println("failed to respond")
-		}
-	})
-}
-
 // SETUP
 
 type Conf struct {
@@ -36,7 +27,7 @@ type Talk struct {
 
 func New(conf Conf, l *jst_log.Logger) (*Talk, error) {
 	if l == nil {
-		return nil, fmt.Errorf("logger not initialized")
+		return nil, fmt.Errorf("logger is nil")
 	}
 
 	opts := &server.Options{
@@ -69,7 +60,7 @@ func (t *Talk) Start() error {
 
 	// start and wait for server to be ready for connections
 	go t.ns.Start()
-	if !t.ns.ReadyForConnections(250 * time.Millisecond) {
+	if !t.ns.ReadyForConnections(4 * time.Second) {
 		return fmt.Errorf("NATS server failed to start")
 	}
 
@@ -86,6 +77,12 @@ func (t *Talk) Start() error {
 	}
 	t.Conn = nc
 
+	// setup subscriptions
+	err = t.subscriptions()
+	if err != nil {
+		return fmt.Errorf("subscriptions: %w", err)
+	}
+
 	return nil
 }
 
@@ -97,13 +94,48 @@ func (t *Talk) WaitForShutdown() {
 	t.ns.WaitForShutdown()
 }
 
-// func (t *Talk) Drain() error {
-// 	err := t.Conn.Drain()
-// 	if err != nil {
-// 		return fmt.Errorf("drain: %w", err)
-// 	}
-// 	return nil
-// }
+func (t *Talk) Drain() error {
+	err := t.Conn.Drain()
+	if err != nil {
+		return fmt.Errorf("drain: %w", err)
+	}
+	return nil
+}
+
+func (t *Talk) subscriptions() error {
+	l := t.l.WithBreadcrumb("subscriptions")
+
+	_, err := t.Conn.Subscribe("ping", func(m *nats.Msg) {
+		err := m.Respond([]byte("pong"))
+		if err != nil {
+			l.Error("failed to respond", "error", err)
+		}
+	})
+	if err != nil {
+		return fmt.Errorf("failed to subscribe")
+	}
+
+	_, err = t.Conn.Subscribe("stats", func(m *nats.Msg) {
+		l.Info("stats")
+		stats := t.Conn.Stats()
+		err := m.Respond(fmt.Appendf(nil,
+			"------------------\nMSGS\nin: %d\nout: %d\n\nBYTES\nin: %d\nout: %d\n\nCONN\nreconnects: %d\n------------------",
+			stats.InMsgs,
+			stats.OutMsgs,
+			stats.InBytes,
+			stats.OutBytes,
+			stats.Reconnects,
+		))
+		if err != nil {
+			fmt.Printf("failed to respond: %s\n", err)
+		}
+	})
+	if err != nil {
+		return fmt.Errorf("failed to subscribe")
+	}
+
+	return nil
+}
 
 // func GlobalNats(conf confNatsGlobal) (*nats.Conn, error) {
 // 	nc, err := nats.Connect(conf.Url, nats.UserCredentials(conf.Creds))

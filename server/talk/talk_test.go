@@ -1,7 +1,8 @@
-package talk
+package talk_test
 
 import (
-	"fmt"
+	"jst_dev/server/jst_log"
+	"jst_dev/server/talk"
 	"testing"
 	"time"
 
@@ -9,68 +10,67 @@ import (
 )
 
 func BenchmarkMessagingInProcess(b *testing.B) {
-
 	// Initialize nats
-	nc, _, err := InitNats(ConfNatsServer{
-		EnableLogging: false,
-		InProcess:     true,
-	})
+	talk, err := talk.New(talk.Conf{
+		ServerName:        "test",
+		EnableLogging:     false,
+		ListenOnLocalhost: false,
+	}, jst_log.NewLogger("test", jst_log.DefaultSubjects()))
 	if err != nil {
-		fmt.Println(err)
-		b.FailNow()
+		b.Fatalf("Failed to initialize TALK: %v", err)
 	}
-	defer nc.Close()
-
-	// Setup the handler
-	MessagingHandler(nc)
+	err = talk.Start()
+	if err != nil {
+		b.Fatalf("Failed to start TALK: %v", err)
+	}
+	defer talk.Shutdown()
 
 	b.ResetTimer()
-
 	// Run the benchmark
 	for n := 0; n < b.N; n++ {
-		// Send 100k messages and wait for responses
-		msg, err := nc.Request("health", []byte("ping"), 1*time.Second)
+		msg, err := talk.Conn.Request("ping", []byte("ping"), 50*time.Millisecond)
 		if err != nil {
 			b.Fatalf("Request failed: %v", err)
 		}
-		if string(msg.Data) != "OK" {
+		if string(msg.Data) != "pong" {
 			b.Fatalf("Unexpected response: %s", string(msg.Data))
 		}
 	}
 }
 
 func BenchmarkMessagingLoopback(b *testing.B) {
-
 	// Initialize nats
-	nc, _, err := InitNats(ConfNatsServer{
-		EnableLogging: false,
-		InProcess:     true,
-	})
+	talk, err := talk.New(talk.Conf{
+		ServerName:        "test",
+		EnableLogging:     false,
+		ListenOnLocalhost: true,
+	}, jst_log.NewLogger("test", jst_log.DefaultSubjects()))
 	if err != nil {
-		fmt.Println(err)
-		b.FailNow()
+		b.Fatalf("Failed to initialize TALK: %v", err)
 	}
-	defer nc.Close()
+	defer talk.Shutdown()
 
-	// Setup the handler
-	MessagingHandler(nc)
+	err = talk.Start()
+	if err != nil {
+		b.Fatalf("Failed to start TALK: %v", err)
+	}
 
 	clientOpts := []nats.Option{}
 	nc2, err := nats.Connect(nats.DefaultURL, clientOpts...)
 	if err != nil {
-		b.Fatalf("err: %e", err)
+		b.Fatalf("Failed to connect client: %v", err)
 	}
+	defer nc2.Close()
 
 	b.ResetTimer()
 
 	// Run the benchmark
 	for n := 0; n < b.N; n++ {
-		// Send 100k messages and wait for responses
-		msg, err := nc2.Request("health", []byte("ping"), 1*time.Second)
+		msg, err := nc2.Request("ping", []byte("ping"), 50*time.Millisecond)
 		if err != nil {
 			b.Fatalf("Request failed: %v", err)
 		}
-		if string(msg.Data) != "OK" {
+		if string(msg.Data) != "pong" {
 			b.Fatalf("Unexpected response: %s", string(msg.Data))
 		}
 	}
