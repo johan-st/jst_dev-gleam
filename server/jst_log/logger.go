@@ -34,13 +34,19 @@ type LoggerSubjects struct {
 	err   string
 	fatal string
 }
-
+type LogMessage struct {
+	level Level
+	msg   string
+	args  []any
+}
 type Logger struct {
 	nc          *nats.Conn
 	appName     string
 	breadcrumbs []string
 	conf        LoggerSubjects
 	level       Level
+	queue       []LogMessage
+	children    []*Logger
 }
 
 func NewLogger(appName string, subjects LoggerSubjects) *Logger {
@@ -51,15 +57,28 @@ func NewLogger(appName string, subjects LoggerSubjects) *Logger {
 		conf:        subjects,
 		breadcrumbs: []string{},
 		level:       Info,
+		children:    []*Logger{},
 	}
-
-	// go logCnc(nc, subjects, logger)
-
 	return logger
 }
 func (l *Logger) Connect(nc *nats.Conn) {
 	l.nc = nc
-	go logCnc(l.nc, l.conf, l)
+
+	// publish queued messages
+	for _, msg := range l.queue {
+		l.log(msg.level, msg.msg, msg.args...)
+	}
+	l.queue = []LogMessage{}
+
+	// connect spawned loggers
+	for _, child := range l.children {
+		child.Connect(nc)
+	}
+	l.children = []*Logger{}
+}
+
+func (l *Logger) IsConnected() bool {
+	return l.nc != nil
 }
 
 func DefaultSubjects() LoggerSubjects {
@@ -80,34 +99,37 @@ func (l *Logger) WithBreadcrumb(breadcrumb string) *Logger {
 		breadcrumbs: append(l.breadcrumbs, breadcrumb),
 		appName:     l.appName,
 	}
+
+	l.children = append(l.children, newLogger)
 	return newLogger
 }
 
-func (l *Logger) Debug(msg string, args ...interface{}) {
+func (l *Logger) Debug(msg string, args ...any) {
 	l.log(Debug, msg, args...)
 }
 
-func (l *Logger) Info(msg string, args ...interface{}) {
+func (l *Logger) Info(msg string, args ...any) {
 	l.log(Info, msg, args...)
 }
 
-func (l *Logger) Warn(msg string, args ...interface{}) {
+func (l *Logger) Warn(msg string, args ...any) {
 	l.log(Warn, msg, args...)
 }
 
-func (l *Logger) Error(msg string, args ...interface{}) {
+func (l *Logger) Error(msg string, args ...any) {
 	l.log(Error, msg, args...)
 }
 
-func (l *Logger) Fatal(msg string, args ...interface{}) {
+func (l *Logger) Fatal(msg string, args ...any) {
 	l.log(Fatal, msg, args...)
 	<-time.After(1 * time.Second)
 	os.Exit(1)
 }
 
-func (l *Logger) log(level Level, msg string, args ...interface{}) {
+func (l *Logger) log(level Level, msg string, args ...any) {
 	if l.nc == nil {
-		fmt.Printf("logger not connected. Local logging only. Msg: %s\n", msg)
+		fmt.Printf("[logger has no connection. Message in queue] %s\n", msg)
+		l.queue = append(l.queue, LogMessage{level, msg, args})
 		return
 	}
 	unixMicro := strconv.FormatInt(time.Now().UnixMicro(), 10)
@@ -123,7 +145,7 @@ func (l *Logger) log(level Level, msg string, args ...interface{}) {
 		"level":       []string{levelStr},
 		"timestamp":   []string{unixMicro},
 		"app":         []string{l.appName},
-		"breadcrumbs": []string{strings.Join(l.breadcrumbs, ".")},
+		"breadcrumbs": l.breadcrumbs,
 	}
 
 	// Create message with headers
@@ -136,20 +158,6 @@ func (l *Logger) log(level Level, msg string, args ...interface{}) {
 		// If we can't publish, print to stderr as fallback
 		fmt.Printf("Failed to publish log message: %v\n", err)
 	}
-}
-
-func logCnc(nc *nats.Conn, subjects LoggerSubjects, logger *Logger) {
-
-	nc.Publish("add_cmd_description.log.set_level.{debug,info,warn,error,fatal}", []byte("set log level"))
-
-	nc.Subscribe("cmd.set_level.*", func(msg *nats.Msg) {
-		level := strings.TrimPrefix(msg.Subject, "log.set_level.")
-		levelFromStr, err := levelFromString(level)
-		if err != nil {
-			fmt.Println(err)
-		}
-		logger.level = levelFromStr
-	})
 }
 
 func levelFromString(level string) (Level, error) {
