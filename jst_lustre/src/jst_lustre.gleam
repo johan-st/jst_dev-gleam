@@ -138,29 +138,36 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 // VIEW ------------------------------------------------------------------------
 
 fn view(model: Model) -> Element(Msg) {
-  html.div([attribute.class("mx-auto max-w-2xl px-32")], [
-    html.nav([attribute.class("flex justify-between items-center my-16")], [
-      html.h1([attribute.class("text-purple-600 font-medium text-xl")], [
-        html.a([href(Index)], [html.text("My little Blog")]),
+  html.div(
+    [
+      attribute.class(
+        "text-gray-50 h-full w-full max-w-screen-lg mx-auto px-12",
+      ),
+    ],
+    [
+      html.nav([attribute.class("flex justify-between items-center")], [
+        html.h1([attribute.class("font-medium text-xl")], [
+          html.a([href(Index)], [html.text("jst.dev")]),
+        ]),
+        html.ul([attribute.class("flex space-x-8")], [
+          view_header_link(current: model.route, to: Posts, label: "Posts"),
+          view_header_link(current: model.route, to: About, label: "About"),
+        ]),
       ]),
-      html.ul([attribute.class("flex space-x-8")], [
-        view_header_link(current: model.route, to: Posts, label: "Posts"),
-        view_header_link(current: model.route, to: About, label: "About"),
-      ]),
-    ]),
-    html.main([attribute.class("my-16")], {
-      // Just like we would show different HTML based on some other state in the
-      // model, we can also pattern match on our Route value to show different
-      // views based on the current page!
-      case model.route {
-        Index -> view_index()
-        Posts -> view_posts(model)
-        PostById(post_id) -> view_post(model, post_id)
-        About -> view_about()
-        NotFound(_) -> view_not_found()
-      }
-    }),
-  ])
+      html.main([], {
+        // Just like we would show different HTML based on some other state in the
+        // model, we can also pattern match on our Route value to show different
+        // views based on the current page!
+        case model.route {
+          Index -> view_index()
+          Posts -> view_posts(model)
+          PostById(post_id) -> view_post(model, post_id)
+          About -> view_about()
+          NotFound(_) -> view_not_found()
+        }
+      }),
+    ],
+  )
 }
 
 fn view_header_link(
@@ -330,3 +337,65 @@ const posts: List(Post) = [
     ",
   ),
 ]
+// COMPONENTS ------------------------------------------------------------------
+
+// Header
+// <header class="bg-gray-900">
+//   <nav class="mx-auto flex max-w-7xl items-center justify-between p-6 lg:px-8" aria-label="Global">
+//     <div class="flex lg:flex-1">
+//       <a href="#" class="-m-1.5 p-1.5">
+//         <span class="sr-only">Your Company</span>
+//         <img class="h-8 w-auto" src="https://tailwindcss.com/plus-assets/img/logos/mark.svg?color=indigo&shade=500" alt="">
+//       </a>
+//     </div>
+//     <div class="flex lg:hidden">
+//       <button type="button" class="-m-2.5 inline-flex items-center justify-center rounded-md p-2.5 text-gray-400">
+//         <span class="sr-only">Open main menu</span>
+//         <svg class="size-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" data-slot="icon">
+//           <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+//         </svg>
+//       </button>
+//     </div>
+//     <div class="hidden lg:flex lg:gap-x-12">
+//       <a href="#" class="text-sm/6 font-semibold text-white">Product</a>
+//       <a href="#" class="text-sm/6 font-semibold text-white">Features</a>
+//       <a href="#" class="text-sm/6 font-semibold text-white">Marketplace</a>
+//       <a href="#" class="text-sm/6 font-semibold text-white">Company</a>
+//     </div>
+//     <div class="hidden lg:flex lg:flex-1 lg:justify-end">
+//       <a href="#" class="text-sm/6 font-semibold text-white">Log in <span aria-hidden="true">&rarr;</span></a>
+//     </div>
+//   </nav>
+//   <!-- Mobile menu, show/hide based on menu open state. -->
+//   <div class="lg:hidden" role="dialog" aria-modal="true">
+//     <!-- Background backdrop, show/hide based on slide-over state. -->
+//     <div class="fixed inset-0 z-10"></div>
+//     <div class="fixed inset-y-0 right-0 z-10 w-full overflow-y-auto bg-gray-900 px-6 py-6 sm:max-w-sm sm:ring-1 sm:ring-white/10">
+//       <div class="flex items-center justify-between">
+//         <a href="#" class="-m-1.5 p-1.5">
+//           <span class="sr-only">Your Company</span>
+//           <img class="h-8 w-auto" src="https://tailwindcss.com/plus-assets/img/logos/mark.svg?color=indigo&shade=500" alt="">
+//         </a>
+//         <button type="button" class="-m-2.5 rounded-md p-2.5 text-gray-400">
+//           <span class="sr-only">Close menu</span>
+//           <svg class="size-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" data-slot="icon">
+//             <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+//           </svg>
+//         </button>
+//       </div>
+//       <div class="mt-6 flow-root">
+//         <div class="-my-6 divide-y divide-gray-500/25">
+//           <div class="space-y-2 py-6">
+//             <a href="#" class="-mx-3 block rounded-lg px-3 py-2 text-base/7 font-semibold text-white hover:bg-gray-800">Product</a>
+//             <a href="#" class="-mx-3 block rounded-lg px-3 py-2 text-base/7 font-semibold text-white hover:bg-gray-800">Features</a>
+//             <a href="#" class="-mx-3 block rounded-lg px-3 py-2 text-base/7 font-semibold text-white hover:bg-gray-800">Marketplace</a>
+//             <a href="#" class="-mx-3 block rounded-lg px-3 py-2 text-base/7 font-semibold text-white hover:bg-gray-800">Company</a>
+//           </div>
+//           <div class="py-6">
+//             <a href="#" class="-mx-3 block rounded-lg px-3 py-2.5 text-base/7 font-semibold text-white hover:bg-gray-800">Log in</a>
+//           </div>
+//         </div>
+//       </div>
+//     </div>
+//   </div>
+// </header>

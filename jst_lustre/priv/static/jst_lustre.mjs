@@ -3037,17 +3037,21 @@ function view_post(model, post_id) {
 }
 function view(model) {
   return div(
-    toList([class$("mx-auto max-w-2xl px-32")]),
+    toList([
+      class$(
+        "text-gray-50 h-full w-full max-w-screen-lg mx-auto px-12"
+      )
+    ]),
     toList([
       nav(
-        toList([class$("flex justify-between items-center my-16")]),
+        toList([class$("flex justify-between items-center")]),
         toList([
           h1(
-            toList([class$("text-purple-600 font-medium text-xl")]),
+            toList([class$("font-medium text-xl")]),
             toList([
               a(
                 toList([href2(new Index())]),
-                toList([text2("My little Blog")])
+                toList([text2("jst.dev")])
               )
             ])
           ),
@@ -3061,7 +3065,7 @@ function view(model) {
         ])
       ),
       main(
-        toList([class$("my-16")]),
+        toList([]),
         (() => {
           let $ = model.route;
           if ($ instanceof Index) {
