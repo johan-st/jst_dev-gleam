@@ -2810,10 +2810,11 @@ var Model2 = class extends CustomType {
   }
 };
 var Post = class extends CustomType {
-  constructor(id, title2, summary, text3) {
+  constructor(id, title2, subtitle2, summary, text3) {
     super();
     this.id = id;
     this.title = title2;
+    this.subtitle = subtitle2;
     this.summary = summary;
     this.text = text3;
   }
@@ -2906,17 +2907,51 @@ function view_header_link(target, current, text3) {
     toList([
       classes(
         toList([
-          ["border-transparent border-b-2 hover:border-purple-600", true],
-          ["text-purple-600", is_active]
+          ["border-transparent border-b-2 hover:border-pink-700", true],
+          ["text-pink-700", is_active]
         ])
       )
     ]),
     toList([a(toList([href2(target)]), toList([text2(text3)]))])
   );
 }
+function view_header(model) {
+  return nav(
+    toList([
+      class$("py-2 border-b bg-zinc-800 border-pink-700 font-mono ")
+    ]),
+    toList([
+      div(
+        toList([
+          class$(
+            "flex justify-between px-10 items-center max-w-screen-md mx-auto"
+          )
+        ]),
+        toList([
+          div(
+            toList([]),
+            toList([
+              a(
+                toList([class$("font-light"), href2(new Index())]),
+                toList([text2("jst.dev")])
+              )
+            ])
+          ),
+          ul(
+            toList([class$("flex space-x-8 pr-2")]),
+            toList([
+              view_header_link(new Posts(), model.route, "Posts"),
+              view_header_link(new About(), model.route, "About")
+            ])
+          )
+        ])
+      )
+    ])
+  );
+}
 function title(title2) {
-  return h2(
-    toList([class$("text-3xl text-purple-800 font-light")]),
+  return h1(
+    toList([class$("text-3xl pt-8 text-pink-700 font-light")]),
     toList([text2(title2)])
   );
 }
@@ -2937,7 +2972,7 @@ function view_posts(model) {
         toList([class$("mt-14")]),
         toList([
           h3(
-            toList([class$("text-xl text-purple-600 font-light")]),
+            toList([class$("text-xl text-pink-700 font-light")]),
             toList([
               a(
                 toList([
@@ -2959,23 +2994,29 @@ function view_posts(model) {
   let posts$1 = _block;
   return prepend(title("Posts"), posts$1);
 }
+function subtitle(title2) {
+  return h2(
+    toList([class$("text-md text-zinc-600 font-light")]),
+    toList([text2(title2)])
+  );
+}
 function leading(text3) {
   return p(
-    toList([class$("mt-8 text-lg")]),
+    toList([class$("font-bold pt-12")]),
     toList([text2(text3)])
   );
 }
 function paragraph(text3) {
   return p(
-    toList([class$("mt-14")]),
+    toList([class$("pt-8")]),
     toList([text2(text3)])
   );
 }
 function view_about() {
   return toList([
-    title("Me"),
+    title("About"),
     paragraph(
-      "I document the odd occurrences that catch my attention and rewrite my own\n       narrative along the way. I'm fine being referred to with pronouns."
+      "I'm a software developer and a writer. I'm also a father and a husband. \n      I'm also a software developer and a writer. I'm also a father and a \n      husband. I'm also a software developer and a writer. I'm also a father \n      and a husband. I'm also a software developer and a writer. I'm also a \n      father and a husband."
     ),
     paragraph(
       "If you enjoy these glimpses into my mind, feel free to come back\n       semi-regularly. But not too regularly, you creep."
@@ -2994,27 +3035,35 @@ function link(target, title2) {
   return a(
     toList([
       href2(target),
-      class$("text-purple-600 hover:underline cursor-pointer")
+      class$("text-pink-700 hover:underline cursor-pointer")
     ]),
     toList([text2(title2)])
   );
 }
 function view_index() {
   return toList([
-    title("Hello, Joe"),
+    title("Welcome to jst.dev!"),
+    subtitle(
+      "...or, A lession on overengineering for fun and.. \n      well just for fun."
+    ),
     leading(
-      "Or whoever you may be! This is were I will share random ramblings\n       and thoughts about life."
+      "This site and it's underlying IT-infrastructure is the primary \n      place for me to experiment with technologies and topologies. I \n      also share some of my thoughts and learnings here."
     ),
     p(
       toList([class$("mt-14")]),
       toList([
         text2(
-          "There is not much going on at the moment, but you can still "
+          "This site and it's underlying IT-infrastructure is the primary \n        place for me to experiment with technologies and topologies. I \n        also share some of my thoughts and learnings here. Feel free to \n        check out my overview, "
         ),
-        link(new Posts(), "read my ramblings ->")
+        link(new Posts(), "NATS all the way down ->")
       ])
     ),
-    paragraph("If you like <3")
+    paragraph(
+      "It to is a work in progress and I mostly keep it here for my own reference."
+    ),
+    paragraph(
+      "I'm also a software developer and a writer. I'm also a father and a \n      husband. I'm also a software developer and a writer. I'm also a father \n      and a husband. I'm also a software developer and a writer. I'm also a \n      father and a husband. I'm also a software developer and a writer."
+    )
   ]);
 }
 function view_post(model, post_id) {
@@ -3038,34 +3087,12 @@ function view_post(model, post_id) {
 function view(model) {
   return div(
     toList([
-      class$(
-        "text-gray-50 h-full w-full max-w-screen-lg mx-auto px-12"
-      )
+      class$("text-zinc-400 h-full w-full text-lg font-thin mx-auto")
     ]),
     toList([
-      nav(
-        toList([class$("flex justify-between items-center")]),
-        toList([
-          h1(
-            toList([class$("font-medium text-xl")]),
-            toList([
-              a(
-                toList([href2(new Index())]),
-                toList([text2("jst.dev")])
-              )
-            ])
-          ),
-          ul(
-            toList([class$("flex space-x-8")]),
-            toList([
-              view_header_link(new Posts(), model.route, "Posts"),
-              view_header_link(new About(), model.route, "About")
-            ])
-          )
-        ])
-      ),
+      view_header(model),
       main(
-        toList([]),
+        toList([class$("px-10 py-4 max-w-screen-md mx-auto")]),
         (() => {
           let $ = model.route;
           if ($ instanceof Index) {
@@ -3073,8 +3100,8 @@ function view(model) {
           } else if ($ instanceof Posts) {
             return view_posts(model);
           } else if ($ instanceof PostById) {
-            let post_id = $.id;
-            return view_post(model, post_id);
+            let id = $.id;
+            return view_post(model, id);
           } else if ($ instanceof About) {
             return view_about();
           } else {
@@ -3090,17 +3117,20 @@ var posts = /* @__PURE__ */ toList([
     1,
     "The Empty Chair",
     "A guide to uninvited furniture and its temporal implications",
+    "A guide to uninvited furniture and its temporal implications",
     "\n      There's an empty chair in my home that wasn't there yesterday. When I sit\n      in it, I start to remember things that haven't happened yet. The chair is\n      getting closer to my bedroom each night, though I never caught it move.\n      Last night, I dreamt it was watching me sleep. This morning, it offered\n      me coffee.\n    "
   ),
   /* @__PURE__ */ new Post(
     2,
     "The Library of Unwritten Books",
     "Warning: Reading this may shorten your narrative arc",
+    "Warning: Reading this may shorten your narrative arc",
     "\n      Between the shelves in the public library exists a thin space where\n      books that were never written somehow exist. Their pages change when you\n      blink. Forms shifting to match the souls blueprint. Librarians warn\n      against reading the final chapter of any unwritten book \u2013 those who do\n      find their own stories mysteriously concluding. Yourself is just another\n      draft to be rewritten.\n    "
   ),
   /* @__PURE__ */ new Post(
     3,
     "The Hum",
+    "",
     "A frequency analysis of the collective forgetting",
     "\n      The citywide hum started Tuesday. Not everyone can hear it, but those who\n      can't are slowly being replaced by perfect copies who smile too widely.\n      The hum isn't sound \u2013 it's the universe forgetting our coordinates.\n      Reports suggest humming back in harmony might postpone whatever comes\n      next. Or perhaps accelerate it.\n    "
   )
@@ -3139,7 +3169,7 @@ function main2() {
     throw makeError(
       "let_assert",
       "jst_lustre",
-      22,
+      23,
       "main",
       "Pattern match failed, no pattern matched the value.",
       { value: $ }

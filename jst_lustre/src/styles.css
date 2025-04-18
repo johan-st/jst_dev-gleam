@@ -6,5 +6,6 @@
   html {
     @apply text-base antialiased;
     @apply bg-zinc-900;
+    @apply text-zinc-400;
   }
 }
