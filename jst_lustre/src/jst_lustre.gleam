@@ -10,6 +10,7 @@ import lustre/attribute.{type Attribute}
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
+import lustre/event
 
 // Modem is a package providing effects and functionality for routing in SPAs.
 // This means instead of links taking you to a new page and reloading everything,
@@ -28,11 +29,20 @@ pub fn main() {
 // MODEL -----------------------------------------------------------------------
 
 type Model {
-  Model(posts: Dict(Int, Post), route: Route)
+  Model(
+    posts: Dict(Int, Post),
+    posts_md: Dict(Int, PostMarkdown),
+    route: Route,
+    websocket_status: String,
+  )
 }
 
 type Post {
   Post(id: Int, title: String, subtitle: String, summary: String, text: String)
+}
+
+type PostMarkdown {
+  PostMarkdown(id: Int, title: String, summary: String, content: String)
 }
 
 /// In a real application, we'll likely want to show different views depending on
@@ -55,6 +65,8 @@ type Route {
   Index
   Posts
   PostById(id: Int)
+  Markdown
+  MarkdownById(id: Int)
   About
   /// It's good practice to store whatever `Uri` we failed to match in case we
   /// want to log it or hint to the user that maybe they made a typo.
@@ -100,6 +112,8 @@ fn href(route: Route) -> Attribute(msg) {
     About -> "/about"
     Posts -> "/posts"
     PostById(post_id) -> "/post/" <> int.to_string(post_id)
+    Markdown -> "/md/"
+    MarkdownById(post_id) -> "/md/" <> int.to_string(post_id)
     NotFound(_) -> "/404"
   }
 
@@ -120,7 +134,13 @@ fn init(_) -> #(Model, Effect(Msg)) {
     |> list.map(fn(post) { #(post.id, post) })
     |> dict.from_list
 
-  let model = Model(route:, posts:)
+  let posts_md =
+    posts_md
+    |> list.map(fn(post) { #(post.id, post) })
+    |> dict.from_list
+
+  let model =
+    Model(route:, posts:, posts_md:, websocket_status: "not connected")
 
   let effect =
     // We need to initialise modem in order for it to intercept links. To do that
@@ -139,12 +159,105 @@ fn init(_) -> #(Model, Effect(Msg)) {
 
 type Msg {
   UserNavigatedTo(route: Route)
+  InjectMarkdownResult(result: Result(Nil, Nil))
+  ClickedConnectButton
+  WebsocketConnetionResult(result: Result(Nil, Nil))
+  WebsocketOnMessage(data: String)
+  WebsocketOnClose(data: String)
+  WebsocketOnError(data: String)
+  WebsocketOnOpen(data: String)
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
-    UserNavigatedTo(route:) -> #(Model(..model, route:), effect.none())
+    UserNavigatedTo(route:) -> {
+      let effect = case route {
+        MarkdownById(id) -> {
+          let posts_md = dict.get(model.posts_md, id)
+          case posts_md {
+            Error(_) -> effect.none()
+            Ok(post) -> effect_inject_markdown("markdown-content", post.content)
+          }
+        }
+        _ -> effect.none()
+      }
+      #(Model(..model, route:), effect)
+    }
+    InjectMarkdownResult(_) -> {
+      #(model, effect.none())
+    }
+    ClickedConnectButton -> {
+      #(
+        Model(..model, websocket_status: "connecting..."),
+        effect_setup_websocket(),
+      )
+    }
+    WebsocketConnetionResult(result:) -> {
+      case result {
+        Ok(_) -> {
+          #(Model(..model, websocket_status: "connected"), effect.none())
+        }
+        Error(_) -> {
+          #(
+            Model(..model, websocket_status: "failed to connect"),
+            effect.none(),
+          )
+        }
+      }
+    }
+    WebsocketOnMessage(data:) -> {
+      #(Model(..model, websocket_status: "data: " <> data), effect.none())
+    }
+    WebsocketOnClose(data:) -> {
+      #(Model(..model, websocket_status: "closed: " <> data), effect.none())
+    }
+    WebsocketOnError(data:) -> {
+      #(Model(..model, websocket_status: "error: " <> data), effect.none())
+    }
+    WebsocketOnOpen(data:) -> {
+      #(Model(..model, websocket_status: "open: " <> data), effect.none())
+    }
   }
+}
+
+// FFI -------------------------------------------------------------------------
+
+@external(javascript, "./app.ffi.mjs", "inject_markdown")
+fn inject_markdown(_element_id: String, _markdown: String) -> Result(Nil, Nil) {
+  Error(Nil)
+}
+
+fn effect_inject_markdown(element_id: String, markdown: String) -> Effect(Msg) {
+  use dispatch <- effect.from
+  dispatch(InjectMarkdownResult(inject_markdown(element_id, markdown)))
+}
+
+@external(javascript, "./app.ffi.mjs", "setup_websocket")
+fn setup_websocket(
+  _path: String,
+  _on_open: fn(String) -> Nil,
+  _on_message: fn(String) -> Nil,
+  _on_close: fn(String) -> Nil,
+  _on_error: fn(String) -> Nil,
+) -> Result(Nil, Nil) {
+  Error(Nil)
+}
+
+fn effect_setup_websocket() -> Effect(Msg) {
+  use dispatch <- effect.from
+  let on_open = fn(data: String) { dispatch(WebsocketOnOpen(data)) }
+  let on_message = fn(data: String) { dispatch(WebsocketOnMessage(data)) }
+  let on_close = fn(data: String) { dispatch(WebsocketOnClose(data)) }
+  let on_error = fn(data: String) { dispatch(WebsocketOnError(data)) }
+  dispatch(
+    WebsocketConnetionResult(setup_websocket(
+      "ws://localhost:8080/ws",
+      on_open,
+      on_message,
+      on_close,
+      on_error,
+    )),
+  )
 }
 
 // VIEW ------------------------------------------------------------------------
@@ -162,6 +275,8 @@ fn view(model: Model) -> Element(Msg) {
           Index -> view_index()
           Posts -> view_posts(model)
           PostById(id) -> view_post(model, id)
+          Markdown -> view_markdowns(model)
+          MarkdownById(id) -> view_markdown(model, id)
           About -> view_about()
           NotFound(_) -> view_not_found()
         }
@@ -171,7 +286,7 @@ fn view(model: Model) -> Element(Msg) {
 }
 
 // VIEW HEADER ----------------------------------------------------------------
-fn view_header(model: Model) -> Element(msg) {
+fn view_header(model: Model) -> Element(Msg) {
   html.nav(
     [attribute.class("py-2 border-b bg-zinc-800 border-pink-700 font-mono ")],
     [
@@ -187,7 +302,15 @@ fn view_header(model: Model) -> Element(msg) {
               html.text("jst.dev"),
             ]),
           ]),
+          html.div([], [html.text(model.websocket_status)]),
           html.ul([attribute.class("flex space-x-8 pr-2")], [
+            html.button(
+              [
+                attribute.class("font-light"),
+                event.on_click(ClickedConnectButton),
+              ],
+              [html.text("Connect")],
+            ),
             view_header_link(current: model.route, to: Posts, label: "Posts"),
             view_header_link(current: model.route, to: About, label: "About"),
           ]),
@@ -281,6 +404,35 @@ fn view_post(model: Model, post_id: Int) -> List(Element(msg)) {
         leading(post.summary),
         paragraph(post.text),
       ]),
+      html.p([attribute.class("mt-14")], [link(Posts, "<- Go back?")]),
+    ]
+  }
+}
+
+fn view_markdowns(model: Model) -> List(Element(msg)) {
+  let posts =
+    model.posts
+    |> dict.values
+    |> list.sort(fn(a, b) { int.compare(a.id, b.id) })
+    |> list.map(fn(post) {
+      html.article([attribute.class("mt-14")], [
+        html.h3([attribute.class("text-xl text-pink-700 font-light")], [
+          html.a(
+            [attribute.class("hover:underline"), href(MarkdownById(post.id))],
+            [html.text(post.title)],
+          ),
+        ]),
+      ])
+    })
+
+  [title("Markdown"), ..posts]
+}
+
+fn view_markdown(model: Model, post_id: Int) -> List(Element(msg)) {
+  case dict.get(model.posts_md, post_id) {
+    Error(_) -> view_not_found()
+    Ok(post) -> [
+      html.article([attribute.id("markdown-content")], [html.text(post.content)]),
       html.p([attribute.class("mt-14")], [link(Posts, "<- Go back?")]),
     ]
   }
@@ -383,7 +535,7 @@ const posts: List(Post) = [
   Post(
     id: 3,
     title: "The Hum",
-    subtitle: "",
+    subtitle: "or, A frequency analysis of the collective forgetting",
     summary: "A frequency analysis of the collective forgetting",
     text: "
       The citywide hum started Tuesday. Not everyone can hear it, but those who
@@ -391,6 +543,169 @@ const posts: List(Post) = [
       The hum isn't sound – it's the universe forgetting our coordinates.
       Reports suggest humming back in harmony might postpone whatever comes
       next. Or perhaps accelerate it.
+    ",
+  ),
+]
+
+const posts_md: List(PostMarkdown) = [
+  PostMarkdown(
+    id: 1,
+    title: "The Hum",
+    summary: "A frequency analysis of the collective forgetting",
+    content: "
+    #blog #article 
+
+    ## MVU -> Model View Update
+
+    I learned of this pattern through Elm which is why The Elm Architecture (TEA) is synonymous with MVU to me. The fact that Elm is a pure functional language gives us Super powers. The fact that the state at any given time is a function of the initial state and the events up to that point enables replays, forking timelines, point-in-time snapshots and excellent visibility. All powered by events. For actions outside of our pure functional world, such as requests, we rely on the runtime for managed effects ( the`Cmd` that is paired with the model ) 
+
+    It is based on a simple idea, the **model** or state (`Model`) is a function of the initial `Model` and the `Msg`s (events). Messages are handled by the **update** function  (`update -> Model -> Msg -> (Model, Cmd)`). **View** (the ui, the markup in the web world) is based purely on the current `Model`.
+
+    For example we could have a form with a single text input. The `Model` for it would be a single string (i.e. `Model String`). A change to the input would be emit a message to the update function  (e.g. `InputChanged String`).  Now the update function would take in the current model (`\"Jo\"`) and the update (`InputChanged \"Joh\"`). The update function will return a new model (`\"Joh\"`). The view function would render this something like this..
+    ```html
+    <form>
+      <input type=\"text\" value=\"Joh\">
+    </form>
+    ```
+
+    If we want to be able also submit the types would be something like
+    ```elm
+    type alias Model {
+      value String
+      submitStatus SubmitStatus
+    } 
+
+    type SubmitStatus {
+      NotSubmitted
+      Pending
+      SubmitFailed HttpError
+      SubmitValidation InputValidation
+      SubmitOk
+    }
+
+    type alias InputValidation {
+        fieldId String
+        value String 
+        validationError Maybe String
+    }
+
+    type Msg {
+      InputChanged String
+      Submit
+      SubmitResult (List InputValidation, Maybe HttpError)
+    }
+
+    initialModel -> (Model, Cmd)
+
+    update -> Model -> Msg -> (Model, Cmd)
+
+    view -> Model -> Html
+    ```
+
+    ## isn't this complicated? 
+
+    I would argue, no. For Elm, the code needed to facilitate the architecture is less that 30KB in payload. It is not nothing.. but also not a lot for any moderately complex website. 
+
+    There is wisdom in striving for solutions that make the difficult problems easier. The easier problems are not where we get stuck or create bugs that are hard to find and fix. 
+
+    ### isolated complexity
+    A pure functional MVU isolates updates to one event at a time. The mental overhead, when everything that can affect the outcome is clearly defined in the scope of the update function, is usually very manageable. In other applications I find myself guessing and trying, hoping I didn't miss anything way too often. 
+
+    ### knowning the world 
+    Something that took me some time to put my finger on is the benefits of narrowing the scope of all possible states. When we have a Model crafted specifically for our purposes we can also limit all possible states to only valid ones. (Richard Feldman has an excellent lecture on \"*making impossible states impossible*\" **check quote**.)
+
+    When what we return from the update function is a the state we want the app to be in any effect we want the runtime to handle for us. Responses from the runtime are simply `Msg`'s for our update function. 
+
+    ## What does this all have to do with event driven architecture? 
+    Well, if we squint on the MVU loop it looks very much like a service reading an event stream and posting messages back. It maintains a local state based on the messages it has received.
+
+    What would a e-commerce site look like in this paradigm? 
+
+    I honestly do not know but it had been something I've been thinking of for quite some time now.. 
+
+    Let's sketch some types..
+
+    ```elm
+
+    type alias Model {
+      stock List Product
+      blog List Article
+      users List User
+      admins List Admin
+      categories  List Category
+      sessions List UserSession
+      orders List Order
+      ... etc.
+    }
+
+    type Msg {
+      {- Session -}
+      SessionNew
+      SessionVisitPage Session Url
+      SessionLogin Session User
+      SessionAddToCart Session Product Int
+      ...
+      {- Order -}
+      OrderNew Session
+      OrderSetAddressBilling Order Address 
+      OrderSetAddressDelivery Order 
+      OrderPay Order Payment
+      OrderValidate Orde
+      ...
+      {- ADMIN -}
+      AdminLogin Session 
+      AdminLoginResult Maybe Admin
+      {- Product -}
+      ProductNew Admin Product
+      ProductUpdate Admin Product
+      ...
+    }```
+
+    > note that Admin messages need an Admin attached to them. Type check fails otherwise.
+
+    ### ​Wow! That's a loooong type definition! 
+
+    But the these types have more than 100 subtypes! 
+
+    Yes, is that an issue?
+
+    We could have something like ￼￼MsgStock Stock.Model Stock.Msg￼￼ that we map to ￼￼Stock.update￼￼ which returns a new Stock.Model. We can even use an opaque type to isolate the Stock module and control the API we expose. Maybe if we have many teams working in parallel.
+
+    This might be what we want but then again.. as we don't need to load a lot of state into our heades to follow the update function, it's usually just as easy to list all the state and state changes. Maybe use comments to organise it. 
+
+    #### ​Stock Service
+    ```elm
+    module Stock
+
+    ​type alias Model {
+      stock List StockItem 
+      reservations List Reservation
+      inbound List StockItem
+    }
+
+    type alias StockItem {
+      uuid Uuid
+      manufacturerRef String
+      count Int
+      desc String
+      ...
+    }
+
+    type alias Reservation {
+      cartId Int
+      list ( ItemId, Int )
+      timeCreated Time
+      timeExpires Maybe Time
+      priority Prio
+    }
+
+    type Prio {
+      Low
+      Standard
+      High
+      Critical 
+    }
+```
     ",
   ),
 ]

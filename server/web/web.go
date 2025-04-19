@@ -124,8 +124,7 @@ func (w *Web) Start() error {
 	}
 
 	// -- SERVER --
-
-	srv := NewServer(w.l, w.routesKv, w.assetsObjStore)
+	srv := NewServer(w.l.WithBreadcrumb("http"), w.routesKv, w.assetsObjStore)
 	go srv.Start(8080)
 	return nil
 }

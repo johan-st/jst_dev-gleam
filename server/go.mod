@@ -3,7 +3,9 @@ module jst_dev/server
 go 1.23.3
 
 require (
+	github.com/coder/websocket v1.8.13 // indirect
 	github.com/google/go-tpm v0.9.3 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/minio/highwayhash v1.0.3 // indirect
 	github.com/nats-io/jwt/v2 v2.7.3 // indirect

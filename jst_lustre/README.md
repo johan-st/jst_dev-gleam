@@ -1,5 +1,15 @@
 # jst_lustre
 
+## build
+
+```sh
+# install javascript dependencies
+npm i 
+# or if no package.json is present
+npm i marked
+npm i dompurify
+```
+
 ## Development
 
 ### Commands

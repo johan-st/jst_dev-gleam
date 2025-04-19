@@ -24,18 +24,19 @@ type Server struct {
 	routes *RoutesStore
 	l      *jst_log.Logger
 	kv     nats.KeyValue
+	wsEcho *wsServer
 }
 
 // NewServer creates a new HTTP server instance
-func NewServer(lParent *jst_log.Logger, kv nats.KeyValue, os nats.ObjectStore) *Server {
-	l := lParent.WithBreadcrumb("HttpServer")
+func NewServer(l *jst_log.Logger, kv nats.KeyValue, os nats.ObjectStore) *Server {
 	l.Debug("NewServer")
 	return &Server{
 		routes: &RoutesStore{
 			routes: make(map[string][]byte),
 		},
-		l:  l,
-		kv: kv,
+		l:      l,
+		kv:     kv,
+		wsEcho: newWsServer(l),
 	}
 }
 
@@ -64,7 +65,16 @@ func (s *Server) routeDelete(subject string) {
 // ServeHTTP implements the http.Handler interface
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	timeStart := time.Now()
+
 	s.l.Debug(fmt.Sprintf("ServeHTTP %s %s", r.Method, r.URL.Path))
+
+	// handle websockets
+	if r.URL.Path == "/ws" {
+		s.wsEcho.ServeHTTP(w, r)
+		return
+	}
+
+	// handle http requests
 	if r.Method != http.MethodGet {
 		s.l.Debug("Method not allowed")
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -114,6 +124,7 @@ func (s *Server) Start(port int) error {
 	}
 	go routesWatcher(s, watcher, s.l.WithBreadcrumb("updates"))
 
+	// start http server
 	addr := fmt.Sprintf(":%d", port)
 	s.l.Info(fmt.Sprintf("listening on %s", addr))
 	return http.ListenAndServe(addr, s)
