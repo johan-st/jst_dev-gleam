@@ -85,19 +85,15 @@ fn parse_route(uri: Uri) -> Route {
         Error(_) -> NotFound(uri:)
       }
 
-    // case int.parse(id_or_slug) {
-    //   Ok(id) ->
-    //     case dict.get(posts, id) {
-    //       Ok(post) -> PostById(id: post.id)
-    //       Error(_) -> NotFound(uri:)
-    //     }
-    //   Error(_) ->
-    //     case dict.get(posts, id_or_slug) {
-    //   Ok(post) -> PostById(id: post.id)
-    //   Error(_) -> NotFound(uri:)
-    // }
-    ["about"] -> About
+    ["md"] -> Markdown
 
+    ["md", post_id] ->
+      case int.parse(post_id) {
+        Ok(post_id) -> MarkdownById(id: post_id)
+        Error(_) -> NotFound(uri:)
+      }
+
+    ["about"] -> About
     _ -> NotFound(uri:)
   }
 }
@@ -112,7 +108,7 @@ fn href(route: Route) -> Attribute(msg) {
     About -> "/about"
     Posts -> "/posts"
     PostById(post_id) -> "/post/" <> int.to_string(post_id)
-    Markdown -> "/md/"
+    Markdown -> "/md"
     MarkdownById(post_id) -> "/md/" <> int.to_string(post_id)
     NotFound(_) -> "/404"
   }
@@ -312,6 +308,11 @@ fn view_header(model: Model) -> Element(Msg) {
               [html.text("Connect")],
             ),
             view_header_link(current: model.route, to: Posts, label: "Posts"),
+            view_header_link(
+              current: model.route,
+              to: Markdown,
+              label: "Markdown",
+            ),
             view_header_link(current: model.route, to: About, label: "About"),
           ]),
         ],
@@ -410,29 +411,30 @@ fn view_post(model: Model, post_id: Int) -> List(Element(msg)) {
 }
 
 fn view_markdowns(model: Model) -> List(Element(msg)) {
-  let posts =
-    model.posts
+  let posts_md =
+    model.posts_md
     |> dict.values
     |> list.sort(fn(a, b) { int.compare(a.id, b.id) })
-    |> list.map(fn(post) {
+    |> list.map(fn(post_md) {
       html.article([attribute.class("mt-14")], [
         html.h3([attribute.class("text-xl text-pink-700 font-light")], [
           html.a(
-            [attribute.class("hover:underline"), href(MarkdownById(post.id))],
-            [html.text(post.title)],
+            [attribute.class("hover:underline"), href(MarkdownById(post_md.id))],
+            [html.text(post_md.title)],
           ),
         ]),
+        html.p([attribute.class("mt-1")], [html.text(post_md.summary)]),
       ])
     })
 
-  [title("Markdown"), ..posts]
+  [title("Markdown"), ..posts_md]
 }
 
 fn view_markdown(model: Model, post_id: Int) -> List(Element(msg)) {
   case dict.get(model.posts_md, post_id) {
     Error(_) -> view_not_found()
     Ok(post) -> [
-      html.article([attribute.id("markdown-content")], [html.text(post.content)]),
+      html.article([attribute.id("markdown-content")], [html.text("rendering...")]),
       html.p([attribute.class("mt-14")], [link(Posts, "<- Go back?")]),
     ]
   }
@@ -550,11 +552,9 @@ const posts: List(Post) = [
 const posts_md: List(PostMarkdown) = [
   PostMarkdown(
     id: 1,
-    title: "The Hum",
-    summary: "A frequency analysis of the collective forgetting",
+    title: "MVU is event driven architecture",
+    summary: "Musings on shoehorning the MVU loop into a service",
     content: "
-    #blog #article 
-
     ## MVU -> Model View Update
 
     I learned of this pattern through Elm which is why The Elm Architecture (TEA) is synonymous with MVU to me. The fact that Elm is a pure functional language gives us Super powers. The fact that the state at any given time is a function of the initial state and the events up to that point enables replays, forking timelines, point-in-time snapshots and excellent visibility. All powered by events. For actions outside of our pure functional world, such as requests, we rely on the runtime for managed effects ( the`Cmd` that is paired with the model ) 
@@ -707,6 +707,15 @@ const posts_md: List(PostMarkdown) = [
     }
 ```
     ",
+  ),
+  PostMarkdown(
+    id: 2,
+    title: "MVU is event driven architecture",
+    summary: "Musings on shoehorning the MVU loop into a service",
+    content: "
+    ## MVU -> Model View Update
+
+    I learned of this pattern through Elm which is why The Elm Architecture (TEA) is synonymous with MVU to me. The fact that Elm is a pure functional language gives us Super powers. The fact that the state at any given time is a function of the initial state and the events up to that point enables replays, forking timelines, point-in-time snapshots and excellent visibility. All powered by events. For actions outside of our pure functional world, such as requests, we rely on the runtime for managed effects ( the \\`Cmd\\` that is paired with the model )     ",
   ),
 ]
 // COMPONENTS ------------------------------------------------------------------

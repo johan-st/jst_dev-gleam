@@ -5933,25 +5933,32 @@ var purify = createDOMPurify();
 
 // build/dev/javascript/jst_lustre/app.ffi.mjs
 function inject_markdown(element_id, markdown) {
+  window.md = marked;
   if (!element_id || !markdown) {
     console.error("ffi: inject_markdown: Invalid arguments");
     return new Error2(void 0);
   }
-  const element2 = document.getElementById(element_id);
-  if (!element2) {
-    console.error("ffi: inject_markdown: Element not found");
-    return new Error2(void 0);
-  }
-  try {
-    let content = purify.sanitize(markdown, { USE_PROFILES: { html: true } });
-    content = content.replace(/^[\u200B\u200C\u200D\u200E\u200F\uFEFF]/, "");
-    content = marked.parse(content);
-    element2.innerHTML = content;
-    return new Ok(void 0);
-  } catch (error) {
-    console.error("ffi: inject_markdown: Error", error);
-    return new Error2(void 0);
-  }
+  setTimeout(() => {
+    const element2 = document.getElementById(element_id);
+    if (!element2) {
+      console.error("ffi: inject_markdown: Element not found");
+      return new Error2(void 0);
+    }
+    try {
+      console.log("ffi: inject_markdown: markdown", markdown);
+      let content = markdown;
+      console.log("ffi: inject_markdown: content", content);
+      content = marked.parse(content);
+      console.log("ffi: inject_markdown: content", content);
+      content = marked.parse(content);
+      console.log("ffi: inject_markdown: content", content);
+      element2.innerHTML = content;
+      return new Ok(void 0);
+    } catch (error) {
+      console.error("ffi: inject_markdown: Error", error);
+      return new Error2(void 0);
+    }
+  }, 0);
 }
 function setup_websocket(path, on_open, on_message, on_close, on_error) {
   const ws = new WebSocket(path, "jst_dev");
@@ -6091,6 +6098,17 @@ function parse_route(uri) {
     } else {
       return new NotFound(uri);
     }
+  } else if ($.hasLength(1) && $.head === "md") {
+    return new Markdown();
+  } else if ($.hasLength(2) && $.head === "md") {
+    let post_id = $.tail.head;
+    let $1 = parse_int(post_id);
+    if ($1.isOk()) {
+      let post_id$1 = $1[0];
+      return new MarkdownById(post_id$1);
+    } else {
+      return new NotFound(uri);
+    }
   } else if ($.hasLength(1) && $.head === "about") {
     return new About();
   } else {
@@ -6109,7 +6127,7 @@ function href2(route) {
     let post_id = route.id;
     _block = "/post/" + to_string(post_id);
   } else if (route instanceof Markdown) {
-    _block = "/md/";
+    _block = "/md";
   } else if (route instanceof MarkdownById) {
     let post_id = route.id;
     _block = "/md/" + to_string(post_id);
@@ -6342,6 +6360,7 @@ function view_header(model) {
                 toList([text2("Connect")])
               ),
               view_header_link(new Posts(), model.route, "Posts"),
+              view_header_link(new Markdown(), model.route, "Markdown"),
               view_header_link(new About(), model.route, "About")
             ])
           )
@@ -6397,7 +6416,7 @@ function view_posts(model) {
 }
 function view_markdowns(model) {
   let _block;
-  let _pipe = model.posts;
+  let _pipe = model.posts_md;
   let _pipe$1 = values(_pipe);
   let _pipe$2 = sort(
     _pipe$1,
@@ -6407,7 +6426,7 @@ function view_markdowns(model) {
   );
   _block = map(
     _pipe$2,
-    (post) => {
+    (post_md) => {
       return article(
         toList([class$("mt-14")]),
         toList([
@@ -6417,18 +6436,22 @@ function view_markdowns(model) {
               a(
                 toList([
                   class$("hover:underline"),
-                  href2(new MarkdownById(post.id))
+                  href2(new MarkdownById(post_md.id))
                 ]),
-                toList([text2(post.title)])
+                toList([text2(post_md.title)])
               )
             ])
+          ),
+          p(
+            toList([class$("mt-1")]),
+            toList([text2(post_md.summary)])
           )
         ])
       );
     }
   );
-  let posts$1 = _block;
-  return prepend(title("Markdown"), posts$1);
+  let posts_md$1 = _block;
+  return prepend(title("Markdown"), posts_md$1);
 }
 function subtitle(title2) {
   return h2(
@@ -6529,7 +6552,7 @@ function view_markdown(model, post_id) {
     return toList([
       article(
         toList([id("markdown-content")]),
-        toList([text2(post.content)])
+        toList([text2("rendering...")])
       ),
       p(
         toList([class$("mt-14")]),
@@ -6597,9 +6620,15 @@ var posts = /* @__PURE__ */ toList([
 var posts_md = /* @__PURE__ */ toList([
   /* @__PURE__ */ new PostMarkdown(
     1,
-    "The Hum",
-    "A frequency analysis of the collective forgetting",
-    '\n    #blog #article \n\n    ## MVU -> Model View Update\n\n    I learned of this pattern through Elm which is why The Elm Architecture (TEA) is synonymous with MVU to me. The fact that Elm is a pure functional language gives us Super powers. The fact that the state at any given time is a function of the initial state and the events up to that point enables replays, forking timelines, point-in-time snapshots and excellent visibility. All powered by events. For actions outside of our pure functional world, such as requests, we rely on the runtime for managed effects ( the`Cmd` that is paired with the model ) \n\n    It is based on a simple idea, the **model** or state (`Model`) is a function of the initial `Model` and the `Msg`s (events). Messages are handled by the **update** function  (`update -> Model -> Msg -> (Model, Cmd)`). **View** (the ui, the markup in the web world) is based purely on the current `Model`.\n\n    For example we could have a form with a single text input. The `Model` for it would be a single string (i.e. `Model String`). A change to the input would be emit a message to the update function  (e.g. `InputChanged String`).  Now the update function would take in the current model (`"Jo"`) and the update (`InputChanged "Joh"`). The update function will return a new model (`"Joh"`). The view function would render this something like this..\n    ```html\n    <form>\n      <input type="text" value="Joh">\n    </form>\n    ```\n\n    If we want to be able also submit the types would be something like\n    ```elm\n    type alias Model {\n      value String\n      submitStatus SubmitStatus\n    } \n\n    type SubmitStatus {\n      NotSubmitted\n      Pending\n      SubmitFailed HttpError\n      SubmitValidation InputValidation\n      SubmitOk\n    }\n\n    type alias InputValidation {\n        fieldId String\n        value String \n        validationError Maybe String\n    }\n\n    type Msg {\n      InputChanged String\n      Submit\n      SubmitResult (List InputValidation, Maybe HttpError)\n    }\n\n    initialModel -> (Model, Cmd)\n\n    update -> Model -> Msg -> (Model, Cmd)\n\n    view -> Model -> Html\n    ```\n\n    ## isn\'t this complicated? \n\n    I would argue, no. For Elm, the code needed to facilitate the architecture is less that 30KB in payload. It is not nothing.. but also not a lot for any moderately complex website. \n\n    There is wisdom in striving for solutions that make the difficult problems easier. The easier problems are not where we get stuck or create bugs that are hard to find and fix. \n\n    ### isolated complexity\n    A pure functional MVU isolates updates to one event at a time. The mental overhead, when everything that can affect the outcome is clearly defined in the scope of the update function, is usually very manageable. In other applications I find myself guessing and trying, hoping I didn\'t miss anything way too often. \n\n    ### knowning the world \n    Something that took me some time to put my finger on is the benefits of narrowing the scope of all possible states. When we have a Model crafted specifically for our purposes we can also limit all possible states to only valid ones. (Richard Feldman has an excellent lecture on "*making impossible states impossible*" **check quote**.)\n\n    When what we return from the update function is a the state we want the app to be in any effect we want the runtime to handle for us. Responses from the runtime are simply `Msg`\'s for our update function. \n\n    ## What does this all have to do with event driven architecture? \n    Well, if we squint on the MVU loop it looks very much like a service reading an event stream and posting messages back. It maintains a local state based on the messages it has received.\n\n    What would a e-commerce site look like in this paradigm? \n\n    I honestly do not know but it had been something I\'ve been thinking of for quite some time now.. \n\n    Let\'s sketch some types..\n\n    ```elm\n\n    type alias Model {\n      stock List Product\n      blog List Article\n      users List User\n      admins List Admin\n      categories  List Category\n      sessions List UserSession\n      orders List Order\n      ... etc.\n    }\n\n    type Msg {\n      {- Session -}\n      SessionNew\n      SessionVisitPage Session Url\n      SessionLogin Session User\n      SessionAddToCart Session Product Int\n      ...\n      {- Order -}\n      OrderNew Session\n      OrderSetAddressBilling Order Address \n      OrderSetAddressDelivery Order \n      OrderPay Order Payment\n      OrderValidate Orde\n      ...\n      {- ADMIN -}\n      AdminLogin Session \n      AdminLoginResult Maybe Admin\n      {- Product -}\n      ProductNew Admin Product\n      ProductUpdate Admin Product\n      ...\n    }```\n\n    > note that Admin messages need an Admin attached to them. Type check fails otherwise.\n\n    ### \u200BWow! That\'s a loooong type definition! \n\n    But the these types have more than 100 subtypes! \n\n    Yes, is that an issue?\n\n    We could have something like \uFFFC\uFFFCMsgStock Stock.Model Stock.Msg\uFFFC\uFFFC that we map to \uFFFC\uFFFCStock.update\uFFFC\uFFFC which returns a new Stock.Model. We can even use an opaque type to isolate the Stock module and control the API we expose. Maybe if we have many teams working in parallel.\n\n    This might be what we want but then again.. as we don\'t need to load a lot of state into our heades to follow the update function, it\'s usually just as easy to list all the state and state changes. Maybe use comments to organise it. \n\n    #### \u200BStock Service\n    ```elm\n    module Stock\n\n    \u200Btype alias Model {\n      stock List StockItem \n      reservations List Reservation\n      inbound List StockItem\n    }\n\n    type alias StockItem {\n      uuid Uuid\n      manufacturerRef String\n      count Int\n      desc String\n      ...\n    }\n\n    type alias Reservation {\n      cartId Int\n      list ( ItemId, Int )\n      timeCreated Time\n      timeExpires Maybe Time\n      priority Prio\n    }\n\n    type Prio {\n      Low\n      Standard\n      High\n      Critical \n    }\n```\n    '
+    "MVU is event driven architecture",
+    "Musings on shoehorning the MVU loop into a service",
+    '\n    ## MVU -> Model View Update\n\n    I learned of this pattern through Elm which is why The Elm Architecture (TEA) is synonymous with MVU to me. The fact that Elm is a pure functional language gives us Super powers. The fact that the state at any given time is a function of the initial state and the events up to that point enables replays, forking timelines, point-in-time snapshots and excellent visibility. All powered by events. For actions outside of our pure functional world, such as requests, we rely on the runtime for managed effects ( the`Cmd` that is paired with the model ) \n\n    It is based on a simple idea, the **model** or state (`Model`) is a function of the initial `Model` and the `Msg`s (events). Messages are handled by the **update** function  (`update -> Model -> Msg -> (Model, Cmd)`). **View** (the ui, the markup in the web world) is based purely on the current `Model`.\n\n    For example we could have a form with a single text input. The `Model` for it would be a single string (i.e. `Model String`). A change to the input would be emit a message to the update function  (e.g. `InputChanged String`).  Now the update function would take in the current model (`"Jo"`) and the update (`InputChanged "Joh"`). The update function will return a new model (`"Joh"`). The view function would render this something like this..\n    ```html\n    <form>\n      <input type="text" value="Joh">\n    </form>\n    ```\n\n    If we want to be able also submit the types would be something like\n    ```elm\n    type alias Model {\n      value String\n      submitStatus SubmitStatus\n    } \n\n    type SubmitStatus {\n      NotSubmitted\n      Pending\n      SubmitFailed HttpError\n      SubmitValidation InputValidation\n      SubmitOk\n    }\n\n    type alias InputValidation {\n        fieldId String\n        value String \n        validationError Maybe String\n    }\n\n    type Msg {\n      InputChanged String\n      Submit\n      SubmitResult (List InputValidation, Maybe HttpError)\n    }\n\n    initialModel -> (Model, Cmd)\n\n    update -> Model -> Msg -> (Model, Cmd)\n\n    view -> Model -> Html\n    ```\n\n    ## isn\'t this complicated? \n\n    I would argue, no. For Elm, the code needed to facilitate the architecture is less that 30KB in payload. It is not nothing.. but also not a lot for any moderately complex website. \n\n    There is wisdom in striving for solutions that make the difficult problems easier. The easier problems are not where we get stuck or create bugs that are hard to find and fix. \n\n    ### isolated complexity\n    A pure functional MVU isolates updates to one event at a time. The mental overhead, when everything that can affect the outcome is clearly defined in the scope of the update function, is usually very manageable. In other applications I find myself guessing and trying, hoping I didn\'t miss anything way too often. \n\n    ### knowning the world \n    Something that took me some time to put my finger on is the benefits of narrowing the scope of all possible states. When we have a Model crafted specifically for our purposes we can also limit all possible states to only valid ones. (Richard Feldman has an excellent lecture on "*making impossible states impossible*" **check quote**.)\n\n    When what we return from the update function is a the state we want the app to be in any effect we want the runtime to handle for us. Responses from the runtime are simply `Msg`\'s for our update function. \n\n    ## What does this all have to do with event driven architecture? \n    Well, if we squint on the MVU loop it looks very much like a service reading an event stream and posting messages back. It maintains a local state based on the messages it has received.\n\n    What would a e-commerce site look like in this paradigm? \n\n    I honestly do not know but it had been something I\'ve been thinking of for quite some time now.. \n\n    Let\'s sketch some types..\n\n    ```elm\n\n    type alias Model {\n      stock List Product\n      blog List Article\n      users List User\n      admins List Admin\n      categories  List Category\n      sessions List UserSession\n      orders List Order\n      ... etc.\n    }\n\n    type Msg {\n      {- Session -}\n      SessionNew\n      SessionVisitPage Session Url\n      SessionLogin Session User\n      SessionAddToCart Session Product Int\n      ...\n      {- Order -}\n      OrderNew Session\n      OrderSetAddressBilling Order Address \n      OrderSetAddressDelivery Order \n      OrderPay Order Payment\n      OrderValidate Orde\n      ...\n      {- ADMIN -}\n      AdminLogin Session \n      AdminLoginResult Maybe Admin\n      {- Product -}\n      ProductNew Admin Product\n      ProductUpdate Admin Product\n      ...\n    }```\n\n    > note that Admin messages need an Admin attached to them. Type check fails otherwise.\n\n    ### \u200BWow! That\'s a loooong type definition! \n\n    But the these types have more than 100 subtypes! \n\n    Yes, is that an issue?\n\n    We could have something like \uFFFC\uFFFCMsgStock Stock.Model Stock.Msg\uFFFC\uFFFC that we map to \uFFFC\uFFFCStock.update\uFFFC\uFFFC which returns a new Stock.Model. We can even use an opaque type to isolate the Stock module and control the API we expose. Maybe if we have many teams working in parallel.\n\n    This might be what we want but then again.. as we don\'t need to load a lot of state into our heades to follow the update function, it\'s usually just as easy to list all the state and state changes. Maybe use comments to organise it. \n\n    #### \u200BStock Service\n    ```elm\n    module Stock\n\n    \u200Btype alias Model {\n      stock List StockItem \n      reservations List Reservation\n      inbound List StockItem\n    }\n\n    type alias StockItem {\n      uuid Uuid\n      manufacturerRef String\n      count Int\n      desc String\n      ...\n    }\n\n    type alias Reservation {\n      cartId Int\n      list ( ItemId, Int )\n      timeCreated Time\n      timeExpires Maybe Time\n      priority Prio\n    }\n\n    type Prio {\n      Low\n      Standard\n      High\n      Critical \n    }\n```\n    '
+  ),
+  /* @__PURE__ */ new PostMarkdown(
+    2,
+    "MVU is event driven architecture",
+    "Musings on shoehorning the MVU loop into a service",
+    "\n    ## MVU -> Model View Update\n\n    I learned of this pattern through Elm which is why The Elm Architecture (TEA) is synonymous with MVU to me. The fact that Elm is a pure functional language gives us Super powers. The fact that the state at any given time is a function of the initial state and the events up to that point enables replays, forking timelines, point-in-time snapshots and excellent visibility. All powered by events. For actions outside of our pure functional world, such as requests, we rely on the runtime for managed effects ( the \\`Cmd\\` that is paired with the model )     "
   )
 ]);
 function init3(_) {
