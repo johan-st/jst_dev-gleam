@@ -10,6 +10,7 @@ import (
 	"jst_dev/server/jst_log"
 	"jst_dev/server/talk"
 	"jst_dev/server/web"
+	"jst_dev/server/who"
 )
 
 const AppName = "local-dev"
@@ -63,6 +64,27 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("start web: %w", err)
 	}
+
+	// --- Who ---
+	who, err := who.New(l.WithBreadcrumb("who"), talk.Conn)
+	if err != nil {
+		return fmt.Errorf("new who: %w", err)
+	}
+
+	u, err := who.CreateUser("johan", "johan@example.com", "password")
+	if err != nil {
+		return fmt.Errorf("create user: %w", err)
+	}
+	jwt, err := u.JwtGet()
+	if err != nil {
+		return fmt.Errorf("jwt get: %w", err)
+	}
+	l.Debug("JWT: %s\n", jwt)
+	userId, permissions, err := who.JwtVerify(jwt)
+	if err != nil {
+		return fmt.Errorf("jwt verify: %w", err)
+	}
+	l.Debug("userId: %s, Permissions: %v", userId, permissions)
 
 	talk.WaitForShutdown()
 	return nil

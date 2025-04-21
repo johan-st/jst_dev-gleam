@@ -1,0 +1,18 @@
+{
+  "read": {
+    "johan:johan_docs": false,
+    "johan:other_docs": false
+  },
+  "change": {
+    "johan:johan_docs": false,
+    "johan:other_docs": false
+  },
+  "delete": {
+    "johan:johan_docs": false,
+    "johan:other_docs": false
+  },
+  "create": {
+    "johan:johan_docs": false,
+    "johan:other_docs": false
+  }
+}
