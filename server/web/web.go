@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"jst_dev/server/jst_log"
-	"jst_dev/server/talk"
 
 	"github.com/nats-io/nats.go"
 
@@ -16,26 +15,30 @@ import (
 type Web struct {
 	l              *jst_log.Logger
 	ctx            context.Context
-	talk           *talk.Talk
+	nc             *nats.Conn
 	routesKv       nats.KeyValue
 	assetsObjStore nats.ObjectStore
 	assetsMetaKv   nats.KeyValue
 }
 
-func New(ctx context.Context, talk *talk.Talk, l *jst_log.Logger) (*Web, error) {
+func New(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (*Web, error) {
 	return &Web{
 		l:              l,
 		ctx:            ctx,
-		talk:           talk,
+		nc:             nc,
 		routesKv:       nil,
 		assetsObjStore: nil,
 		assetsMetaKv:   nil,
 	}, nil
 }
 
-func (w *Web) Start() error {
+func (w *Web) Start(ctx context.Context) error {
+	if ctx == nil {
+		return fmt.Errorf("context is nil")
+	}
+
 	// grab jetstream
-	js, err := w.talk.Conn.JetStream()
+	js, err := w.nc.JetStream()
 	if err != nil {
 		return fmt.Errorf("get jetstream: %w", err)
 	}
@@ -45,7 +48,7 @@ func (w *Web) Start() error {
 	routesMetadata := map[string]string{}
 	routesMetadata["location"] = "unknown"
 	routesMetadata["environment"] = "development"
-	routesSvc, err := micro.AddService(w.talk.Conn, micro.Config{
+	routesSvc, err := micro.AddService(w.nc, micro.Config{
 		Name:        "web_routes",
 		Version:     "1.0.0",
 		Description: "routes handler",
@@ -85,7 +88,7 @@ func (w *Web) Start() error {
 	assetsMetadata := map[string]string{}
 	assetsMetadata["location"] = "unknown"
 	assetsMetadata["environment"] = "development"
-	assetsSvc, err := micro.AddService(w.talk.Conn, micro.Config{
+	assetsSvc, err := micro.AddService(w.nc, micro.Config{
 		Name:        "web_assets",
 		Version:     "1.0.0",
 		Description: "assets handler",
@@ -95,16 +98,16 @@ func (w *Web) Start() error {
 		return fmt.Errorf("add service: %w", err)
 	}
 
-	assetsKvConf := nats.ObjectStoreConfig{
+	assetsOsConf := nats.ObjectStoreConfig{
 		Bucket:      "web_assets",
 		Description: "web assets by hash", // TODO: metadata?
 		Storage:     nats.FileStorage,
 		MaxBytes:    1024 * 1024 * 1024 * 10, // 10GB
 		Compression: true,
 	}
-	assetsObjStore, err := js.CreateObjectStore(&assetsKvConf)
+	assetsObjStore, err := js.CreateObjectStore(&assetsOsConf)
 	if err != nil {
-		w.l.Error(fmt.Sprintf("Create assets kv store %s:%s", assetsKvConf.Bucket, err.Error()))
+		w.l.Error(fmt.Sprintf("Create assets kv store %s:%s", assetsOsConf.Bucket, err.Error()))
 		return err
 	}
 	w.assetsObjStore = assetsObjStore

@@ -1,3 +1,4 @@
+// Package jst_log provides a logger for servers running NATS.
 package jst_log
 
 import (

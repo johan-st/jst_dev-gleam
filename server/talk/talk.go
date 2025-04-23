@@ -1,6 +1,7 @@
 package talk
 
 import (
+	"context"
 	"fmt"
 	"jst_dev/server/jst_log"
 	"time"
@@ -18,11 +19,11 @@ type Conf struct {
 }
 
 type Talk struct {
-	Conn *nats.Conn
-	// Service micro.Service
+	nc   *nats.Conn
 	ns   *server.Server
 	l    *jst_log.Logger
 	conf Conf
+	ctx  context.Context
 }
 
 func New(conf Conf, l *jst_log.Logger) (*Talk, error) {
@@ -50,40 +51,52 @@ func New(conf Conf, l *jst_log.Logger) (*Talk, error) {
 		ns.ConfigureLogger()
 	}
 
-	return &Talk{Conn: nil, ns: ns, l: l}, nil
+	return &Talk{nc: nil, ns: ns, l: l}, nil
 }
 
-func (t *Talk) Start() error {
-	if t.ns == nil {
-		return fmt.Errorf("NATS server not initialized")
+func (t *Talk) Start(ctx context.Context) (*nats.Conn, error) {
+	var (
+		err        error
+		nc         *nats.Conn
+		clientOpts []nats.Option
+	)
+
+	if t == nil {
+		return nil, fmt.Errorf("talk is nil")
 	}
+	if ctx == nil {
+		return nil, fmt.Errorf("context is nil")
+	}
+	if t.ns == nil {
+		return nil, fmt.Errorf("NATS server not initialized")
+	}
+	t.ctx = ctx
 
 	// start and wait for server to be ready for connections
 	go t.ns.Start()
 	if !t.ns.ReadyForConnections(4 * time.Second) {
-		return fmt.Errorf("NATS server failed to start")
+		return nil, fmt.Errorf("NATS server failed to start")
 	}
 
 	// Client options
-	clientOpts := []nats.Option{}
+	clientOpts = []nats.Option{}
 	if !t.conf.ListenOnLocalhost {
 		clientOpts = append(clientOpts, nats.InProcessServer(t.ns))
 	}
 
 	// Connect to server
-	nc, err := nats.Connect(t.ns.ClientURL(), clientOpts...)
+	nc, err = nats.Connect(t.ns.ClientURL(), clientOpts...)
 	if err != nil {
-		return fmt.Errorf("connect to NATS: %w", err)
+		return nil, fmt.Errorf("connect to NATS: %w", err)
 	}
-	t.Conn = nc
-
+	t.nc = nc
 	// setup subscriptions
 	err = t.subscriptions()
 	if err != nil {
-		return fmt.Errorf("subscriptions: %w", err)
+		return nil, fmt.Errorf("subscriptions: %w", err)
 	}
 
-	return nil
+	return nc, nil
 }
 
 func (t *Talk) Shutdown() {
@@ -94,20 +107,16 @@ func (t *Talk) WaitForShutdown() {
 	t.ns.WaitForShutdown()
 }
 
-func (t *Talk) Drain() error {
-	err := t.Conn.Drain()
-	if err != nil {
-		return fmt.Errorf("drain: %w", err)
-	}
-	return nil
-}
-
 func (t *Talk) subscriptions() error {
-	l := t.l.WithBreadcrumb("subscriptions")
+	var (
+		err   error
+		stats nats.Statistics
+		msg   []byte
+		l     = t.l.WithBreadcrumb("sub		scriptions")
+	)
 
-	_, err := t.Conn.Subscribe("ping", func(m *nats.Msg) {
-		err := m.Respond([]byte("pong"))
-		if err != nil {
+	_, err = t.nc.Subscribe("ping", func(m *nats.Msg) {
+		if err := m.Respond([]byte("pong")); err != nil {
 			l.Error("failed to respond", "error", err)
 		}
 	})
@@ -115,19 +124,20 @@ func (t *Talk) subscriptions() error {
 		return fmt.Errorf("failed to subscribe")
 	}
 
-	_, err = t.Conn.Subscribe("stats", func(m *nats.Msg) {
+	_, err = t.nc.Subscribe("stats", func(m *nats.Msg) {
 		l.Info("stats")
-		stats := t.Conn.Stats()
-		err := m.Respond(fmt.Appendf(nil,
+		stats = t.nc.Stats()
+		msg = fmt.Appendf(nil,
 			"------------------\nMSGS\nin: %d\nout: %d\n\nBYTES\nin: %d\nout: %d\n\nCONN\nreconnects: %d\n------------------",
 			stats.InMsgs,
 			stats.OutMsgs,
 			stats.InBytes,
 			stats.OutBytes,
 			stats.Reconnects,
-		))
+		)
+		err = m.Respond(msg)
 		if err != nil {
-			fmt.Printf("failed to respond: %s\n", err)
+			l.Error("failed to respond", "error", err)
 		}
 	})
 	if err != nil {

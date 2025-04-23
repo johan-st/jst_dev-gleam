@@ -5,21 +5,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"jst_dev/server/jst_log"
-	"jst_dev/server/talk"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nats.go/micro"
 )
 
 type Blog struct {
-	js   jetstream.JetStream
-	kv   jetstream.KeyValue
-	l    *jst_log.Logger
-	ctx  context.Context
-	talk *talk.Talk
+	js  jetstream.JetStream
+	kv  jetstream.KeyValue
+	l   *jst_log.Logger
+	ctx context.Context
+	nc  *nats.Conn
 }
 
 type BlogArticle struct {
@@ -28,14 +28,29 @@ type BlogArticle struct {
 	Content string `json:"content"`
 }
 
-func New(ctx context.Context, talk *talk.Talk, l *jst_log.Logger) (*Blog, error) {
+func New(nc *nats.Conn, l *jst_log.Logger) (*Blog, error) {
 	// Create JetStream streams
-	js, err := jetstream.New(talk.Conn)
+	js, err := jetstream.New(nc)
 	if err != nil {
 		return nil, fmt.Errorf("create JetStream: %w", err)
 	}
 
-	kv, err := js.CreateKeyValue(ctx, jetstream.KeyValueConfig{
+	return &Blog{
+		js:  js,
+		kv:  nil,
+		l:   l,
+		ctx: nil,
+		nc:  nc,
+	}, nil
+
+}
+func (b *Blog) Start(ctx context.Context) error {
+	if ctx == nil {
+		return fmt.Errorf("context is nil")
+	}
+	b.ctx = ctx
+
+	kv, err := b.js.CreateKeyValue(ctx, jetstream.KeyValueConfig{
 		Bucket:       "blog",
 		Description:  "blog articles formated as markdown",
 		MaxValueSize: 1024 * 1024 * 5, // 5MB
@@ -51,19 +66,10 @@ func New(ctx context.Context, talk *talk.Talk, l *jst_log.Logger) (*Blog, error)
 	})
 	if err != nil {
 		// TODO: if err is bucket already exists we should try to update the config
-		return nil, fmt.Errorf("create key value: %w", err)
+		return fmt.Errorf("create key value: %w", err)
 	}
-
-	return &Blog{
-		js:   js,
-		kv:   kv,
-		l:    l,
-		ctx:  ctx,
-		talk: talk,
-	}, nil
-
-}
-func (b *Blog) Start() error {
+	b.kv = kv
+	
 
 	watcher, err := b.kv.WatchAll(b.ctx)
 	if err != nil {
@@ -75,7 +81,7 @@ func (b *Blog) Start() error {
 	metadata := map[string]string{}
 	metadata["location"] = "unknown"
 	metadata["environment"] = "development"
-	svc, err := micro.AddService(b.talk.Conn, micro.Config{
+	svc, err := micro.AddService(b.nc, micro.Config{
 		Name:        "blog",
 		Version:     "1.0.0",
 		Description: "Managing blog posts",
