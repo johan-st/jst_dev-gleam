@@ -21,10 +21,11 @@ type RoutesStore struct {
 
 // Server handles HTTP requests and manages page content
 type Server struct {
-	routes *RoutesStore
-	l      *jst_log.Logger
-	kv     nats.KeyValue
-	wsEcho *wsServer
+	routes     *RoutesStore
+	l          *jst_log.Logger
+	kv         nats.KeyValue
+	wsEcho     *wsServer
+	fastestYet time.Duration
 }
 
 // NewServer creates a new HTTP server instance
@@ -34,9 +35,10 @@ func NewServer(l *jst_log.Logger, kv nats.KeyValue, os nats.ObjectStore) *Server
 		routes: &RoutesStore{
 			routes: make(map[string][]byte),
 		},
-		l:      l,
-		kv:     kv,
-		wsEcho: newWsServer(l),
+		l:          l,
+		kv:         kv,
+		wsEcho:     newWsServer(l),
+		fastestYet: 1 * time.Hour,
 	}
 }
 
@@ -64,7 +66,15 @@ func (s *Server) routeDelete(subject string) {
 
 // ServeHTTP implements the http.Handler interface
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	timeStart := time.Now()
+	var (
+		timeStart   time.Time = time.Now()
+		timeElapsed time.Duration
+		subject     string
+		page        []byte
+		exists      bool
+		tmpl        *template.Template
+		err         error
+	)
 
 	s.l.Debug(fmt.Sprintf("ServeHTTP %s %s", r.Method, r.URL.Path))
 
@@ -81,7 +91,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	subject := r.URL.Path
+	subject = r.URL.Path
 	if subject == "/" {
 		subject = "index"
 	}
@@ -89,14 +99,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	subject = strings.ReplaceAll(subject, "/", ".")
 
 	s.l.Debug(fmt.Sprintf("getPage subject: %s", subject))
-	page, exists := s.getPage(subject)
+	page, exists = s.getPage(subject)
 	if !exists {
 		s.l.Warn(fmt.Sprintf("unknown page requested at %s", r.URL.Path))
 		http.Error(w, "Page not found", http.StatusNotFound)
 		return
 	}
 
-	tmpl, err := template.New("template").Parse(string(page))
+	tmpl, err = template.New("template").Parse(string(page))
 	if err != nil {
 		s.l.Error(fmt.Sprintf("Parse:%e", err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -113,7 +123,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-	s.l.Debug(fmt.Sprintf("Page written in %s", time.Since(timeStart)))
+
+	timeElapsed = time.Since(timeStart)
+	if timeElapsed == 0 {
+		s.l.Debug(fmt.Sprintf("page %s was served faster than we could measure!", subject))
+	} else {
+		if timeElapsed < s.fastestYet {
+			s.fastestYet = timeElapsed
+		}
+		s.l.Debug(fmt.Sprintf("page %s was served in %s (fastest yet: %s)", subject, timeElapsed, s.fastestYet))
+	}
 }
 
 func (s *Server) Start(port int) error {

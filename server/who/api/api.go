@@ -6,6 +6,40 @@ import (
 	"github.com/golang-jwt/jwt"
 )
 
+var Subj = struct {
+	// users
+	UserGroup  string
+	UserCreate string
+	UserGet    string
+	UserUpdate string
+	UserDelete string
+	// permissions
+	PermissionsGroup  string
+	PermissionsList   string
+	PermissionsGrant  string
+	PermissionsRevoke string
+	PermissionsCheck  string
+	// auth
+	AuthGroup string
+	AuthLogin string
+}{
+	// users
+	UserGroup:  "svc.who.users",
+	UserCreate: "create",
+	UserGet:    "get",
+	UserUpdate: "update",
+	UserDelete: "delete",
+	// permissions
+	PermissionsGroup:  "svc.who.permissions",
+	PermissionsList:   "list",
+	PermissionsGrant:  "grant",
+	PermissionsRevoke: "revoke",
+	PermissionsCheck:  "check",
+	// auth
+	AuthGroup: "svc.who.auth",
+	AuthLogin: "login",
+}
+
 // USER
 type UserFullResponse struct {
 	ID          string       `json:"id"`
@@ -108,8 +142,8 @@ type JwtClaims struct {
 }
 
 // JwtVerify verifies a JWT token signed by the Who service.
-// 
-//  subject, permissions, err := JwtVerify(secret, tokenStr)
+//
+//	subject, permissions, err := JwtVerify(secret, tokenStr)
 func JwtVerify(secret, tokenStr string) (string, []Permission, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &JwtClaims{}, func(token *jwt.Token) (any, error) {
 		return secret, nil

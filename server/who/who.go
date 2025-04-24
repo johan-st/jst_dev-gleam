@@ -122,38 +122,38 @@ func (w *Who) Start(ctx context.Context) error {
 	}
 
 	// ----------- Users -----------
-	userSvcGroup := whoSvc.AddGroup("svc.who.users", micro.WithGroupQueueGroup("svc.who.users"))
-	if err := userSvcGroup.AddEndpoint("user_create", w.handleUserCreate(), micro.WithEndpointSubject("create")); err != nil {
+	userSvcGroup := whoSvc.AddGroup(api.Subj.UserGroup, micro.WithGroupQueueGroup(api.Subj.UserGroup))
+	if err := userSvcGroup.AddEndpoint("user_create", w.handleUserCreate(), micro.WithEndpointSubject(api.Subj.UserCreate)); err != nil {
 		return fmt.Errorf("add users endpoint (user_create): %w", err)
 	}
-	if err := userSvcGroup.AddEndpoint("user_get", w.handleUserGet(), micro.WithEndpointSubject("get")); err != nil {
+	if err := userSvcGroup.AddEndpoint("user_get", w.handleUserGet(), micro.WithEndpointSubject(api.Subj.UserGet)); err != nil {
 		return fmt.Errorf("add users endpoint (user_get): %w", err)
 	}
-	if err := userSvcGroup.AddEndpoint("user_update", w.handleUserUpdate(), micro.WithEndpointSubject("update")); err != nil {
+	if err := userSvcGroup.AddEndpoint("user_update", w.handleUserUpdate(), micro.WithEndpointSubject(api.Subj.UserUpdate)); err != nil {
 		return fmt.Errorf("add users endpoint (user_update): %w", err)
 	}
-	if err := userSvcGroup.AddEndpoint("user_delete", w.handleUserDelete(), micro.WithEndpointSubject("delete")); err != nil {
+	if err := userSvcGroup.AddEndpoint("user_delete", w.handleUserDelete(), micro.WithEndpointSubject(api.Subj.UserDelete)); err != nil {
 		return fmt.Errorf("add users endpoint (user_delete): %w", err)
 	}
 
 	// ----------- Permissions -----------
-	permissionsSvcGroup := whoSvc.AddGroup("svc.who.permissions", micro.WithGroupQueueGroup("svc.who.permissions"))
-	if err := permissionsSvcGroup.AddEndpoint("permission_list", w.handlePermissionsList(), micro.WithEndpointSubject("list")); err != nil {
+	permissionsSvcGroup := whoSvc.AddGroup(api.Subj.PermissionsGroup, micro.WithGroupQueueGroup(api.Subj.PermissionsGroup))
+	if err := permissionsSvcGroup.AddEndpoint("permission_list", w.handlePermissionsList(), micro.WithEndpointSubject(api.Subj.PermissionsList)); err != nil {
 		return fmt.Errorf("add permissions endpoint (permission_list): %w", err)
 	}
-	if err := permissionsSvcGroup.AddEndpoint("permission_grant", w.handlePermissionsGrant(), micro.WithEndpointSubject("grant")); err != nil {
+	if err := permissionsSvcGroup.AddEndpoint("permission_grant", w.handlePermissionsGrant(), micro.WithEndpointSubject(api.Subj.PermissionsGrant)); err != nil {
 		return fmt.Errorf("add permissions endpoint (permission_grant): %w", err)
 	}
-	if err := permissionsSvcGroup.AddEndpoint("permission_revoke", w.handlePermissionsRevoke(), micro.WithEndpointSubject("revoke")); err != nil {
+	if err := permissionsSvcGroup.AddEndpoint("permission_revoke", w.handlePermissionsRevoke(), micro.WithEndpointSubject(api.Subj.PermissionsRevoke)); err != nil {
 		return fmt.Errorf("add permissions endpoint (permission_revoke): %w", err)
 	}
-	if err := permissionsSvcGroup.AddEndpoint("permission_check", w.handlePermissionsCheck(), micro.WithEndpointSubject("check")); err != nil {
+	if err := permissionsSvcGroup.AddEndpoint("permission_check", w.handlePermissionsCheck(), micro.WithEndpointSubject(api.Subj.PermissionsCheck)); err != nil {
 		return fmt.Errorf("add permissions endpoint (permission_check): %w", err)
 	}
 
 	// ----------- Auth -----------
-	authSvcGroup := whoSvc.AddGroup("svc.who.auth", micro.WithGroupQueueGroup("svc.who.auth"))
-	if err := authSvcGroup.AddEndpoint("auth_login", w.handleAuth(), micro.WithEndpointSubject("login")); err != nil {
+	authSvcGroup := whoSvc.AddGroup(api.Subj.AuthGroup, micro.WithGroupQueueGroup(api.Subj.AuthGroup))
+	if err := authSvcGroup.AddEndpoint("auth_login", w.handleAuth(), micro.WithEndpointSubject(api.Subj.AuthLogin)); err != nil {
 		return fmt.Errorf("add auth endpoint (auth_login): %w", err)
 	}
 	return nil
@@ -613,7 +613,7 @@ func (w *Who) userGet(id string) (User, bool) {
 // userByUsername returns the user by username and a boolean indicating if the user was found
 // We do not return a reference to the original user as we do not want to allow modifications to the user
 //
-//  user, ok := w.userByUsername("username44")
+//	user, ok := w.userByUsername("username44")
 func (w *Who) userByUsername(username string) (User, bool) {
 	var user User
 	for _, u := range w.users {
@@ -628,7 +628,7 @@ func (w *Who) userByUsername(username string) (User, bool) {
 // userByEmail returns the user by email and a boolean indicating if the user was found
 // We do not return a reference to the original user as we do not want to allow modifications to the user
 //
-//  user, ok := w.userByEmail("email@example.com")
+//	user, ok := w.userByEmail("email@example.com")
 func (w *Who) userByEmail(email string) (User, bool) {
 	var user User
 	for _, u := range w.users {
@@ -686,5 +686,3 @@ func (w *Who) userJwt(u *User) (string, error) {
 	}
 	return ss, nil
 }
-
-

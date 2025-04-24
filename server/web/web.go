@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"jst_dev/server/jst_log"
+	"jst_dev/server/web/api"
 
 	"github.com/nats-io/nats.go"
 
@@ -22,6 +23,16 @@ type Web struct {
 }
 
 func New(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (*Web, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("context is nil")
+	}
+	if nc == nil {
+		return nil, fmt.Errorf("nats conn is nil")
+	}
+	if l == nil {
+		return nil, fmt.Errorf("logger is nil")
+	}
+
 	return &Web{
 		l:              l,
 		ctx:            ctx,
@@ -72,14 +83,14 @@ func (w *Web) Start(ctx context.Context) error {
 	}
 	w.routesKv = routesKv
 
-	routesSvcGroup := routesSvc.AddGroup("svc.web", micro.WithGroupQueueGroup("svc.web.routes"))
-	if err := routesSvcGroup.AddEndpoint("info", w.handleRoutesInfo(), micro.WithEndpointSubject("routes")); err != nil {
+	routesSvcGroup := routesSvc.AddGroup("svc.web", micro.WithGroupQueueGroup(api.Subj.RouteGroup))
+	if err := routesSvcGroup.AddEndpoint("info", w.handleRoutesInfo(), micro.WithEndpointSubject(api.Subj.RouteInfo)); err != nil {
 		return fmt.Errorf("add routes endpoint (info): %w", err)
 	}
-	if err := routesSvcGroup.AddEndpoint("register", w.handleRoutesRegister(), micro.WithEndpointSubject("routes.register")); err != nil {
+	if err := routesSvcGroup.AddEndpoint("register", w.handleRoutesRegister(), micro.WithEndpointSubject(api.Subj.RouteRegister)); err != nil {
 		return fmt.Errorf("add routes endpoint (register): %w", err)
 	}
-	if err := routesSvcGroup.AddEndpoint("remove", w.handleRoutesRemove(), micro.WithEndpointSubject("routes.remove")); err != nil {
+	if err := routesSvcGroup.AddEndpoint("remove", w.handleRoutesRemove(), micro.WithEndpointSubject(api.Subj.RouteRemove)); err != nil {
 		return fmt.Errorf("add routes endpont (remove): %w", err)
 	}
 
@@ -112,17 +123,17 @@ func (w *Web) Start(ctx context.Context) error {
 	}
 	w.assetsObjStore = assetsObjStore
 
-	assetsSvcGroup := assetsSvc.AddGroup("svc.web", micro.WithGroupQueueGroup("svc.web.assets"))
-	if err := assetsSvcGroup.AddEndpoint("list", w.handleAssetsList(), micro.WithEndpointSubject("assets")); err != nil {
+	assetsSvcGroup := assetsSvc.AddGroup("svc.web", micro.WithGroupQueueGroup(api.Subj.AssetGroup))
+	if err := assetsSvcGroup.AddEndpoint("list", w.handleAssetsList(), micro.WithEndpointSubject(api.Subj.AssetInfo)); err != nil {
 		return fmt.Errorf("add assets endpont (list): %w", err)
 	}
-	if err := assetsSvcGroup.AddEndpoint("find", w.handleTodo("find", ""), micro.WithEndpointSubject("assets.find")); err != nil {
+	if err := assetsSvcGroup.AddEndpoint("find", w.handleTodo("find", "Not Implemented"), micro.WithEndpointSubject(api.Subj.AssetFind)); err != nil {
 		return fmt.Errorf("add assets endpont (find): %w", err)
 	}
-	if err := assetsSvcGroup.AddEndpoint("add", w.handleTodo("add", ""), micro.WithEndpointSubject("assets.add")); err != nil {
+	if err := assetsSvcGroup.AddEndpoint("add", w.handleTodo("add", "Not Implemented"), micro.WithEndpointSubject(api.Subj.AssetAdd)); err != nil {
 		return fmt.Errorf("add assets endpont (put): %w", err)
 	}
-	if err := assetsSvcGroup.AddEndpoint("delete", w.handleTodo("delete", ""), micro.WithEndpointSubject("assets.delete")); err != nil {
+	if err := assetsSvcGroup.AddEndpoint("delete", w.handleTodo("delete", "Not Implemented"), micro.WithEndpointSubject(api.Subj.AssetDelete)); err != nil {
 		return fmt.Errorf("add assets endpont (delete): %w", err)
 	}
 
@@ -185,13 +196,9 @@ func (w *Web) handleRoutesInfo() micro.HandlerFunc {
 }
 
 func (w *Web) handleRoutesRegister() micro.HandlerFunc {
-	type RouteRegReq struct {
-		Path    string `json:"path"`
-		Content string `json:"content"`
-	}
 	return func(req micro.Request) {
 		w.l.Debug(string(req.Data()))
-		var page RouteRegReq
+		var page api.RouteRegReq
 		err := json.Unmarshal(req.Data(), &page)
 		if err != nil {
 			w.l.Warn(fmt.Sprintf("Unmarshaling page: %s", err.Error()))
@@ -205,39 +212,6 @@ func (w *Web) handleRoutesRegister() micro.HandlerFunc {
 		req.Respond([]byte(fmt.Sprintf("OK, current revision is %d", rev)))
 	}
 }
-
-// func (w *Web) handlerRoutesGetContent() micro.HandlerFunc {
-// 	return func(req micro.Request) {
-// 		w.l.Debug(string(req.Data()))
-// 		path := string(req.Data())
-// 		page, err := w.routesKv.Get(path)
-// 		if err != nil {
-// 			w.l.Error(fmt.Sprintf("Get page: %s", err.Error()))
-// 			req.Error("404", "route not found", []byte(fmt.Sprintf("Get page error: %s", err.Error())))
-// 			return
-// 		}
-// 		req.Respond(page.Value())
-// 	}
-// }
-
-// func (w *Web) handlerRoutesUpdate() micro.HandlerFunc {
-// 	type RouteUpdateReq
-// 	return func(req micro.Request) {
-// 		w.l.Debug(string(req.Data()))
-// 		var page Route
-// 		err := json.Unmarshal(req.Data(), &page)
-// 		if err != nil {
-// 			w.l.Error(fmt.Sprintf("Unmarshaling page: %s", err.Error()))
-// 			req.Respond([]byte(fmt.Sprintf("Unmarshaling page: %s", err.Error())))
-// 			return
-// 		}
-// 		rev, err := w.routesKv.Put(page.Path, []byte(page.Content))
-// 		if err != nil {
-// 			req.Error("000", "failed to put", []byte(fmt.Sprintf("the route '%s' was not registered update. (%s)", page.Path, err.Error())))
-// 		}
-// 		req.Respond([]byte(fmt.Sprintf("%d", rev)))
-// 	}
-// }
 
 func (w *Web) handleRoutesRemove() micro.HandlerFunc {
 	return func(req micro.Request) {
