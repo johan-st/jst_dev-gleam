@@ -64,6 +64,13 @@ type UserUpdateRequest struct {
 	ID       string `json:"id"`
 	Username string `json:"username,omitempty"`
 	Email    string `json:"email,omitempty"`
+	Password string `json:"password,omitempty"`
+}
+type UserUpdateResponse struct {
+	ID              string `json:"id"`
+	Username        string `json:"username"`
+	Email           string `json:"email"`
+	PasswordChanged bool   `json:"passwordChanged"`
 }
 
 type UserDeleteRequest struct {
@@ -119,8 +126,9 @@ type PermissionsCheckRequest struct {
 	Permission Permission `json:"permission"`
 }
 type PermissionsCheckResponse struct {
-	ID            string     `json:"id"`
-	HasPermission Permission `json:"hasPermission"`
+	ID         string     `json:"id"`
+	Permission Permission `json:"permission"`
+	Granted    bool       `json:"granted"`
 }
 
 // AUTH

@@ -50,6 +50,7 @@ type User struct {
 	// private
 	permissions  []api.Permission
 	passwordHash string
+	revision     uint64
 }
 
 type Conf struct {
@@ -60,17 +61,23 @@ type Conf struct {
 }
 
 func New(c *Conf) (*Who, error) {
+	var (
+		err  error
+		hash hash.Hash
+		who  *Who
+	)
+
 	if len(c.JwtSecret) < 12 {
 		return nil, fmt.Errorf("jwt secret must be at least 12 characters")
 	}
 
-	hash := sha512.New()
-	_, err := hash.Write([]byte(hashSalt))
+	hash = sha512.New()
+	_, err = hash.Write([]byte(hashSalt))
 	if err != nil {
 		return nil, fmt.Errorf("failed to write hash salt: %w", err)
 	}
 
-	who := &Who{
+	who = &Who{
 		users:   []User{},
 		l:       c.Logger,
 		nc:      c.NatsConn,
@@ -83,9 +90,8 @@ func New(c *Conf) (*Who, error) {
 }
 
 func (w *Who) Start(ctx context.Context) error {
-	s := w.nc.Status()
-	if s != nats.CONNECTED {
-		return fmt.Errorf("nats connection not connected: %s", s)
+	if w.nc.Status() != nats.CONNECTED {
+		return fmt.Errorf("nats connection not connected: %s", w.nc.Status())
 	}
 
 	js, err := w.nc.JetStream()
@@ -105,8 +111,8 @@ func (w *Who) Start(ctx context.Context) error {
 		w.l.Error(fmt.Sprintf("create users kv store %s:%s", confKv.Bucket, err.Error()))
 		return fmt.Errorf("create users kv store %s:%w", confKv.Bucket, err)
 	}
-
 	w.usersKv = kv
+	w.userWatcher()
 
 	svcMetadata := map[string]string{}
 	svcMetadata["location"] = "unknown"
@@ -123,40 +129,86 @@ func (w *Who) Start(ctx context.Context) error {
 
 	// ----------- Users -----------
 	userSvcGroup := whoSvc.AddGroup(api.Subj.UserGroup, micro.WithGroupQueueGroup(api.Subj.UserGroup))
-	if err := userSvcGroup.AddEndpoint("user_create", w.handleUserCreate(), micro.WithEndpointSubject(api.Subj.UserCreate)); err != nil {
+	if err = userSvcGroup.AddEndpoint("user_create", w.handleUserCreate(), micro.WithEndpointSubject(api.Subj.UserCreate)); err != nil {
 		return fmt.Errorf("add users endpoint (user_create): %w", err)
 	}
-	if err := userSvcGroup.AddEndpoint("user_get", w.handleUserGet(), micro.WithEndpointSubject(api.Subj.UserGet)); err != nil {
+	if err = userSvcGroup.AddEndpoint("user_get", w.handleUserGet(), micro.WithEndpointSubject(api.Subj.UserGet)); err != nil {
 		return fmt.Errorf("add users endpoint (user_get): %w", err)
 	}
-	if err := userSvcGroup.AddEndpoint("user_update", w.handleUserUpdate(), micro.WithEndpointSubject(api.Subj.UserUpdate)); err != nil {
+	if err = userSvcGroup.AddEndpoint("user_update", w.handleUserUpdate(), micro.WithEndpointSubject(api.Subj.UserUpdate)); err != nil {
 		return fmt.Errorf("add users endpoint (user_update): %w", err)
 	}
-	if err := userSvcGroup.AddEndpoint("user_delete", w.handleUserDelete(), micro.WithEndpointSubject(api.Subj.UserDelete)); err != nil {
+	if err = userSvcGroup.AddEndpoint("user_delete", w.handleUserDelete(), micro.WithEndpointSubject(api.Subj.UserDelete)); err != nil {
 		return fmt.Errorf("add users endpoint (user_delete): %w", err)
 	}
 
 	// ----------- Permissions -----------
 	permissionsSvcGroup := whoSvc.AddGroup(api.Subj.PermissionsGroup, micro.WithGroupQueueGroup(api.Subj.PermissionsGroup))
-	if err := permissionsSvcGroup.AddEndpoint("permission_list", w.handlePermissionsList(), micro.WithEndpointSubject(api.Subj.PermissionsList)); err != nil {
+	if err = permissionsSvcGroup.AddEndpoint("permission_list", w.handlePermissionsList(), micro.WithEndpointSubject(api.Subj.PermissionsList)); err != nil {
 		return fmt.Errorf("add permissions endpoint (permission_list): %w", err)
 	}
-	if err := permissionsSvcGroup.AddEndpoint("permission_grant", w.handlePermissionsGrant(), micro.WithEndpointSubject(api.Subj.PermissionsGrant)); err != nil {
+	if err = permissionsSvcGroup.AddEndpoint("permission_grant", w.handlePermissionsGrant(), micro.WithEndpointSubject(api.Subj.PermissionsGrant)); err != nil {
 		return fmt.Errorf("add permissions endpoint (permission_grant): %w", err)
 	}
-	if err := permissionsSvcGroup.AddEndpoint("permission_revoke", w.handlePermissionsRevoke(), micro.WithEndpointSubject(api.Subj.PermissionsRevoke)); err != nil {
+	if err = permissionsSvcGroup.AddEndpoint("permission_revoke", w.handlePermissionsRevoke(), micro.WithEndpointSubject(api.Subj.PermissionsRevoke)); err != nil {
 		return fmt.Errorf("add permissions endpoint (permission_revoke): %w", err)
 	}
-	if err := permissionsSvcGroup.AddEndpoint("permission_check", w.handlePermissionsCheck(), micro.WithEndpointSubject(api.Subj.PermissionsCheck)); err != nil {
+	if err = permissionsSvcGroup.AddEndpoint("permission_check", w.handlePermissionsCheck(), micro.WithEndpointSubject(api.Subj.PermissionsCheck)); err != nil {
 		return fmt.Errorf("add permissions endpoint (permission_check): %w", err)
 	}
 
 	// ----------- Auth -----------
 	authSvcGroup := whoSvc.AddGroup(api.Subj.AuthGroup, micro.WithGroupQueueGroup(api.Subj.AuthGroup))
-	if err := authSvcGroup.AddEndpoint("auth_login", w.handleAuth(), micro.WithEndpointSubject(api.Subj.AuthLogin)); err != nil {
+	if err = authSvcGroup.AddEndpoint("auth_login", w.handleAuth(), micro.WithEndpointSubject(api.Subj.AuthLogin)); err != nil {
 		return fmt.Errorf("add auth endpoint (auth_login): %w", err)
 	}
 	return nil
+}
+
+// ----------- WATCHERS -----------
+
+func (w *Who) userWatcher() error {
+	var (
+		watcher nats.KeyWatcher
+		err     error
+		kv      nats.KeyValueEntry
+		user    User
+		u       *User
+	)
+	watcher, err = w.usersKv.WatchAll()
+	if err != nil {
+		return fmt.Errorf("failed to watch users: %w", err)
+	}
+
+	for {
+		select {
+		case kv = <-watcher.Updates():
+			if kv == nil {
+				w.l.Debug("up to date. %d users loaded", len(w.users))
+				continue
+			}
+			switch kv.Operation() {
+			case nats.KeyValuePut:
+				err = json.Unmarshal(kv.Value(), &user)
+				if err != nil {
+					w.l.Error("failed to unmarshal user: %s", err.Error())
+					continue
+				}
+				u = w.userGet(user.ID)
+				if u == nil {
+					w.users = append(w.users, user)
+					w.l.Debug("new user(%s). %d users loaded", user.ID, len(w.users))
+				}
+			case nats.KeyValueDelete:
+				w.l.Debug("deleted user(%s). %d users loaded", kv.Key(), len(w.users))
+			default:
+				w.l.Error("unknown operation: %s", kv.Operation())
+			}
+		case <-watcher.Context().Done():
+			w.l.Debug("watcher: context done")
+			return nil
+		}
+	}
 }
 
 // ----------- HANDLERS -----------
@@ -166,11 +218,10 @@ func (w *Who) handleUserCreate() micro.HandlerFunc {
 	l := w.l.WithBreadcrumb("user_create")
 	return func(req micro.Request) {
 		var (
+			err      error
+			user     *User
 			reqData  api.UserCreateRequest
 			respData api.UserFullResponse
-			err      error
-			user     User
-			ok       bool
 		)
 
 		l.Debug("got request")
@@ -195,16 +246,16 @@ func (w *Who) handleUserCreate() micro.HandlerFunc {
 			req.Error("INVALID_REQUEST", "password is empty", []byte("password is empty"))
 			return
 		}
-		_, ok = w.userByEmail(reqData.Email)
-		if ok {
+		user = w.userByEmail(reqData.Email)
+		if user != nil {
 			l.Warn("user already exists")
-			req.Error("EMAIL_ALREADY_EXISTS", "a user with this email already exists", []byte(reqData.Email))
+			req.Error("EMAIL_TAKEN", "a user with this email already exists", []byte(reqData.Email))
 			return
 		}
-		_, ok = w.userByUsername(reqData.Username)
-		if ok {
+		user = w.userByUsername(reqData.Username)
+		if user != nil {
 			l.Warn("user already exists")
-			req.Error("USERNAME_ALREADY_EXISTS", "a user with this username already exists", []byte(reqData.Username))
+			req.Error("USERNAME_TAKEN", "a user with this username already exists", []byte(reqData.Username))
 			return
 		}
 
@@ -215,7 +266,7 @@ func (w *Who) handleUserCreate() micro.HandlerFunc {
 			return
 		}
 
-		w.users = append(w.users, user)
+		w.users = append(w.users, *user)
 		respData = api.UserFullResponse{
 			ID:          user.ID,
 			Username:    user.Username,
@@ -234,8 +285,7 @@ func (w *Who) handleUserGet() micro.HandlerFunc {
 			reqData  api.UserGetRequest
 			respData api.UserFullResponse
 			err      error
-			user     User
-			ok       bool
+			user     *User
 		)
 		l.Debug("got request")
 		err = json.Unmarshal(req.Data(), &reqData)
@@ -250,21 +300,26 @@ func (w *Who) handleUserGet() micro.HandlerFunc {
 			return
 		}
 		if reqData.ID != "" {
-			user, ok = w.userGet(reqData.ID)
-			if err != nil {
+			user = w.userGet(reqData.ID)
+			if user == nil {
 				l.Warn(fmt.Sprintf("error getting user: %s", err.Error()))
 				req.Error("SERVER_ERROR", "server error while getting user", []byte(err.Error()))
 				return
 			}
 		} else if reqData.Email != "" {
-			user, ok = w.userByEmail(reqData.Email)
-			if !ok {
+			user = w.userByEmail(reqData.Email)
+			if user == nil {
 				l.Warn(fmt.Sprintf("user not found: %s", reqData.Email))
 				req.Error("USER_NOT_FOUND", "user not found", []byte(reqData.Email))
 				return
 			}
 		} else if reqData.Username != "" {
-			user, ok = w.userByUsername(reqData.Username)
+			user = w.userByUsername(reqData.Username)
+			if user == nil {
+				l.Warn(fmt.Sprintf("user not found: %s", reqData.Username))
+				req.Error("USER_NOT_FOUND", "user not found", []byte(reqData.Username))
+				return
+			}
 		}
 
 		if err != nil {
@@ -284,39 +339,27 @@ func (w *Who) handleUserGet() micro.HandlerFunc {
 
 func (w *Who) handleUserUpdate() micro.HandlerFunc {
 	l := w.l.WithBreadcrumb("user_update")
-	type UserUpdateReq struct {
-		ID       string `json:"id"`
-		Username string `json:"username,omitempty"`
-		Email    string `json:"email,omitempty"`
-		Password string `json:"password,omitempty"`
-	}
-	type UserUpdateResp struct {
-		Revision        uint64 `json:"revision"`
-		ID              string `json:"id"`
-		Username        string `json:"username"`
-		Email           string `json:"email"`
-		PasswordChanged bool   `json:"passwordChanged"`
-	}
-
 	return func(req micro.Request) {
-		l.Debug("got request")
 		var (
-			reqData         UserUpdateReq
-			respData        UserUpdateResp
 			err             error
-			user            User
-			ok              bool
+			user            *User
+			reqData         api.UserUpdateRequest
+			respData        api.UserUpdateResponse
 			passwordChanged bool = false
+			passwordHash    []byte
+			userBytes       []byte
 			rev             uint64
 		)
+
+		l.Debug("got request")
 		err = json.Unmarshal(req.Data(), &reqData)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to unmarshal user update request: %s", err.Error()))
 			req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error()))
 			return
 		}
-		user, ok = w.userGet(reqData.ID)
-		if !ok {
+		user = w.userGet(reqData.ID)
+		if user == nil {
 			l.Warn(fmt.Sprintf("user not found: %s", reqData.ID))
 			req.Error("NOT_FOUND", "user not found", []byte(reqData.ID))
 			return
@@ -331,11 +374,11 @@ func (w *Who) handleUserUpdate() micro.HandlerFunc {
 		}
 		if reqData.Password != "" {
 			passwordChanged = true
-			passwordHash := w.hash.Sum([]byte(reqData.Password))
+			passwordHash = w.hash.Sum([]byte(reqData.Password))
 			user.passwordHash = hex.EncodeToString(passwordHash)
 		}
 
-		userBytes, err := json.Marshal(user)
+		userBytes, err = json.Marshal(user)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to marshal user: %s", err.Error()))
 			req.Error("SERVER_ERROR", "server error while updating user", []byte(err.Error()))
@@ -347,8 +390,8 @@ func (w *Who) handleUserUpdate() micro.HandlerFunc {
 			req.Error("SERVER_ERROR", "server error while updating user", []byte(err.Error()))
 			return
 		}
-		respData = UserUpdateResp{
-			Revision:        rev,
+		user.revision = rev
+		respData = api.UserUpdateResponse{
 			ID:              user.ID,
 			Username:        user.Username,
 			Email:           user.Email,
@@ -360,23 +403,22 @@ func (w *Who) handleUserUpdate() micro.HandlerFunc {
 
 func (w *Who) handleUserDelete() micro.HandlerFunc {
 	l := w.l.WithBreadcrumb("user_delete")
-	type UserDeleteReq struct {
-		ID string `json:"id"`
-	}
-	type UserDeleteResp struct {
-		ID string `json:"id"`
-	}
 	return func(req micro.Request) {
+		var (
+			err      error
+			user     *User
+			reqData  api.UserDeleteRequest
+			respData api.UserDeleteResponse
+		)
 		l.Debug("got request")
-		var reqData UserDeleteReq
-		err := json.Unmarshal(req.Data(), &reqData)
+		err = json.Unmarshal(req.Data(), &reqData)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to unmarshal user delete request: %s", err.Error()))
 			req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error()))
 			return
 		}
-		user, ok := w.userGet(reqData.ID)
-		if !ok {
+		user = w.userGet(reqData.ID)
+		if user == nil {
 			l.Warn(fmt.Sprintf("user not found: %s", reqData.ID))
 			req.Error("NOT_FOUND", "user not found and could thus not be deleted", []byte(reqData.ID))
 			return
@@ -387,8 +429,8 @@ func (w *Who) handleUserDelete() micro.HandlerFunc {
 			req.Error("SERVER_ERROR", "server error while deleting user", []byte(err.Error()))
 			return
 		}
-		respData := UserDeleteResp{
-			ID: user.ID,
+		respData = api.UserDeleteResponse{
+			IdDeleted: user.ID,
 		}
 		req.RespondJSON(respData)
 	}
@@ -398,7 +440,6 @@ func (w *Who) handleUserDelete() micro.HandlerFunc {
 
 func (w *Who) handlePermissionsList() micro.HandlerFunc {
 	l := w.l.WithBreadcrumb("permissions_list")
-	//
 	permissions := []api.Permission{
 		api.PermissionPostViewAny,
 		api.PermissionPostDeleteAny,
@@ -409,8 +450,11 @@ func (w *Who) handlePermissionsList() micro.HandlerFunc {
 		api.PermissionUserRevokeAny,
 	}
 	return func(req micro.Request) {
+		var (
+			respData api.PermissionsListResponse
+		)
 		l.Debug("got request")
-		respData := api.PermissionsListResponse{
+		respData = api.PermissionsListResponse{
 			Permissions: permissions,
 		}
 		req.RespondJSON(respData)
@@ -420,27 +464,32 @@ func (w *Who) handlePermissionsList() micro.HandlerFunc {
 func (w *Who) handlePermissionsGrant() micro.HandlerFunc {
 	l := w.l.WithBreadcrumb("permissions_grant")
 	return func(req micro.Request) {
+		var (
+			err      error
+			user     *User
+			reqData  api.PermissionsGrantRequest
+			respData api.PermissionsGrantResponse
+		)
 		l.Debug("got request")
-		var reqData api.PermissionsGrantRequest
-		err := json.Unmarshal(req.Data(), &reqData)
+		err = json.Unmarshal(req.Data(), &reqData)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to unmarshal permissions grant request: %s", err.Error()))
 			req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error()))
 			return
 		}
-		user, ok := w.userGet(reqData.ID)
-		if !ok {
+		user = w.userGet(reqData.ID)
+		if user == nil {
 			l.Warn(fmt.Sprintf("user not found: %s", reqData.ID))
 			req.Error("NOT_FOUND", "user not found and could thus not be granted permission", []byte(reqData.ID))
 			return
 		}
-		err = w.userAddPermission(&user, reqData.Permission)
+		err = w.userAddPermission(user, reqData.Permission)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to add permission: %s", err.Error()))
 			req.Error("OPERATION_FAILED", "the operation failed to complete", []byte(err.Error()))
 			return
 		}
-		respData := api.PermissionsGrantResponse{
+		respData = api.PermissionsGrantResponse{
 			ID:    user.ID,
 			Added: reqData.Permission,
 		}
@@ -451,27 +500,32 @@ func (w *Who) handlePermissionsGrant() micro.HandlerFunc {
 func (w *Who) handlePermissionsRevoke() micro.HandlerFunc {
 	l := w.l.WithBreadcrumb("permissions_revoke")
 	return func(req micro.Request) {
+		var (
+			err      error
+			user     *User
+			reqData  api.PermissionsRevokeRequest
+			respData api.PermissionsRevokeResponse
+		)
 		l.Debug("got request")
-		var reqData api.PermissionsRevokeRequest
-		err := json.Unmarshal(req.Data(), &reqData)
+		err = json.Unmarshal(req.Data(), &reqData)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to unmarshal permissions revoke request: %s", err.Error()))
 			req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error()))
 			return
 		}
-		user, ok := w.userGet(reqData.ID)
-		if !ok {
+		user = w.userGet(reqData.ID)
+		if user == nil {
 			l.Warn(fmt.Sprintf("user not found: %s", reqData.ID))
 			req.Error("NOT_FOUND", "user not found and could thus not be revoked permission", []byte(reqData.ID))
 			return
 		}
-		err = w.userRemovePermission(&user, reqData.Permission)
+		err = w.userRemovePermission(user, reqData.Permission)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to remove permission: %s", err.Error()))
 			req.Error("OPERATION_FAILED", "the operation failed to complete", []byte(err.Error()))
 			return
 		}
-		respData := api.PermissionsRevokeResponse{
+		respData = api.PermissionsRevokeResponse{
 			ID:      user.ID,
 			Removed: reqData.Permission,
 		}
@@ -481,33 +535,31 @@ func (w *Who) handlePermissionsRevoke() micro.HandlerFunc {
 
 func (w *Who) handlePermissionsCheck() micro.HandlerFunc {
 	l := w.l.WithBreadcrumb("permissions_check")
-	type PermissionsCheckResp struct {
-		ID  string `json:"id"`
-		Has bool   `json:"has"`
-	}
 	return func(req micro.Request) {
-		l.Debug("got request")
 		var (
-			err     error
-			reqData api.PermissionsCheckRequest
-			user    User
+			err      error
+			reqData  api.PermissionsCheckRequest
+			respData api.PermissionsCheckResponse
+			user     *User
 		)
+
+		l.Debug("got request")
 		err = json.Unmarshal(req.Data(), &reqData)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to unmarshal permissions check request: %s", err.Error()))
 			req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error()))
 			return
 		}
-		user, ok := w.userGet(reqData.ID)
-		if !ok {
+		user = w.userGet(reqData.ID)
+		if user == nil {
 			l.Warn(fmt.Sprintf("user not found: %s", reqData.ID))
 			req.Error("NOT_FOUND", "user not found", []byte(reqData.ID))
 			return
 		}
-		has := w.hasPermission(&user, reqData.Permission)
-		respData := PermissionsCheckResp{
-			ID:  user.ID,
-			Has: has,
+		respData = api.PermissionsCheckResponse{
+			ID:         user.ID,
+			Permission: reqData.Permission,
+			Granted:    w.permGranted(user, reqData.Permission),
 		}
 		req.RespondJSON(respData)
 	}
@@ -518,15 +570,15 @@ func (w *Who) handlePermissionsCheck() micro.HandlerFunc {
 func (w *Who) handleAuth() micro.HandlerFunc {
 	l := w.l.WithBreadcrumb("auth")
 	return func(req micro.Request) {
-		l.Debug("got request")
 		var (
 			err      error
+			user     *User
+			token    string
 			reqData  api.AuthRequest
 			respData api.AuthResponse
-			user     User
-			ok       bool
 		)
 
+		l.Debug("got request")
 		err = json.Unmarshal(req.Data(), &reqData)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to unmarshal auth request: %s", err.Error()))
@@ -540,18 +592,18 @@ func (w *Who) handleAuth() micro.HandlerFunc {
 		}
 
 		if reqData.Email != "" {
-			user, ok = w.userByEmail(reqData.Email)
+			user = w.userByEmail(reqData.Email)
 		}
-		if !ok && reqData.Username != "" {
-			user, ok = w.userByUsername(reqData.Username)
+		if user == nil && reqData.Username != "" {
+			user = w.userByUsername(reqData.Username)
 		}
-		if !ok {
+		if user == nil {
 			l.Warn(fmt.Sprintf("user not found: %s", reqData.Username))
 			req.Error("NOT_FOUND", "user not found", []byte(reqData.Username))
 			return
 		}
 
-		token, err := w.userJwt(&user)
+		token, err = w.userJwt(user)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to create token: %s", err.Error()))
 			req.Error("OPERATION_FAILED", "the operation failed to complete", []byte(err.Error()))
@@ -568,14 +620,22 @@ func (w *Who) handleAuth() micro.HandlerFunc {
 
 // ----------- Helper Functions -----------
 
-func (w *Who) userCreate(username, email, password string) (User, error) {
+func (w *Who) userCreate(username, email, password string) (*User, error) {
+	var (
+		err          error
+		user         *User
+		userBytes    []byte
+		passwordHash []byte
+		rev          uint64
+	)
+
 	if username == "" || email == "" || password == "" {
-		return User{}, fmt.Errorf("username, email and password are required")
+		return nil, fmt.Errorf("username, email and password are required")
 	}
 
-	passwordHash := w.hash.Sum([]byte(password))
+	passwordHash = w.hash.Sum([]byte(password))
 
-	u := User{
+	user = &User{
 		Version:      1,
 		ID:           uuid.New().String(),
 		Username:     username,
@@ -583,80 +643,60 @@ func (w *Who) userCreate(username, email, password string) (User, error) {
 		permissions:  []api.Permission{},
 		passwordHash: hex.EncodeToString(passwordHash),
 	}
-	userBytes, err := json.Marshal(u)
+	userBytes, err = json.Marshal(user)
 	if err != nil {
-		return User{}, fmt.Errorf("failed to marshal user: %w", err)
+		return nil, fmt.Errorf("failed to marshal user: %w", err)
 	}
-	rev, err := w.usersKv.Put(u.ID, userBytes)
+	rev, err = w.usersKv.Put(user.ID, userBytes)
 	if err != nil {
-		return User{}, fmt.Errorf("failed to put user in kv: %w", err)
+		return nil, fmt.Errorf("failed to put user in kv: %w", err)
 	}
-	w.l.Debug("user created %s, rev %d", u.Email, rev)
-	return u, nil
+	w.l.Debug("user created %s, rev %d", user.Email, rev)
+	return user, nil
 }
 
-func (w *Who) userGet(id string) (User, bool) {
-	var (
-		user User
-		ok   bool = false
-	)
-	for _, u := range w.users {
-		if u.ID == id {
-			user = u
-			ok = true
-			break
+func (w *Who) userGet(id string) *User {
+	for _, user := range w.users {
+		if user.ID == id {
+			return &user
 		}
 	}
-	return user, ok
+	return nil
 }
-
-// userByUsername returns the user by username and a boolean indicating if the user was found
-// We do not return a reference to the original user as we do not want to allow modifications to the user
-//
-//	user, ok := w.userByUsername("username44")
-func (w *Who) userByUsername(username string) (User, bool) {
-	var user User
-	for _, u := range w.users {
-		if u.Username == username {
-			user = u
-			break
+func (w *Who) userByUsername(username string) *User {
+	for _, user := range w.users {
+		if user.Username == username {
+			return &user
 		}
 	}
-	return user, user.ID != ""
+	return nil
 }
-
-// userByEmail returns the user by email and a boolean indicating if the user was found
-// We do not return a reference to the original user as we do not want to allow modifications to the user
-//
-//	user, ok := w.userByEmail("email@example.com")
-func (w *Who) userByEmail(email string) (User, bool) {
-	var user User
-	for _, u := range w.users {
-		if u.Email == email {
-			user = u
-			break
+func (w *Who) userByEmail(email string) *User {
+	for _, user := range w.users {
+		if user.Email == email {
+			return &user
 		}
 	}
-	return user, user.ID != ""
-}
-
-func (w *Who) hasPermission(u *User, p api.Permission) bool {
-	return slices.Contains(u.permissions, p)
-}
-
-func (w *Who) userAddPermission(u *User, p api.Permission) error {
-	if !slices.Contains(PermissionsAll, p) {
-		return fmt.Errorf("invalid permission")
-	}
-	if w.hasPermission(u, p) {
-		return fmt.Errorf("permission already exists")
-	}
-	u.permissions = append(u.permissions, p)
 	return nil
 }
 
-func (w *Who) userRemovePermission(u *User, perm api.Permission) error {
-	u.permissions = slices.DeleteFunc(u.permissions, func(p api.Permission) bool {
+func (w *Who) permGranted(user *User, perm api.Permission) bool {
+	return slices.Contains(user.permissions, perm)
+}
+
+func (w *Who) userAddPermission(user *User, perm api.Permission) error {
+	if !slices.Contains(PermissionsAll, perm) {
+		return fmt.Errorf("invalid permission")
+	}
+	if w.permGranted(user, perm) {
+		return fmt.Errorf("permission already exists")
+	}
+	user.permissions = append(user.permissions, perm)
+	return nil
+}
+
+func (w *Who) userRemovePermission(user *User, perm api.Permission) error {
+	user.permissions = slices.DeleteFunc(user.permissions, func(p api.Permission) bool {
 		return p == perm
 
 	})
@@ -665,24 +705,30 @@ func (w *Who) userRemovePermission(u *User, perm api.Permission) error {
 
 // ----------- JWT -----------
 
-func (w *Who) userJwt(u *User) (string, error) {
+func (w *Who) userJwt(user *User) (string, error) {
+	var (
+		err          error
+		token        *jwt.Token
+		signedSecret string
+		claims       api.JwtClaims
+	)
 	// Create the Claims
-	claims := api.JwtClaims{
-		Permissions: u.permissions,
+	claims = api.JwtClaims{
+		Permissions: user.permissions,
 		StandardClaims: jwt.StandardClaims{
-			Audience:  "jst_dev.who",
+			Audience:  "jst_dev.who, jst_dev.blog, jst_dev.web",
 			ExpiresAt: time.Now().Add(jwtExpiresAfterTime).Unix(),
 			Issuer:    "jst_dev.who",
-			Subject:   u.ID,
+			Subject:   user.ID,
 			IssuedAt:  time.Now().Unix(),
 		},
 	}
 
 	// TODO: Consider signingmethod with a public/private key pair
-	token := jwt.NewWithClaims(jwt.SigningMethodHS512, claims)
-	ss, err := token.SignedString(w.secret)
+	token = jwt.NewWithClaims(jwt.SigningMethodHS512, claims)
+	signedSecret, err = token.SignedString(w.secret)
 	if err != nil {
 		return "", err
 	}
-	return ss, nil
+	return signedSecret, nil
 }
