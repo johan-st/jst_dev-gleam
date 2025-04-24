@@ -112,20 +112,25 @@ func run() error {
 	}
 
 	// - debug
-	initDefaultUserCleanup := initDefaultUser(lRoot.WithBreadcrumb("initDefaultUser"), nc)
+	// initDefaultUserCleanup := initDefaultUser(lRoot.WithBreadcrumb("initDefaultUser"), nc)
+
+	// ------------------------------------------------------------
+	// RUNNING
+	// ------------------------------------------------------------
 
 	l.Debug("started all services")
-
 	// Wait for interrupt signal to gracefully shut down
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 
 	// Wait for first interrupt
 	<-sigCh
+	cancel()
+
 	l.Info("Received interrupt signal, starting graceful shutdown...")
-	if initDefaultUserCleanup != nil {
-		initDefaultUserCleanup()
-	}
+	// if initDefaultUserCleanup != nil {
+	// 	initDefaultUserCleanup()
+	// }
 	// Drain connections
 	l.Debug("draining connections")
 	err = nc.Drain()

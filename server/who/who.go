@@ -152,7 +152,7 @@ func (w *Who) Start(ctx context.Context) error {
 
 	// ----------- Auth -----------
 	authSvcGroup := whoSvc.AddGroup("svc.who.auth", micro.WithGroupQueueGroup("svc.who.auth"))
-	if err := authSvcGroup.AddEndpoint("auth_login", w.handleAuth(), micro.WithEndpointSubject("jwt")); err != nil {
+	if err := authSvcGroup.AddEndpoint("auth_login", w.handleAuth(), micro.WithEndpointSubject("login")); err != nil {
 		return fmt.Errorf("add auth endpoint (auth_login): %w", err)
 	}
 	return nil
@@ -661,7 +661,7 @@ func (w *Who) userGetByEmail(email string) (*User, error) {
 	}
 	if userId == "" {
 		w.l.Warn("user not found by email: %s", email)
-		return nil, fmt.Errorf("user not found")
+		return nil, nil
 	}
 	return w.userGet(userId)
 }
