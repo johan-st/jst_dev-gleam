@@ -9,3 +9,16 @@
     @apply text-zinc-400;
   }
 }
+
+
+@supports selector(:view-transition-name(article-content)) {
+  #article-content {
+    view-transition-name: article-content;
+  }
+  #article-content::view-transition-old(article-content) {
+    opacity: 1;
+  }
+  #article-content::view-transition-new(article-content) {
+    opacity: 0;
+  }
+}

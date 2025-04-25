@@ -3,8 +3,10 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 
 
+
 // parses and injects markdown into the element with the given id
 export function inject_markdown(element_id, markdown) {
+    console.debug("inject_markdown", element_id, markdown.slice(0, 100));
     window.md = marked;
     if (!element_id || !markdown) {
         console.error("ffi: inject_markdown: Invalid arguments");
@@ -18,13 +20,18 @@ export function inject_markdown(element_id, markdown) {
             return new Error(undefined);
         }
 
-
         try {
             let content = markdown.trim();
             content = content.replace(/^[\u200B\u200C\u200D\u200E\u200F\uFEFF]/, "");
             content = DOMPurify.sanitize(markdown, { USE_PROFILES: { html: true } });
             content = marked(content, { async: false });
-            element.innerHTML = content;
+            if (document.startViewTransition) {
+                document.startViewTransition(() => {
+                    element.innerHTML = content;
+                });
+            } else {
+                element.innerHTML = content;
+            }
             return new Ok(undefined);
         } catch (error) {
             console.error("ffi: inject_markdown: Error", error);
