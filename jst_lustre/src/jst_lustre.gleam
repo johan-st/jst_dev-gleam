@@ -1,7 +1,6 @@
 // IMPORTS ---------------------------------------------------------------------
 
 import gleam/dict.{type Dict}
-import gleam/function
 import gleam/int
 import gleam/list
 import gleam/uri.{type Uri}
@@ -45,22 +44,6 @@ type PostMarkdown {
   PostMarkdown(id: Int, title: String, summary: String, content: String)
 }
 
-/// In a real application, we'll likely want to show different views depending on
-/// which URL we are on:
-///
-/// - /      - show the home page
-/// - /posts - show a list of posts
-/// - /about - show an about page
-/// - ...
-///
-/// We could store the `Uri` or perhaps the path as a `String` in our model, but
-/// this can be awkward to work with and error prone as our application grows.
-///
-/// Instead, we _parse_ the URL into a nice Gleam custom type with just the
-/// variants we need! This lets us benefit from Gleam's pattern matching,
-/// exhaustiveness checks, and LSP features, while also serving as documentation
-/// for our app: if you can get to a page, it must be in this type!
-///
 type Route {
   Index
   Posts
@@ -555,156 +538,156 @@ const posts_md: List(PostMarkdown) = [
     title: "MVU is event driven architecture",
     summary: "Musings on shoehorning the MVU loop into a service",
     content: "
-    ## MVU -> Model View Update
+## MVU -> Model View Update
 
-    I learned of this pattern through Elm which is why The Elm Architecture (TEA) is synonymous with MVU to me. The fact that Elm is a pure functional language gives us Super powers. The fact that the state at any given time is a function of the initial state and the events up to that point enables replays, forking timelines, point-in-time snapshots and excellent visibility. All powered by events. For actions outside of our pure functional world, such as requests, we rely on the runtime for managed effects ( the`Cmd` that is paired with the model ) 
+I learned of this pattern through Elm which is why The Elm Architecture (TEA) is synonymous with MVU to me. The fact that Elm is a pure functional language gives us Super powers. The fact that the state at any given time is a function of the initial state and the events up to that point enables replays, forking timelines, point-in-time snapshots and excellent visibility. All powered by events. For actions outside of our pure functional world, such as requests, we rely on the runtime for managed effects ( the`Cmd` that is paired with the model ) 
 
-    It is based on a simple idea, the **model** or state (`Model`) is a function of the initial `Model` and the `Msg`s (events). Messages are handled by the **update** function  (`update -> Model -> Msg -> (Model, Cmd)`). **View** (the ui, the markup in the web world) is based purely on the current `Model`.
+It is based on a simple idea, the **model** or state (`Model`) is a function of the initial `Model` and the `Msg`s (events). Messages are handled by the **update** function  (`update -> Model -> Msg -> (Model, Cmd)`). **View** (the ui, the markup in the web world) is based purely on the current `Model`.
 
-    For example we could have a form with a single text input. The `Model` for it would be a single string (i.e. `Model String`). A change to the input would be emit a message to the update function  (e.g. `InputChanged String`).  Now the update function would take in the current model (`\"Jo\"`) and the update (`InputChanged \"Joh\"`). The update function will return a new model (`\"Joh\"`). The view function would render this something like this..
-    ```html
-    <form>
-      <input type=\"text\" value=\"Joh\">
-    </form>
-    ```
+For example we could have a form with a single text input. The `Model` for it would be a single string (i.e. `Model String`). A change to the input would be emit a message to the update function  (e.g. `InputChanged String`).  Now the update function would take in the current model (`\"Jo\"`) and the update (`InputChanged \"Joh\"`). The update function will return a new model (`\"Joh\"`). The view function would render this something like this..
+```html
+<form>
+  <input type=\"text\" value=\"Joh\">
+</form>
+```
 
-    If we want to be able also submit the types would be something like
-    ```elm
-    type alias Model {
-      value String
-      submitStatus SubmitStatus
-    } 
+If we want to be able also submit the types would be something like
+```elm
+type alias Model {
+  value String
+  submitStatus SubmitStatus
+} 
 
-    type SubmitStatus {
-      NotSubmitted
-      Pending
-      SubmitFailed HttpError
-      SubmitValidation InputValidation
-      SubmitOk
-    }
+type SubmitStatus {
+  NotSubmitted
+  Pending
+  SubmitFailed HttpError
+  SubmitValidation InputValidation
+  SubmitOk
+}
 
-    type alias InputValidation {
-        fieldId String
-        value String 
-        validationError Maybe String
-    }
+type alias InputValidation {
+    fieldId String
+    value String 
+    validationError Maybe String
+}
 
-    type Msg {
-      InputChanged String
-      Submit
-      SubmitResult (List InputValidation, Maybe HttpError)
-    }
+type Msg {
+  InputChanged String
+  Submit
+  SubmitResult (List InputValidation, Maybe HttpError)
+}
 
-    initialModel -> (Model, Cmd)
+initialModel -> (Model, Cmd)
 
-    update -> Model -> Msg -> (Model, Cmd)
+update -> Model -> Msg -> (Model, Cmd)
 
-    view -> Model -> Html
-    ```
+view -> Model -> Html
+```
 
-    ## isn't this complicated? 
+## isn't this complicated? 
 
-    I would argue, no. For Elm, the code needed to facilitate the architecture is less that 30KB in payload. It is not nothing.. but also not a lot for any moderately complex website. 
+I would argue, no. For Elm, the code needed to facilitate the architecture is less that 30KB in payload. It is not nothing.. but also not a lot for any moderately complex website. 
 
-    There is wisdom in striving for solutions that make the difficult problems easier. The easier problems are not where we get stuck or create bugs that are hard to find and fix. 
+There is wisdom in striving for solutions that make the difficult problems easier. The easier problems are not where we get stuck or create bugs that are hard to find and fix. 
 
-    ### isolated complexity
-    A pure functional MVU isolates updates to one event at a time. The mental overhead, when everything that can affect the outcome is clearly defined in the scope of the update function, is usually very manageable. In other applications I find myself guessing and trying, hoping I didn't miss anything way too often. 
+### isolated complexity
+A pure functional MVU isolates updates to one event at a time. The mental overhead, when everything that can affect the outcome is clearly defined in the scope of the update function, is usually very manageable. In other applications I find myself guessing and trying, hoping I didn't miss anything way too often. 
 
-    ### knowning the world 
-    Something that took me some time to put my finger on is the benefits of narrowing the scope of all possible states. When we have a Model crafted specifically for our purposes we can also limit all possible states to only valid ones. (Richard Feldman has an excellent lecture on \"*making impossible states impossible*\" **check quote**.)
+### knowning the world 
+Something that took me some time to put my finger on is the benefits of narrowing the scope of all possible states. When we have a Model crafted specifically for our purposes we can also limit all possible states to only valid ones. (Richard Feldman has an excellent lecture on \"*making impossible states impossible*\" **check quote**.)
 
-    When what we return from the update function is a the state we want the app to be in any effect we want the runtime to handle for us. Responses from the runtime are simply `Msg`'s for our update function. 
+When what we return from the update function is a the state we want the app to be in any effect we want the runtime to handle for us. Responses from the runtime are simply `Msg`'s for our update function. 
 
-    ## What does this all have to do with event driven architecture? 
-    Well, if we squint on the MVU loop it looks very much like a service reading an event stream and posting messages back. It maintains a local state based on the messages it has received.
+## What does this all have to do with event driven architecture? 
+Well, if we squint on the MVU loop it looks very much like a service reading an event stream and posting messages back. It maintains a local state based on the messages it has received.
 
-    What would a e-commerce site look like in this paradigm? 
+What would a e-commerce site look like in this paradigm? 
 
-    I honestly do not know but it had been something I've been thinking of for quite some time now.. 
+I honestly do not know but it had been something I've been thinking of for quite some time now.. 
 
-    Let's sketch some types..
+Let's sketch some types..
 
-    ```elm
+```elm
 
-    type alias Model {
-      stock List Product
-      blog List Article
-      users List User
-      admins List Admin
-      categories  List Category
-      sessions List UserSession
-      orders List Order
-      ... etc.
-    }
+type alias Model {
+  stock List Product
+  blog List Article
+  users List User
+  admins List Admin
+  categories  List Category
+  sessions List UserSession
+  orders List Order
+  ... etc.
+}
 
-    type Msg {
-      {- Session -}
-      SessionNew
-      SessionVisitPage Session Url
-      SessionLogin Session User
-      SessionAddToCart Session Product Int
-      ...
-      {- Order -}
-      OrderNew Session
-      OrderSetAddressBilling Order Address 
-      OrderSetAddressDelivery Order 
-      OrderPay Order Payment
-      OrderValidate Orde
-      ...
-      {- ADMIN -}
-      AdminLogin Session 
-      AdminLoginResult Maybe Admin
-      {- Product -}
-      ProductNew Admin Product
-      ProductUpdate Admin Product
-      ...
-    }```
+type Msg {
+  {- Session -}
+  SessionNew
+  SessionVisitPage Session Url
+  SessionLogin Session User
+  SessionAddToCart Session Product Int
+  ...
+  {- Order -}
+  OrderNew Session
+  OrderSetAddressBilling Order Address 
+  OrderSetAddressDelivery Order 
+  OrderPay Order Payment
+  OrderValidate Orde
+  ...
+  {- ADMIN -}
+  AdminLogin Session 
+  AdminLoginResult Maybe Admin
+  {- Product -}
+  ProductNew Admin Product
+  ProductUpdate Admin Product
+  ...
+}```
 
-    > note that Admin messages need an Admin attached to them. Type check fails otherwise.
+> note that Admin messages need an Admin attached to them. Type check fails otherwise.
 
-    ### ​Wow! That's a loooong type definition! 
+### ​Wow! That's a loooong type definition! 
 
-    But the these types have more than 100 subtypes! 
+But the these types have more than 100 subtypes! 
 
-    Yes, is that an issue?
+Yes, is that an issue?
 
-    We could have something like ￼￼MsgStock Stock.Model Stock.Msg￼￼ that we map to ￼￼Stock.update￼￼ which returns a new Stock.Model. We can even use an opaque type to isolate the Stock module and control the API we expose. Maybe if we have many teams working in parallel.
+We could have something like ￼￼MsgStock Stock.Model Stock.Msg￼￼ that we map to ￼￼Stock.update￼￼ which returns a new Stock.Model. We can even use an opaque type to isolate the Stock module and control the API we expose. Maybe if we have many teams working in parallel.
 
-    This might be what we want but then again.. as we don't need to load a lot of state into our heades to follow the update function, it's usually just as easy to list all the state and state changes. Maybe use comments to organise it. 
+This might be what we want but then again.. as we don't need to load a lot of state into our heades to follow the update function, it's usually just as easy to list all the state and state changes. Maybe use comments to organise it. 
 
-    #### ​Stock Service
-    ```elm
-    module Stock
+#### ​Stock Service
+```elm
+module Stock
 
-    ​type alias Model {
-      stock List StockItem 
-      reservations List Reservation
-      inbound List StockItem
-    }
+​type alias Model {
+  stock List StockItem 
+  reservations List Reservation
+  inbound List StockItem
+}
 
-    type alias StockItem {
-      uuid Uuid
-      manufacturerRef String
-      count Int
-      desc String
-      ...
-    }
+type alias StockItem {
+  uuid Uuid
+  manufacturerRef String
+  count Int
+  desc String
+  ...
+}
 
-    type alias Reservation {
-      cartId Int
-      list ( ItemId, Int )
-      timeCreated Time
-      timeExpires Maybe Time
-      priority Prio
-    }
+type alias Reservation {
+  cartId Int
+  list ( ItemId, Int )
+  timeCreated Time
+  timeExpires Maybe Time
+  priority Prio
+}
 
-    type Prio {
-      Low
-      Standard
-      High
-      Critical 
-    }
+type Prio {
+  Low
+  Standard
+  High
+  Critical 
+}
 ```
     ",
   ),
@@ -713,9 +696,9 @@ const posts_md: List(PostMarkdown) = [
     title: "MVU is event driven architecture",
     summary: "Musings on shoehorning the MVU loop into a service",
     content: "
-    ## MVU -> Model View Update
+## MVU -> Model View Update
 
-    I learned of this pattern through Elm which is why The Elm Architecture (TEA) is synonymous with MVU to me. The fact that Elm is a pure functional language gives us Super powers. The fact that the state at any given time is a function of the initial state and the events up to that point enables replays, forking timelines, point-in-time snapshots and excellent visibility. All powered by events. For actions outside of our pure functional world, such as requests, we rely on the runtime for managed effects ( the \\`Cmd\\` that is paired with the model )     ",
+I learned of this pattern through Elm which is why The Elm Architecture (TEA) is synonymous with MVU to me. The fact that Elm is a pure functional language gives us Super powers. The fact that the state at any given time is a function of the initial state and the events up to that point enables replays, forking timelines, point-in-time snapshots and excellent visibility. All powered by events. For actions outside of our pure functional world, such as requests, we rely on the runtime for managed effects ( the \\`Cmd\\` that is paired with the model )     ",
   ),
 ]
 // COMPONENTS ------------------------------------------------------------------

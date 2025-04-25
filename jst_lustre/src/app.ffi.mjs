@@ -20,23 +20,17 @@ export function inject_markdown(element_id, markdown) {
 
 
         try {
-            console.log("ffi: inject_markdown: markdown", markdown);
-            let content = markdown;
-            console.log("ffi: inject_markdown: content", content);
-            // content = DOMPurify.sanitize(markdown, { USE_PROFILES: { html: true } });
-            // content = content.replace(/^[\u200B\u200C\u200D\u200E\u200F\uFEFF]/, "");
-            content = marked.parse(content);
-            console.log("ffi: inject_markdown: content", content);
-            content = marked.parse(content);
-            console.log("ffi: inject_markdown: content", content);
-
+            let content = markdown.trim();
+            content = content.replace(/^[\u200B\u200C\u200D\u200E\u200F\uFEFF]/, "");
+            content = DOMPurify.sanitize(markdown, { USE_PROFILES: { html: true } });
+            content = marked(content, { async: false });
             element.innerHTML = content;
             return new Ok(undefined);
         } catch (error) {
             console.error("ffi: inject_markdown: Error", error);
             return new Error(undefined);
         }
-    }, 0);
+    }, 50);
 }
 
 
