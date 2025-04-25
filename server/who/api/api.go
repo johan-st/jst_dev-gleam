@@ -143,13 +143,17 @@ type AuthResponse struct {
 	ExpiresAt int64  `json:"expiresAt"`
 }
 
-// --------- Jwt ---------
+// JwtClaims is the claims for the JWT token.
+//
+// This is ment to be imported and used inside of the who service but also needs to be available in the api package.
 type JwtClaims struct {
 	Permissions []Permission `json:"perm"`
 	jwt.StandardClaims
 }
 
 // JwtVerify verifies a JWT token signed by the Who service.
+//
+// This is ment to be imported and used outside of the who service.
 //
 //	subject, permissions, err := JwtVerify(secret, tokenStr)
 func JwtVerify(secret, tokenStr string) (string, []Permission, error) {
