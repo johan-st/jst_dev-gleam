@@ -1,54 +1,20 @@
 {
     "id": 1,
     "title": "NATS all the way down",
-    "subtitle": "Subtitle 1",
-    "summary": "Summary 1",
+    "subtitle": "..or, how to replace your stack with one tool.",
+    "leading": "I've fallen in love several times these last few years since I started writing code for a living. A few highlights are Docker, Elm, functional programming, Go, simple and portable file formats, my son, markdown, gleam and now NATS. Each infatuation has taught me something important about a technology and usually also about myself.",
     "content": [
         {
-            "type": "ingress",
-            "text": "This is an ingress."
-        },
-        {
-            "type": "paragraph",
-            "text": "This is a paragraph."
-        },
-        {
             "type": "heading",
-            "text": "This is a heading."
-        },
-        {
-            "type": "image",
-            "src": "https://via.placeholder.com/150",
-            "alt": "This is an image."
+            "text": "In the beginning.."
         },
         {
             "type": "paragraph",
-            "text": "This is another paragraph."
-        },
-        {
-            "type": "block",
-            "content": [
-                {
-                    "type": "heading",
-                    "text": "block 1 heading"
-                },
-                {
-                    "type": "paragraph",
-                    "text": "block 1 paragraph"
-                }
-            ]
+            "text": "Just like many of my adventures the last few years, it started with me reading the docs for some project I recently heard about. This time it was NATS. The more I read, the more I wanted to explore the patterns NATS and systems like it enable."
         },
         {
             "type": "paragraph",
-            "text": "This is another paragraph."
-        },
-        {
-            "type": "paragraph",
-            "text": "This is another paragraph."
-        },
-        {
-            "type": "paragraph",
-            "text": "This is another paragraph."
+            "text": "ASIDE: NATS is a messaging system that allows you to send and receive messages between different systems. It's a bit like email, but it's designed for the cloud and for modern systems. In go applications I tend to embed the server in my library and use nats as an in-process messaging system."
         }
     ]
 }

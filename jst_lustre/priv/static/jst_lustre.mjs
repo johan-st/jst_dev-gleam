@@ -4421,9 +4421,6 @@ function h2(attrs, children2) {
 function h3(attrs, children2) {
   return element("h3", attrs, children2);
 }
-function h4(attrs, children2) {
-  return element("h4", attrs, children2);
-}
 function main(attrs, children2) {
   return element("main", attrs, children2);
 }
@@ -4979,11 +4976,11 @@ function expect_json(decoder, to_msg) {
 
 // build/dev/javascript/jst_lustre/article/article.mjs
 var Article = class extends CustomType {
-  constructor(id2, title, summary, subtitle, content) {
+  constructor(id2, title, leading, subtitle, content) {
     super();
     this.id = id2;
     this.title = title;
-    this.summary = summary;
+    this.leading = leading;
     this.subtitle = subtitle;
     this.content = content;
   }
@@ -4995,12 +4992,6 @@ var Heading = class extends CustomType {
   }
 };
 var Subtitle = class extends CustomType {
-  constructor(x0) {
-    super();
-    this[0] = x0;
-  }
-};
-var Leading = class extends CustomType {
   constructor(x0) {
     super();
     this[0] = x0;
@@ -5018,7 +5009,7 @@ var Unknown = class extends CustomType {
     this[0] = x0;
   }
 };
-function view_article_content(view_subtitle2, view_h22, view_h32, view_h42, view_leading2, view_paragraph2, view_unknown2, contents) {
+function view_article_content(view_subtitle2, view_h22, view_h3, view_h4, view_paragraph2, view_unknown2, contents) {
   let view_block = (contents2, current_level) => {
     let _pipe = contents2;
     return map(
@@ -5028,11 +5019,11 @@ function view_article_content(view_subtitle2, view_h22, view_h32, view_h42, view
         if (current_level === 0) {
           _block = view_h22;
         } else if (current_level === 1) {
-          _block = view_h32;
+          _block = view_h3;
         } else if (current_level === 2) {
-          _block = view_h42;
+          _block = view_h4;
         } else {
-          _block = view_h42;
+          _block = view_h4;
         }
         let view_heading = _block;
         if (content instanceof Subtitle) {
@@ -5041,9 +5032,6 @@ function view_article_content(view_subtitle2, view_h22, view_h32, view_h42, view
         } else if (content instanceof Heading) {
           let text3 = content[0];
           return view_heading(text3);
-        } else if (content instanceof Leading) {
-          let text3 = content[0];
-          return view_leading2(text3);
         } else if (content instanceof Paragraph) {
           let text3 = content[0];
           return view_paragraph2(text3);
@@ -5079,14 +5067,6 @@ function content_decoder() {
             return success(new Heading(text3));
           }
         );
-      } else if (content_type === "leading") {
-        return field(
-          "text",
-          string2,
-          (text3) => {
-            return success(new Leading(text3));
-          }
-        );
       } else if (content_type === "paragraph") {
         return field(
           "text",
@@ -5111,9 +5091,9 @@ function article_decoder() {
         string2,
         (title) => {
           return field(
-            "summary",
+            "leading",
             string2,
-            (summary) => {
+            (leading) => {
               return field(
                 "subtitle",
                 string2,
@@ -5123,7 +5103,7 @@ function article_decoder() {
                     new None(),
                     optional(list2(content_decoder())),
                     (content) => {
-                      echo(content, "src\\article\\article.gleam", 120);
+                      echo(content, "src\\article\\article.gleam", 118);
                       let _block;
                       if (content instanceof Some && content[0].hasLength(0)) {
                         _block = new None();
@@ -5131,9 +5111,9 @@ function article_decoder() {
                         _block = content;
                       }
                       let content$1 = _block;
-                      echo(content$1, "src\\article\\article.gleam", 125);
+                      echo(content$1, "src\\article\\article.gleam", 123);
                       return success(
-                        new Article(id2, title, summary, subtitle, content$1)
+                        new Article(id2, title, leading, subtitle, content$1)
                       );
                     }
                   );
@@ -5752,7 +5732,7 @@ function update(model, msg) {
         let user_messages = append(
           model.user_messages,
           toList([
-            new UserError(
+            new UserInfo(
               next_user_message_id(model.user_messages),
               "Article content was not available"
             )
@@ -5864,13 +5844,6 @@ function view_header(model) {
           ul(
             toList([class$("flex space-x-8 pr-2")]),
             toList([
-              button(
-                toList([
-                  class$("font-light"),
-                  on_click(new ClickedConnectButton())
-                ]),
-                toList([text2("Connect")])
-              ),
               view_header_link(new Articles(), model.route, "Articles"),
               view_header_link(new About(), model.route, "About")
             ])
@@ -5880,13 +5853,15 @@ function view_header(model) {
     ])
   );
 }
-function view_message(msg) {
+function view_user_message(msg) {
   if (msg instanceof UserError) {
     let id2 = msg.id;
     let msg_text = msg.text;
     return div(
       toList([
-        class$("rounded-md bg-green-50 p-4"),
+        class$(
+          "rounded-md bg-red-50 p-4 absolute top-0 left-0 right-0"
+        ),
         id("user-message-" + to_string(id2))
       ]),
       toList([
@@ -5895,15 +5870,13 @@ function view_message(msg) {
           toList([
             div(
               toList([class$("shrink-0")]),
-              toList([text2("\u{1F44D}")])
+              toList([text2("ERROR")])
             ),
             div(
               toList([class$("ml-3")]),
               toList([
                 p(
-                  toList([
-                    class$("text-sm font-medium text-green-800")
-                  ]),
+                  toList([class$("text-sm font-medium text-red-800")]),
                   toList([text2(msg_text)])
                 )
               ])
@@ -5917,7 +5890,7 @@ function view_message(msg) {
                     button(
                       toList([
                         class$(
-                          "inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50"
+                          "inline-flex rounded-md bg-red-50 p-1.5 text-red-500 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2 focus:ring-offset-orange-50"
                         ),
                         on_click(new UserMessageDismissed(msg))
                       ]),
@@ -5936,7 +5909,9 @@ function view_message(msg) {
     let msg_text = msg.text;
     return div(
       toList([
-        class$("rounded-md bg-green-50 p-4"),
+        class$(
+          "rounded-md bg-green-50 p-4 relative top-0 left-0 right-0"
+        ),
         id("user-message-" + to_string(id2))
       ]),
       toList([
@@ -5945,7 +5920,7 @@ function view_message(msg) {
           toList([
             div(
               toList([class$("shrink-0")]),
-              toList([text2("\u{1F44D}")])
+              toList([text2("WARNING")])
             ),
             div(
               toList([class$("ml-3")]),
@@ -5986,7 +5961,7 @@ function view_message(msg) {
     let msg_text = msg.text;
     return div(
       toList([
-        class$("rounded-md bg-green-50 p-4"),
+        class$("border-l-4 border-yellow-400 bg-yellow-50 p-4"),
         id("user-message-" + to_string(id2))
       ]),
       toList([
@@ -5995,15 +5970,13 @@ function view_message(msg) {
           toList([
             div(
               toList([class$("shrink-0")]),
-              toList([text2("\u{1F44D}")])
+              toList([text2("INFO")])
             ),
             div(
               toList([class$("ml-3")]),
               toList([
                 p(
-                  toList([
-                    class$("text-sm font-medium text-green-800")
-                  ]),
+                  toList([class$("font-medium text-yellow-800")]),
                   toList([text2(msg_text)])
                 )
               ])
@@ -6017,7 +5990,7 @@ function view_message(msg) {
                     button(
                       toList([
                         class$(
-                          "inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50"
+                          "inline-flex rounded-md bg-yellow-50 p-1.5 text-yellow-500 hover:bg-yellow-100 focus:outline-none focus:ring-2 focus:ring-yellow-600 focus:ring-offset-2 focus:ring-offset-yellow-50"
                         ),
                         on_click(new UserMessageDismissed(msg))
                       ]),
@@ -6033,13 +6006,13 @@ function view_message(msg) {
     );
   }
 }
-function view_messages(msgs) {
+function view_user_messages(msgs) {
   if (msgs.hasLength(0)) {
     return toList([]);
   } else {
     let msg = msgs.head;
     let msgs$1 = msgs.tail;
-    return prepend(view_message(msg), view_messages(msgs$1));
+    return prepend(view_user_message(msg), view_user_messages(msgs$1));
   }
 }
 function view_title(title) {
@@ -6078,7 +6051,7 @@ function view_article_listing(articles) {
           ),
           p(
             toList([class$("mt-1")]),
-            toList([text2(article2.summary)])
+            toList([text2(article2.leading)])
           )
         ])
       );
@@ -6087,34 +6060,22 @@ function view_article_listing(articles) {
   let articles$1 = _block;
   return prepend(view_title("Articles"), articles$1);
 }
-function view_h2(title) {
-  return h2(
-    toList([class$("text-2xl text-zinc-600 font-light")]),
-    toList([text2(title)])
-  );
-}
-function view_h3(title) {
-  return h3(
-    toList([class$("text-xl text-zinc-600 font-light")]),
-    toList([text2(title)])
-  );
-}
-function view_h4(title) {
-  return h4(
-    toList([class$("text-lg text-zinc-600 font-light")]),
-    toList([text2(title)])
-  );
-}
 function view_subtitle(title) {
-  return h2(
-    toList([class$("text-md text-zinc-600 font-light")]),
+  return div(
+    toList([class$("text-md text-zinc-500 font-light")]),
     toList([text2(title)])
   );
 }
 function view_leading(text3) {
   return p(
-    toList([class$("font-bold pt-12")]),
+    toList([class$("font-bold pt-8")]),
     toList([text2(text3)])
+  );
+}
+function view_h2(title) {
+  return h2(
+    toList([class$("text-2xl text-pink-600 font-light pt-16")]),
+    toList([text2(title)])
   );
 }
 function view_paragraph(text3) {
@@ -6193,8 +6154,8 @@ function view_article(article2) {
   if ($ instanceof None) {
     _block = toList([
       view_title(article2.title),
-      view_subtitle(article2.summary),
-      view_leading(article2.summary),
+      view_subtitle(article2.subtitle),
+      view_leading(article2.leading),
       view_paragraph("failed to fetch article..")
     ]);
   } else {
@@ -6202,15 +6163,14 @@ function view_article(article2) {
     _block = prepend(
       view_title(article2.title),
       prepend(
-        view_subtitle(article2.summary),
+        view_subtitle(article2.subtitle),
         prepend(
-          view_leading(article2.summary),
+          view_leading(article2.leading),
           view_article_content(
             view_h2,
-            view_h3,
-            view_h4,
+            view_h2,
+            view_h2,
             view_subtitle,
-            view_leading,
             view_paragraph,
             view_unknown,
             content2
@@ -6235,7 +6195,10 @@ function view(model) {
     ]),
     toList([
       view_header(model),
-      div(toList([]), view_messages(model.user_messages)),
+      div(
+        toList([class$("fixed top-18 left-0 right-0")]),
+        view_user_messages(model.user_messages)
+      ),
       main(
         toList([class$("px-10 py-4 max-w-screen-md mx-auto")]),
         (() => {

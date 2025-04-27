@@ -231,7 +231,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             http.JsonError(json.UnexpectedByte("")) -> {
               let user_messages =
                 list.append(model.user_messages, [
-                  UserError(
+                  UserInfo(
                     next_user_message_id(model.user_messages),
                     "Article content was not available",
                   ),
@@ -296,7 +296,10 @@ fn view(model: Model) -> Element(Msg) {
     [attribute.class("text-zinc-400 h-full w-full text-lg font-thin mx-auto")],
     [
       view_header(model),
-      html.div([], view_messages(model.user_messages)),
+      html.div(
+        [attribute.class("fixed top-18 left-0 right-0")],
+        view_user_messages(model.user_messages),
+      ),
       html.main([attribute.class("px-10 py-4 max-w-screen-md mx-auto")], {
         // Just like we would show different HTML based on some other state in the
         // model, we can also pattern match on our Route value to show different
@@ -346,13 +349,6 @@ fn view_header(model: Model) -> Element(Msg) {
             }),
           ]),
           html.ul([attribute.class("flex space-x-8 pr-2")], [
-            html.button(
-              [
-                attribute.class("font-light"),
-                event.on_click(ClickedConnectButton),
-              ],
-              [html.text("Connect")],
-            ),
             view_header_link(
               current: model.route,
               to: Articles,
@@ -389,31 +385,28 @@ fn view_header_link(
 
 // VIEW MESSAGES ---------------------------------------------------------------
 
-fn view_messages(msgs) {
+fn view_user_messages(msgs) {
   case msgs {
     [] -> []
-    [msg, ..msgs] -> [view_message(msg), ..view_messages(msgs)]
+    [msg, ..msgs] -> [view_user_message(msg), ..view_user_messages(msgs)]
   }
 }
 
-fn view_message(msg: UserMessage) -> Element(Msg) {
+fn view_user_message(msg: UserMessage) -> Element(Msg) {
   case msg {
     UserError(id, msg_text) -> {
       html.div(
         [
-          attribute.class("rounded-md bg-green-50 p-4"),
+          attribute.class(
+            "rounded-md bg-red-50 p-4 absolute top-0 left-0 right-0",
+          ),
           attribute.id("user-message-" <> int.to_string(id)),
         ],
         [
           html.div([attribute.class("flex")], [
-            html.div([attribute.class("shrink-0")], [
-              // <svg class="size-5 text-green-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-slot="icon">
-              //   <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
-              // </svg>
-              html.text("👍"),
-            ]),
+            html.div([attribute.class("shrink-0")], [html.text("ERROR")]),
             html.div([attribute.class("ml-3")], [
-              html.p([attribute.class("text-sm font-medium text-green-800")], [
+              html.p([attribute.class("text-sm font-medium text-red-800")], [
                 html.text(msg_text),
               ]),
             ]),
@@ -422,7 +415,7 @@ fn view_message(msg: UserMessage) -> Element(Msg) {
                 html.button(
                   [
                     attribute.class(
-                      "inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50",
+                      "inline-flex rounded-md bg-red-50 p-1.5 text-red-500 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2 focus:ring-offset-orange-50",
                     ),
                     event.on_click(UserMessageDismissed(msg)),
                   ],
@@ -438,17 +431,14 @@ fn view_message(msg: UserMessage) -> Element(Msg) {
     UserWarning(id, msg_text) -> {
       html.div(
         [
-          attribute.class("rounded-md bg-green-50 p-4"),
+          attribute.class(
+            "rounded-md bg-green-50 p-4 relative top-0 left-0 right-0",
+          ),
           attribute.id("user-message-" <> int.to_string(id)),
         ],
         [
           html.div([attribute.class("flex")], [
-            html.div([attribute.class("shrink-0")], [
-              // <svg class="size-5 text-green-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-slot="icon">
-              //   <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
-              // </svg>
-              html.text("👍"),
-            ]),
+            html.div([attribute.class("shrink-0")], [html.text("WARNING")]),
             html.div([attribute.class("ml-3")], [
               html.p([attribute.class("text-sm font-medium text-green-800")], [
                 html.text(msg_text),
@@ -475,19 +465,14 @@ fn view_message(msg: UserMessage) -> Element(Msg) {
     UserInfo(id, msg_text) -> {
       html.div(
         [
-          attribute.class("rounded-md bg-green-50 p-4"),
+          attribute.class("border-l-4 border-yellow-400 bg-yellow-50 p-4"),
           attribute.id("user-message-" <> int.to_string(id)),
         ],
         [
           html.div([attribute.class("flex")], [
-            html.div([attribute.class("shrink-0")], [
-              // <svg class="size-5 text-green-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-slot="icon">
-              //   <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
-              // </svg>
-              html.text("👍"),
-            ]),
+            html.div([attribute.class("shrink-0")], [html.text("INFO")]),
             html.div([attribute.class("ml-3")], [
-              html.p([attribute.class("text-sm font-medium text-green-800")], [
+              html.p([attribute.class("font-medium text-yellow-800")], [
                 html.text(msg_text),
               ]),
             ]),
@@ -496,7 +481,7 @@ fn view_message(msg: UserMessage) -> Element(Msg) {
                 html.button(
                   [
                     attribute.class(
-                      "inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50",
+                      "inline-flex rounded-md bg-yellow-50 p-1.5 text-yellow-500 hover:bg-yellow-100 focus:outline-none focus:ring-2 focus:ring-yellow-600 focus:ring-offset-2 focus:ring-offset-yellow-50",
                     ),
                     event.on_click(UserMessageDismissed(msg)),
                   ],
@@ -509,6 +494,22 @@ fn view_message(msg: UserMessage) -> Element(Msg) {
       )
     }
   }
+  // <div class="border-l-4 border-yellow-400 bg-yellow-50 p-4">
+  //   <div class="flex">
+  //     <div class="shrink-0">
+  //       <svg class="size-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-slot="icon">
+  //         <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495ZM10 5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 10 5Zm0 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
+  //       </svg>
+  //     </div>
+  //     <div class="ml-3">
+  //       <p class="text-sm text-yellow-700">
+  //         You have no credits left.
+  //         <a href="#" class="font-medium text-yellow-700 underline hover:text-yellow-600">Upgrade your account to add more credits.</a>
+  //       </p>
+  //     </div>
+  //   </div>
+  // </div>
+
   // <div class="rounded-md bg-green-50 p-4">
   //   <div class="flex">
   //     <div class="shrink-0">
@@ -583,7 +584,7 @@ fn view_article_listing(
             [html.text(article.title)],
           ),
         ]),
-        html.p([attribute.class("mt-1")], [html.text(article.summary)]),
+        html.p([attribute.class("mt-1")], [html.text(article.leading)]),
       ])
     })
 
@@ -594,20 +595,19 @@ fn view_article(article: article.Article) -> List(Element(msg)) {
   let content = case article.content {
     None -> [
       view_title(article.title),
-      view_subtitle(article.summary),
-      view_leading(article.summary),
+      view_subtitle(article.subtitle),
+      view_leading(article.leading),
       view_paragraph("failed to fetch article.."),
     ]
     Some(content) -> [
       view_title(article.title),
-      view_subtitle(article.summary),
-      view_leading(article.summary),
+      view_subtitle(article.subtitle),
+      view_leading(article.leading),
       ..article.view_article_content(
         view_h2,
-        view_h3,
-        view_h4,
+        view_h2,
+        view_h2,
         view_subtitle,
-        view_leading,
         view_paragraph,
         view_unknown,
         content,
@@ -656,32 +656,32 @@ fn view_title(title: String) -> Element(msg) {
   ])
 }
 
-fn view_h2(title: String) -> Element(msg) {
-  html.h2([attribute.class("text-2xl text-zinc-600 font-light")], [
-    html.text(title),
-  ])
-}
-
-fn view_h3(title: String) -> Element(msg) {
-  html.h3([attribute.class("text-xl text-zinc-600 font-light")], [
-    html.text(title),
-  ])
-}
-
-fn view_h4(title: String) -> Element(msg) {
-  html.h4([attribute.class("text-lg text-zinc-600 font-light")], [
-    html.text(title),
-  ])
-}
-
 fn view_subtitle(title: String) -> Element(msg) {
-  html.h2([attribute.class("text-md text-zinc-600 font-light")], [
+  html.div([attribute.class("text-md text-zinc-500 font-light")], [
     html.text(title),
   ])
 }
 
 fn view_leading(text: String) -> Element(msg) {
-  html.p([attribute.class("font-bold pt-12")], [html.text(text)])
+  html.p([attribute.class("font-bold pt-8")], [html.text(text)])
+}
+
+fn view_h2(title: String) -> Element(msg) {
+  html.h2([attribute.class("text-2xl text-pink-600 font-light pt-16")], [
+    html.text(title),
+  ])
+}
+
+fn view_h3(title: String) -> Element(msg) {
+  html.h3([attribute.class("text-xl text-pink-600 font-light")], [
+    html.text(title),
+  ])
+}
+
+fn view_h4(title: String) -> Element(msg) {
+  html.h4([attribute.class("text-lg text-pink-600 font-light")], [
+    html.text(title),
+  ])
 }
 
 fn view_paragraph(text: String) -> Element(msg) {

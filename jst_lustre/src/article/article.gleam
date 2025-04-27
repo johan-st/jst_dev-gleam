@@ -10,7 +10,7 @@ pub type Article {
   Article(
     id: Int,
     title: String,
-    summary: String,
+    leading: String,
     subtitle: String,
     content: Option(List(Content)),
   )
@@ -20,7 +20,6 @@ pub type Content {
   Block(List(Content))
   Heading(String)
   Subtitle(String)
-  Leading(String)
   Paragraph(String)
   Unknown(String)
 }
@@ -32,7 +31,6 @@ pub fn view_article_content(
   view_h2: fn(String) -> Element(msg),
   view_h3: fn(String) -> Element(msg),
   view_h4: fn(String) -> Element(msg),
-  view_leading: fn(String) -> Element(msg),
   view_paragraph: fn(String) -> Element(msg),
   view_unknown: fn(String) -> Element(msg),
   contents: List(Content),
@@ -51,7 +49,7 @@ pub fn view_article_content(
       case content {
         Subtitle(text) -> view_subtitle(text)
         Heading(text) -> view_heading(text)
-        Leading(text) -> view_leading(text)
+        // Leading(text) -> view_leading(text)
         Paragraph(text) -> view_paragraph(text)
         Unknown(text) -> view_unknown(text)
         Block(_) -> view_unknown("Block")
@@ -85,10 +83,10 @@ fn content_decoder() -> decode.Decoder(Content) {
       use text <- decode.field("text", decode.string)
       decode.success(Heading(text))
     }
-    "leading" -> {
-      use text <- decode.field("text", decode.string)
-      decode.success(Leading(text))
-    }
+    // "leading" -> {
+    //   use text <- decode.field("text", decode.string)
+    //   decode.success(Leading(text))
+    // }
     "paragraph" -> {
       use text <- decode.field("text", decode.string)
       decode.success(Paragraph(text))
@@ -106,7 +104,7 @@ fn content_decoder() -> decode.Decoder(Content) {
 fn article_decoder() -> decode.Decoder(Article) {
   use id <- decode.field("id", decode.int)
   use title <- decode.field("title", decode.string)
-  use summary <- decode.field("summary", decode.string)
+  use leading <- decode.field("leading", decode.string)
   use subtitle <- decode.field("subtitle", decode.string)
   // use content <- decode.field(
   //   "content",
@@ -123,5 +121,5 @@ fn article_decoder() -> decode.Decoder(Article) {
     _ -> content
   }
   echo content
-  decode.success(Article(id:, title:, summary:, subtitle:, content:))
+  decode.success(Article(id:, title:, leading:, subtitle:, content:))
 }
