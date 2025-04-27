@@ -806,6 +806,33 @@ function reverse_and_prepend(loop$prefix, loop$suffix) {
 function reverse(list3) {
   return reverse_and_prepend(list3, toList([]));
 }
+function filter_loop(loop$list, loop$fun, loop$acc) {
+  while (true) {
+    let list3 = loop$list;
+    let fun = loop$fun;
+    let acc = loop$acc;
+    if (list3.hasLength(0)) {
+      return reverse(acc);
+    } else {
+      let first$1 = list3.head;
+      let rest$1 = list3.tail;
+      let _block;
+      let $ = fun(first$1);
+      if ($) {
+        _block = prepend(first$1, acc);
+      } else {
+        _block = acc;
+      }
+      let new_acc = _block;
+      loop$list = rest$1;
+      loop$fun = fun;
+      loop$acc = new_acc;
+    }
+  }
+}
+function filter(list3, predicate) {
+  return filter_loop(list3, predicate, toList([]));
+}
 function filter_map_loop(loop$list, loop$fun, loop$acc) {
   while (true) {
     let list3 = loop$list;
@@ -1223,6 +1250,20 @@ function sort(list3, compare3) {
     );
     return merge_all(sequences$1, new Ascending(), compare3);
   }
+}
+function reduce(list3, fun) {
+  if (list3.hasLength(0)) {
+    return new Error(void 0);
+  } else {
+    let first$1 = list3.head;
+    let rest$1 = list3.tail;
+    return new Ok(fold(rest$1, first$1, fun));
+  }
+}
+function last(list3) {
+  return reduce(list3, (_, elem) => {
+    return elem;
+  });
 }
 
 // build/dev/javascript/gleam_stdlib/gleam/result.mjs
@@ -3647,6 +3688,9 @@ function classes(names) {
     })()
   );
 }
+function id(name) {
+  return attribute("id", name);
+}
 function href(uri) {
   return attribute("href", uri);
 }
@@ -4935,9 +4979,9 @@ function expect_json(decoder, to_msg) {
 
 // build/dev/javascript/jst_lustre/article/article.mjs
 var Article = class extends CustomType {
-  constructor(id, title, summary, subtitle, content) {
+  constructor(id2, title, summary, subtitle, content) {
     super();
-    this.id = id;
+    this.id = id2;
     this.title = title;
     this.summary = summary;
     this.subtitle = subtitle;
@@ -5061,7 +5105,7 @@ function article_decoder() {
   return field(
     "id",
     int2,
-    (id) => {
+    (id2) => {
       return field(
         "title",
         string2,
@@ -5089,7 +5133,7 @@ function article_decoder() {
                       let content$1 = _block;
                       echo(content$1, "src\\article\\article.gleam", 125);
                       return success(
-                        new Article(id, title, summary, subtitle, content$1)
+                        new Article(id2, title, summary, subtitle, content$1)
                       );
                     }
                   );
@@ -5102,8 +5146,8 @@ function article_decoder() {
     }
   );
 }
-function get_article(msg, id) {
-  let url = "http://127.0.0.1:1234/priv/static/article_" + to_string(id) + ".json";
+function get_article(msg, id2) {
+  let url = "http://127.0.0.1:1234/priv/static/article_" + to_string(id2) + ".json";
   return get(url, expect_json(article_decoder(), msg));
 }
 function get_metadata_all(msg) {
@@ -5330,21 +5374,24 @@ var Model2 = class extends CustomType {
   }
 };
 var UserError = class extends CustomType {
-  constructor(x0) {
+  constructor(id2, text3) {
     super();
-    this[0] = x0;
+    this.id = id2;
+    this.text = text3;
   }
 };
 var UserWarning = class extends CustomType {
-  constructor(x0) {
+  constructor(id2, text3) {
     super();
-    this[0] = x0;
+    this.id = id2;
+    this.text = text3;
   }
 };
 var UserInfo = class extends CustomType {
-  constructor(x0) {
+  constructor(id2, text3) {
     super();
-    this[0] = x0;
+    this.id = id2;
+    this.text = text3;
   }
 };
 var Index = class extends CustomType {
@@ -5352,9 +5399,9 @@ var Index = class extends CustomType {
 var Articles = class extends CustomType {
 };
 var ArticleById = class extends CustomType {
-  constructor(id) {
+  constructor(id2) {
     super();
-    this.id = id;
+    this.id = id2;
   }
 };
 var About = class extends CustomType {
@@ -5421,6 +5468,12 @@ var GotArticleSummaries = class extends CustomType {
     this.result = result;
   }
 };
+var UserMessageDismissed = class extends CustomType {
+  constructor(msg) {
+    super();
+    this.msg = msg;
+  }
+};
 function parse_route(uri) {
   let $ = path_segments(uri.path);
   if ($.hasLength(0)) {
@@ -5463,10 +5516,10 @@ function href2(route) {
 }
 function effect_navigation(route) {
   if (route instanceof ArticleById) {
-    let id = route.id;
+    let id2 = route.id;
     return get_article((var0) => {
       return new GotArticle(var0);
-    }, id);
+    }, id2);
   } else {
     return none();
   }
@@ -5512,6 +5565,15 @@ function articles_update(old_articles, new_articles) {
   let _pipe$2 = from_list(_pipe$1);
   return merge(_pipe$2, old_articles);
 }
+function next_user_message_id(user_messages) {
+  let $ = last(user_messages);
+  if ($.isOk()) {
+    let msg = $[0];
+    return msg.id + 1;
+  } else {
+    return 0;
+  }
+}
 function update(model, msg) {
   if (msg instanceof UserNavigatedTo) {
     let route = msg.route;
@@ -5539,7 +5601,9 @@ function update(model, msg) {
     if (result.isOk()) {
       let user_messages = append(
         model.user_messages,
-        toList([new UserInfo("connected")])
+        toList([
+          new UserInfo(next_user_message_id(model.user_messages), "connected")
+        ])
       );
       return [
         (() => {
@@ -5551,7 +5615,12 @@ function update(model, msg) {
     } else {
       let user_messages = append(
         model.user_messages,
-        toList([new UserError("failed to connect")])
+        toList([
+          new UserError(
+            next_user_message_id(model.user_messages),
+            "failed to connect"
+          )
+        ])
       );
       return [
         (() => {
@@ -5565,7 +5634,12 @@ function update(model, msg) {
     let data = msg.data;
     let user_messages = append(
       model.user_messages,
-      toList([new UserInfo("ws msg: " + data)])
+      toList([
+        new UserInfo(
+          next_user_message_id(model.user_messages),
+          "ws msg: " + data
+        )
+      ])
     );
     return [
       (() => {
@@ -5578,7 +5652,12 @@ function update(model, msg) {
     let data = msg.data;
     let user_messages = append(
       model.user_messages,
-      toList([new UserWarning("ws closed: " + data)])
+      toList([
+        new UserWarning(
+          next_user_message_id(model.user_messages),
+          "ws closed: " + data
+        )
+      ])
     );
     return [
       (() => {
@@ -5591,7 +5670,12 @@ function update(model, msg) {
     let data = msg.data;
     let user_messages = append(
       model.user_messages,
-      toList([new UserError("ws error: " + data)])
+      toList([
+        new UserError(
+          next_user_message_id(model.user_messages),
+          "ws error: " + data
+        )
+      ])
     );
     return [
       (() => {
@@ -5604,7 +5688,12 @@ function update(model, msg) {
     let data = msg.data;
     let user_messages = append(
       model.user_messages,
-      toList([new UserInfo("ws open: " + data)])
+      toList([
+        new UserInfo(
+          next_user_message_id(model.user_messages),
+          "ws open: " + data
+        )
+      ])
     );
     return [
       (() => {
@@ -5630,7 +5719,9 @@ function update(model, msg) {
       let error_string = http_error(err);
       let user_messages = append(
         model.user_messages,
-        toList([new UserError(error_string)])
+        toList([
+          new UserError(next_user_message_id(model.user_messages), error_string)
+        ])
       );
       return [
         (() => {
@@ -5645,7 +5736,7 @@ function update(model, msg) {
     if (result.isOk()) {
       let article2 = result[0];
       let articles = insert(model.articles, article2.id, article2);
-      echo2(articles, "src\\jst_lustre.gleam", 195);
+      echo2(articles, "src\\jst_lustre.gleam", 224);
       return [
         (() => {
           let _record = model;
@@ -5656,11 +5747,16 @@ function update(model, msg) {
     } else {
       let err = result[0];
       let error_string = http_error(err);
-      echo2(err, "src\\jst_lustre.gleam", 200);
+      echo2(err, "src\\jst_lustre.gleam", 229);
       if (err instanceof JsonError && err[0] instanceof UnexpectedByte && err[0][0] === "") {
         let user_messages = append(
           model.user_messages,
-          toList([new UserError("Article content was not available")])
+          toList([
+            new UserError(
+              next_user_message_id(model.user_messages),
+              "Article content was not available"
+            )
+          ])
         );
         return [
           (() => {
@@ -5672,7 +5768,12 @@ function update(model, msg) {
       } else {
         let user_messages = append(
           model.user_messages,
-          toList([new UserError("unhandled error\n" + error_string)])
+          toList([
+            new UserError(
+              next_user_message_id(model.user_messages),
+              "unhandled error\n" + error_string
+            )
+          ])
         );
         return [
           (() => {
@@ -5685,9 +5786,21 @@ function update(model, msg) {
     }
   } else {
     let msg$1 = msg.msg;
-    echo2("msg dismissed", "src\\jst_lustre.gleam", 224);
-    echo2(msg$1, "src\\jst_lustre.gleam", 225);
-    return [model, none()];
+    echo2("msg dismissed", "src\\jst_lustre.gleam", 259);
+    echo2(msg$1, "src\\jst_lustre.gleam", 260);
+    let user_messages = filter(
+      model.user_messages,
+      (m) => {
+        return !isEqual(m, msg$1);
+      }
+    );
+    return [
+      (() => {
+        let _record = model;
+        return new Model2(_record.articles, _record.route, user_messages);
+      })(),
+      none()
+    ];
   }
 }
 function view_header_link(target, current, text3) {
@@ -5767,15 +5880,167 @@ function view_header(model) {
     ])
   );
 }
+function view_message(msg) {
+  if (msg instanceof UserError) {
+    let id2 = msg.id;
+    let msg_text = msg.text;
+    return div(
+      toList([
+        class$("rounded-md bg-green-50 p-4"),
+        id("user-message-" + to_string(id2))
+      ]),
+      toList([
+        div(
+          toList([class$("flex")]),
+          toList([
+            div(
+              toList([class$("shrink-0")]),
+              toList([text2("\u{1F44D}")])
+            ),
+            div(
+              toList([class$("ml-3")]),
+              toList([
+                p(
+                  toList([
+                    class$("text-sm font-medium text-green-800")
+                  ]),
+                  toList([text2(msg_text)])
+                )
+              ])
+            ),
+            div(
+              toList([class$("ml-auto pl-3")]),
+              toList([
+                div(
+                  toList([class$("-mx-1.5 -my-1.5")]),
+                  toList([
+                    button(
+                      toList([
+                        class$(
+                          "inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50"
+                        ),
+                        on_click(new UserMessageDismissed(msg))
+                      ]),
+                      toList([text2("Dismiss")])
+                    )
+                  ])
+                )
+              ])
+            )
+          ])
+        )
+      ])
+    );
+  } else if (msg instanceof UserWarning) {
+    let id2 = msg.id;
+    let msg_text = msg.text;
+    return div(
+      toList([
+        class$("rounded-md bg-green-50 p-4"),
+        id("user-message-" + to_string(id2))
+      ]),
+      toList([
+        div(
+          toList([class$("flex")]),
+          toList([
+            div(
+              toList([class$("shrink-0")]),
+              toList([text2("\u{1F44D}")])
+            ),
+            div(
+              toList([class$("ml-3")]),
+              toList([
+                p(
+                  toList([
+                    class$("text-sm font-medium text-green-800")
+                  ]),
+                  toList([text2(msg_text)])
+                )
+              ])
+            ),
+            div(
+              toList([class$("ml-auto pl-3")]),
+              toList([
+                div(
+                  toList([class$("-mx-1.5 -my-1.5")]),
+                  toList([
+                    button(
+                      toList([
+                        class$(
+                          "inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50"
+                        ),
+                        on_click(new UserMessageDismissed(msg))
+                      ]),
+                      toList([text2("Dismiss")])
+                    )
+                  ])
+                )
+              ])
+            )
+          ])
+        )
+      ])
+    );
+  } else {
+    let id2 = msg.id;
+    let msg_text = msg.text;
+    return div(
+      toList([
+        class$("rounded-md bg-green-50 p-4"),
+        id("user-message-" + to_string(id2))
+      ]),
+      toList([
+        div(
+          toList([class$("flex")]),
+          toList([
+            div(
+              toList([class$("shrink-0")]),
+              toList([text2("\u{1F44D}")])
+            ),
+            div(
+              toList([class$("ml-3")]),
+              toList([
+                p(
+                  toList([
+                    class$("text-sm font-medium text-green-800")
+                  ]),
+                  toList([text2(msg_text)])
+                )
+              ])
+            ),
+            div(
+              toList([class$("ml-auto pl-3")]),
+              toList([
+                div(
+                  toList([class$("-mx-1.5 -my-1.5")]),
+                  toList([
+                    button(
+                      toList([
+                        class$(
+                          "inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50"
+                        ),
+                        on_click(new UserMessageDismissed(msg))
+                      ]),
+                      toList([text2("Dismiss")])
+                    )
+                  ])
+                )
+              ])
+            )
+          ])
+        )
+      ])
+    );
+  }
+}
 function view_messages(msgs) {
-  throw makeError(
-    "todo",
-    "jst_lustre",
-    349,
-    "view_messages",
-    "`todo` expression evaluated. This code has not yet been implemented.",
-    {}
-  );
+  if (msgs.hasLength(0)) {
+    return toList([]);
+  } else {
+    let msg = msgs.head;
+    let msgs$1 = msgs.tail;
+    return prepend(view_message(msg), view_messages(msgs$1));
+  }
 }
 function view_title(title) {
   return h1(
@@ -5970,7 +6235,7 @@ function view(model) {
     ]),
     toList([
       view_header(model),
-      view_messages(model.user_messages),
+      div(toList([]), view_messages(model.user_messages)),
       main(
         toList([class$("px-10 py-4 max-w-screen-md mx-auto")]),
         (() => {
@@ -5980,8 +6245,8 @@ function view(model) {
           } else if ($ instanceof Articles) {
             return view_article_listing(model.articles);
           } else if ($ instanceof ArticleById) {
-            let id = $.id;
-            let article2 = map_get(model.articles, id);
+            let id2 = $.id;
+            let article2 = map_get(model.articles, id2);
             if (article2.isOk()) {
               let article$1 = article2[0];
               return view_article(article$1);

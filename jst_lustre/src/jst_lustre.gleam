@@ -39,9 +39,9 @@ type Model {
 }
 
 type UserMessage {
-  UserError(String)
-  UserWarning(String)
-  UserInfo(String)
+  UserError(id: Int, text: String)
+  UserWarning(id: Int, text: String)
+  UserInfo(id: Int, text: String)
 }
 
 type Route {
@@ -144,34 +144,61 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       case result {
         Ok(_) -> {
           let user_messages =
-            list.append(model.user_messages, [UserInfo("connected")])
+            list.append(model.user_messages, [
+              UserInfo(next_user_message_id(model.user_messages), "connected"),
+            ])
           #(Model(..model, user_messages:), effect.none())
         }
         Error(_) -> {
           let user_messages =
-            list.append(model.user_messages, [UserError("failed to connect")])
+            list.append(model.user_messages, [
+              UserError(
+                next_user_message_id(model.user_messages),
+                "failed to connect",
+              ),
+            ])
           #(Model(..model, user_messages:), effect.none())
         }
       }
     }
     WebsocketOnMessage(data:) -> {
       let user_messages =
-        list.append(model.user_messages, [UserInfo("ws msg: " <> data)])
+        list.append(model.user_messages, [
+          UserInfo(
+            next_user_message_id(model.user_messages),
+            "ws msg: " <> data,
+          ),
+        ])
       #(Model(..model, user_messages:), effect.none())
     }
     WebsocketOnClose(data:) -> {
       let user_messages =
-        list.append(model.user_messages, [UserWarning("ws closed: " <> data)])
+        list.append(model.user_messages, [
+          UserWarning(
+            next_user_message_id(model.user_messages),
+            "ws closed: " <> data,
+          ),
+        ])
       #(Model(..model, user_messages:), effect.none())
     }
     WebsocketOnError(data:) -> {
       let user_messages =
-        list.append(model.user_messages, [UserError("ws error: " <> data)])
+        list.append(model.user_messages, [
+          UserError(
+            next_user_message_id(model.user_messages),
+            "ws error: " <> data,
+          ),
+        ])
       #(Model(..model, user_messages:), effect.none())
     }
     WebsocketOnOpen(data:) -> {
       let user_messages =
-        list.append(model.user_messages, [UserInfo("ws open: " <> data)])
+        list.append(model.user_messages, [
+          UserInfo(
+            next_user_message_id(model.user_messages),
+            "ws open: " <> data,
+          ),
+        ])
       #(Model(..model, user_messages:), effect.none())
     }
     GotArticleSummaries(result:) -> {
@@ -183,7 +210,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         Error(err) -> {
           let error_string = error_string.http_error(err)
           let user_messages =
-            list.append(model.user_messages, [UserError(error_string)])
+            list.append(model.user_messages, [
+              UserError(next_user_message_id(model.user_messages), error_string),
+            ])
           #(Model(..model, user_messages:), effect.none())
         }
       }
@@ -202,7 +231,10 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             http.JsonError(json.UnexpectedByte("")) -> {
               let user_messages =
                 list.append(model.user_messages, [
-                  UserError("Article content was not available"),
+                  UserError(
+                    next_user_message_id(model.user_messages),
+                    "Article content was not available",
+                  ),
                 ])
               #(
                 Model(..model, user_messages:),
@@ -212,7 +244,10 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             _ -> {
               let user_messages =
                 list.append(model.user_messages, [
-                  UserError("unhandled error\n" <> error_string),
+                  UserError(
+                    next_user_message_id(model.user_messages),
+                    "unhandled error\n" <> error_string,
+                  ),
                 ])
               #(Model(..model, user_messages:), effect.none())
             }
@@ -223,7 +258,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     UserMessageDismissed(msg) -> {
       echo "msg dismissed"
       echo msg
-      #(model, effect.none())
+
+      let user_messages = list.filter(model.user_messages, fn(m) { m != msg })
+      #(Model(..model, user_messages:), effect.none())
     }
   }
 }
@@ -245,6 +282,13 @@ fn articles_update(
   |> dict.merge(old_articles)
 }
 
+fn next_user_message_id(user_messages: List(UserMessage)) -> Int {
+  case list.last(user_messages) {
+    Ok(msg) -> msg.id + 1
+    Error(_) -> 0
+  }
+}
+
 // VIEW ------------------------------------------------------------------------
 
 fn view(model: Model) -> Element(Msg) {
@@ -252,7 +296,7 @@ fn view(model: Model) -> Element(Msg) {
     [attribute.class("text-zinc-400 h-full w-full text-lg font-thin mx-auto")],
     [
       view_header(model),
-      view_messages(model.user_messages),
+      html.div([], view_messages(model.user_messages)),
       html.main([attribute.class("px-10 py-4 max-w-screen-md mx-auto")], {
         // Just like we would show different HTML based on some other state in the
         // model, we can also pattern match on our Route value to show different
@@ -346,7 +390,147 @@ fn view_header_link(
 // VIEW MESSAGES ---------------------------------------------------------------
 
 fn view_messages(msgs) {
-  todo
+  case msgs {
+    [] -> []
+    [msg, ..msgs] -> [view_message(msg), ..view_messages(msgs)]
+  }
+}
+
+fn view_message(msg: UserMessage) -> Element(Msg) {
+  case msg {
+    UserError(id, msg_text) -> {
+      html.div(
+        [
+          attribute.class("rounded-md bg-green-50 p-4"),
+          attribute.id("user-message-" <> int.to_string(id)),
+        ],
+        [
+          html.div([attribute.class("flex")], [
+            html.div([attribute.class("shrink-0")], [
+              // <svg class="size-5 text-green-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-slot="icon">
+              //   <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
+              // </svg>
+              html.text("👍"),
+            ]),
+            html.div([attribute.class("ml-3")], [
+              html.p([attribute.class("text-sm font-medium text-green-800")], [
+                html.text(msg_text),
+              ]),
+            ]),
+            html.div([attribute.class("ml-auto pl-3")], [
+              html.div([attribute.class("-mx-1.5 -my-1.5")], [
+                html.button(
+                  [
+                    attribute.class(
+                      "inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50",
+                    ),
+                    event.on_click(UserMessageDismissed(msg)),
+                  ],
+                  [html.text("Dismiss")],
+                ),
+              ]),
+            ]),
+          ]),
+        ],
+      )
+    }
+
+    UserWarning(id, msg_text) -> {
+      html.div(
+        [
+          attribute.class("rounded-md bg-green-50 p-4"),
+          attribute.id("user-message-" <> int.to_string(id)),
+        ],
+        [
+          html.div([attribute.class("flex")], [
+            html.div([attribute.class("shrink-0")], [
+              // <svg class="size-5 text-green-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-slot="icon">
+              //   <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
+              // </svg>
+              html.text("👍"),
+            ]),
+            html.div([attribute.class("ml-3")], [
+              html.p([attribute.class("text-sm font-medium text-green-800")], [
+                html.text(msg_text),
+              ]),
+            ]),
+            html.div([attribute.class("ml-auto pl-3")], [
+              html.div([attribute.class("-mx-1.5 -my-1.5")], [
+                html.button(
+                  [
+                    attribute.class(
+                      "inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50",
+                    ),
+                    event.on_click(UserMessageDismissed(msg)),
+                  ],
+                  [html.text("Dismiss")],
+                ),
+              ]),
+            ]),
+          ]),
+        ],
+      )
+    }
+
+    UserInfo(id, msg_text) -> {
+      html.div(
+        [
+          attribute.class("rounded-md bg-green-50 p-4"),
+          attribute.id("user-message-" <> int.to_string(id)),
+        ],
+        [
+          html.div([attribute.class("flex")], [
+            html.div([attribute.class("shrink-0")], [
+              // <svg class="size-5 text-green-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-slot="icon">
+              //   <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
+              // </svg>
+              html.text("👍"),
+            ]),
+            html.div([attribute.class("ml-3")], [
+              html.p([attribute.class("text-sm font-medium text-green-800")], [
+                html.text(msg_text),
+              ]),
+            ]),
+            html.div([attribute.class("ml-auto pl-3")], [
+              html.div([attribute.class("-mx-1.5 -my-1.5")], [
+                html.button(
+                  [
+                    attribute.class(
+                      "inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50",
+                    ),
+                    event.on_click(UserMessageDismissed(msg)),
+                  ],
+                  [html.text("Dismiss")],
+                ),
+              ]),
+            ]),
+          ]),
+        ],
+      )
+    }
+  }
+  // <div class="rounded-md bg-green-50 p-4">
+  //   <div class="flex">
+  //     <div class="shrink-0">
+  //       <svg class="size-5 text-green-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-slot="icon">
+  //         <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
+  //       </svg>
+  //     </div>
+  //     <div class="ml-3">
+  //       <p class="text-sm font-medium text-green-800">Successfully uploaded</p>
+  //     </div>
+  //     <div class="ml-auto pl-3">
+  //       <div class="-mx-1.5 -my-1.5">
+  //         <button type="button" class="inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50">
+  //           <span class="sr-only">Dismiss</span>
+  //           <svg class="size-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-slot="icon">
+  //             <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+  //           </svg>
+  //         </button>
+  //       </div>
+  //     </div>
+  //   </div>
+  // </div>
 }
 
 // VIEW PAGES ------------------------------------------------------------------
