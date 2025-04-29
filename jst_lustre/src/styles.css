@@ -9,14 +9,3 @@
     @apply text-zinc-400;
   }
 }
-
-@supports selector(:view-transition-name(article-content)) {
-  @layer view-transition {
-    .with-transition .article-title {
-      view-transition-name: article-title;
-    }
-    .with-transition .article-subtitle {
-      view-transition-name: article-subtitle;
-    }
-  }
-}
