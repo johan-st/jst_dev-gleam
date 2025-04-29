@@ -8,13 +8,13 @@
     {
         "id": 2,
         "title": "title missing article",
-        "subtitle": "subtitle missing article",
-        "leading": "leading missing article"
+        "subtitle": "..or, how to not be there",
+        "leading": "This article is missing altoghether... Triggering an error "
     },
     {
         "id": 3,
         "title": "unsupported format",
-        "subtitle": "subtitle unsupported format",
-        "leading": "leading unsupported format"
+        "subtitle": "..or, dealing with the unknown",
+        "leading": "This article contains unsuportent content types"
     }
 ]

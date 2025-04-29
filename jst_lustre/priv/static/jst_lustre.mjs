@@ -640,6 +640,33 @@ function makeError(variant, module, line, fn, message, extra) {
   return error;
 }
 
+// build/dev/javascript/gleam_javascript/gleam_javascript_ffi.mjs
+var PromiseLayer = class _PromiseLayer {
+  constructor(promise) {
+    this.promise = promise;
+  }
+  static wrap(value) {
+    return value instanceof Promise ? new _PromiseLayer(value) : value;
+  }
+  static unwrap(value) {
+    return value instanceof _PromiseLayer ? value.promise : value;
+  }
+};
+function resolve(value) {
+  return Promise.resolve(PromiseLayer.wrap(value));
+}
+function then_await(promise, fn) {
+  return promise.then((value) => fn(PromiseLayer.unwrap(value)));
+}
+function map_promise(promise, fn) {
+  return promise.then(
+    (value) => PromiseLayer.wrap(fn(PromiseLayer.unwrap(value)))
+  );
+}
+function rescue(promise, fn) {
+  return promise.catch((error) => fn(error));
+}
+
 // build/dev/javascript/gleam_stdlib/gleam/order.mjs
 var Lt = class extends CustomType {
 };
@@ -786,7 +813,7 @@ function length_loop(loop$list, loop$count) {
     }
   }
 }
-function length(list3) {
+function length2(list3) {
   return length_loop(list3, 0);
 }
 function reverse_and_prepend(loop$prefix, loop$suffix) {
@@ -877,7 +904,7 @@ function map_loop(loop$list, loop$fun, loop$acc) {
     }
   }
 }
-function map(list3, fun) {
+function map2(list3, fun) {
   return map_loop(list3, fun, toList([]));
 }
 function append_loop(loop$first, loop$second) {
@@ -1251,7 +1278,7 @@ function sort(list3, compare3) {
     return merge_all(sequences$1, new Ascending(), compare3);
   }
 }
-function reduce(list3, fun) {
+function reduce2(list3, fun) {
   if (list3.hasLength(0)) {
     return new Error(void 0);
   } else {
@@ -1261,7 +1288,7 @@ function reduce(list3, fun) {
   }
 }
 function last(list3) {
-  return reduce(list3, (_, elem) => {
+  return reduce2(list3, (_, elem) => {
     return elem;
   });
 }
@@ -1420,7 +1447,7 @@ function bitcount(x) {
   x += x >> 16;
   return x & 127;
 }
-function index(bitmap, bit) {
+function index2(bitmap, bit) {
   return bitcount(bitmap & bit - 1);
 }
 function cloneAndSet(arr, at, val) {
@@ -1541,7 +1568,7 @@ function assocArray(root, shift, hash, key, val, addedLeaf) {
 }
 function assocIndex(root, shift, hash, key, val, addedLeaf) {
   const bit = bitpos(hash, shift);
-  const idx = index(root.bitmap, bit);
+  const idx = index2(root.bitmap, bit);
   if ((root.bitmap & bit) !== 0) {
     const node = root.array[idx];
     if (node.type !== ENTRY) {
@@ -1688,7 +1715,7 @@ function findIndex(root, shift, hash, key) {
   if ((root.bitmap & bit) === 0) {
     return void 0;
   }
-  const idx = index(root.bitmap, bit);
+  const idx = index2(root.bitmap, bit);
   const node = root.array[idx];
   if (node.type !== ENTRY) {
     return find(node, shift + SHIFT, hash, key);
@@ -1781,7 +1808,7 @@ function withoutIndex(root, shift, hash, key) {
   if ((root.bitmap & bit) === 0) {
     return root;
   }
-  const idx = index(root.bitmap, bit);
+  const idx = index2(root.bitmap, bit);
   const node = root.array[idx];
   if (node.type !== ENTRY) {
     const n = without(node, shift + SHIFT, hash, key);
@@ -2080,18 +2107,18 @@ var trim_end_regex = /* @__PURE__ */ new RegExp(`[${unicode_whitespaces}]*$`);
 function new_map() {
   return Dict.new();
 }
-function map_to_list(map7) {
-  return List.fromArray(map7.entries());
+function map_to_list(map8) {
+  return List.fromArray(map8.entries());
 }
-function map_get(map7, key) {
-  const value = map7.get(key, NOT_FOUND);
+function map_get(map8, key) {
+  const value = map8.get(key, NOT_FOUND);
   if (value === NOT_FOUND) {
     return new Error(Nil);
   }
   return new Ok(value);
 }
-function map_insert(key, value, map7) {
-  return map7.set(key, value);
+function map_insert(key, value, map8) {
+  return map8.set(key, value);
 }
 function classify_dynamic(data) {
   if (typeof data === "string") {
@@ -2206,12 +2233,12 @@ function split2(x, substring) {
     let _pipe = x;
     let _pipe$1 = identity(_pipe);
     let _pipe$2 = split(_pipe$1, substring);
-    return map(_pipe$2, identity);
+    return map2(_pipe$2, identity);
   }
 }
 
 // build/dev/javascript/gleam_stdlib/gleam_stdlib_decode_ffi.mjs
-function index2(data, key) {
+function index3(data, key) {
   if (data instanceof Dict || data instanceof WeakMap || data instanceof Map) {
     const token = {};
     const entry = data.get(key, token);
@@ -2265,11 +2292,11 @@ function is_null(data) {
 
 // build/dev/javascript/gleam_stdlib/gleam/dynamic/decode.mjs
 var DecodeError2 = class extends CustomType {
-  constructor(expected, found, path) {
+  constructor(expected, found, path2) {
     super();
     this.expected = expected;
     this.found = found;
-    this.path = path;
+    this.path = path2;
   }
 };
 var Decoder = class extends CustomType {
@@ -2293,7 +2320,7 @@ function success(data) {
     return [data, toList([])];
   });
 }
-function map3(decoder, transformer) {
+function map4(decoder, transformer) {
   return new Decoder(
     (d) => {
       let $ = decoder.function(d);
@@ -2391,18 +2418,18 @@ function list2(inner) {
     }
   );
 }
-function push_path(layer, path) {
+function push_path(layer, path2) {
   let decoder = one_of(
     string2,
     toList([
       (() => {
         let _pipe = int2;
-        return map3(_pipe, to_string);
+        return map4(_pipe, to_string);
       })()
     ])
   );
-  let path$1 = map(
-    path,
+  let path$1 = map2(
+    path2,
     (key) => {
       let key$1 = identity(key);
       let $ = run(key$1, decoder);
@@ -2414,7 +2441,7 @@ function push_path(layer, path) {
       }
     }
   );
-  let errors = map(
+  let errors = map2(
     layer[1],
     (error) => {
       let _record = error;
@@ -2427,20 +2454,20 @@ function push_path(layer, path) {
   );
   return [layer[0], errors];
 }
-function index3(loop$path, loop$position, loop$inner, loop$data, loop$handle_miss) {
+function index4(loop$path, loop$position, loop$inner, loop$data, loop$handle_miss) {
   while (true) {
-    let path = loop$path;
+    let path2 = loop$path;
     let position = loop$position;
     let inner = loop$inner;
     let data = loop$data;
     let handle_miss = loop$handle_miss;
-    if (path.hasLength(0)) {
+    if (path2.hasLength(0)) {
       let _pipe = inner(data);
       return push_path(_pipe, reverse(position));
     } else {
-      let key = path.head;
-      let path$1 = path.tail;
-      let $ = index2(data, key);
+      let key = path2.head;
+      let path$1 = path2.tail;
+      let $ = index3(data, key);
       if ($.isOk() && $[0] instanceof Some) {
         let data$1 = $[0][0];
         loop$path = path$1;
@@ -2466,7 +2493,7 @@ function index3(loop$path, loop$position, loop$inner, loop$data, loop$handle_mis
 function subfield(field_path, field_decoder, next) {
   return new Decoder(
     (data) => {
-      let $ = index3(
+      let $ = index4(
         field_path,
         toList([]),
         field_decoder.function,
@@ -2497,7 +2524,7 @@ function optional_field(key, default$, field_decoder, next) {
   return new Decoder(
     (data) => {
       let _block$1;
-      let $1 = index2(data, key);
+      let $1 = index3(data, key);
       if ($1.isOk() && $1[0] instanceof Some) {
         let data$1 = $1[0][0];
         _block$1 = field_decoder.function(data$1);
@@ -2651,13 +2678,13 @@ function parse(json, decoder) {
 
 // build/dev/javascript/gleam_stdlib/gleam/uri.mjs
 var Uri = class extends CustomType {
-  constructor(scheme, userinfo, host, port, path, query, fragment) {
+  constructor(scheme, userinfo, host, port, path2, query, fragment) {
     super();
     this.scheme = scheme;
     this.userinfo = userinfo;
     this.host = host;
     this.port = port;
-    this.path = path;
+    this.path = path2;
     this.query = query;
     this.fragment = fragment;
   }
@@ -2742,7 +2769,7 @@ function parse_path_loop(loop$original, loop$uri_string, loop$pieces, loop$size)
     let size = loop$size;
     if (uri_string.startsWith("?")) {
       let rest = uri_string.slice(1);
-      let path = string_codeunit_slice(original, 0, size);
+      let path2 = string_codeunit_slice(original, 0, size);
       let _block;
       let _record = pieces;
       _block = new Uri(
@@ -2750,7 +2777,7 @@ function parse_path_loop(loop$original, loop$uri_string, loop$pieces, loop$size)
         _record.userinfo,
         _record.host,
         _record.port,
-        path,
+        path2,
         _record.query,
         _record.fragment
       );
@@ -2758,7 +2785,7 @@ function parse_path_loop(loop$original, loop$uri_string, loop$pieces, loop$size)
       return parse_query_with_question_mark(rest, pieces$1);
     } else if (uri_string.startsWith("#")) {
       let rest = uri_string.slice(1);
-      let path = string_codeunit_slice(original, 0, size);
+      let path2 = string_codeunit_slice(original, 0, size);
       let _block;
       let _record = pieces;
       _block = new Uri(
@@ -2766,7 +2793,7 @@ function parse_path_loop(loop$original, loop$uri_string, loop$pieces, loop$size)
         _record.userinfo,
         _record.host,
         _record.port,
-        path,
+        path2,
         _record.query,
         _record.fragment
       );
@@ -3425,8 +3452,8 @@ function remove_dot_segments_loop(loop$input, loop$accumulator) {
 function remove_dot_segments(input) {
   return remove_dot_segments_loop(input, toList([]));
 }
-function path_segments(path) {
-  return remove_dot_segments(split2(path, "/"));
+function path_segments(path2) {
+  return remove_dot_segments(split2(path2, "/"));
 }
 function to_string2(uri) {
   let _block;
@@ -3531,6 +3558,15 @@ var Effect = class extends CustomType {
     this.all = all;
   }
 };
+var Actions = class extends CustomType {
+  constructor(dispatch, emit2, select, root) {
+    super();
+    this.dispatch = dispatch;
+    this.emit = emit2;
+    this.select = select;
+    this.root = root;
+  }
+};
 function custom(run2) {
   return new Effect(
     toList([
@@ -3560,6 +3596,29 @@ function batch(effects) {
     )
   );
 }
+function map5(effect, f) {
+  return new Effect(
+    map2(
+      effect.all,
+      (eff) => {
+        return (actions) => {
+          return eff(
+            new Actions(
+              (msg) => {
+                return actions.dispatch(f(msg));
+              },
+              actions.emit,
+              (_) => {
+                return void 0;
+              },
+              actions.root
+            )
+          );
+        };
+      }
+    )
+  );
+}
 
 // build/dev/javascript/lustre/lustre/internals/vdom.mjs
 var Text = class extends CustomType {
@@ -3569,10 +3628,10 @@ var Text = class extends CustomType {
   }
 };
 var Element = class extends CustomType {
-  constructor(key, namespace, tag, attrs, children2, self_closing, void$) {
+  constructor(key, namespace2, tag, attrs, children2, self_closing, void$) {
     super();
     this.key = key;
-    this.namespace = namespace;
+    this.namespace = namespace2;
     this.tag = tag;
     this.attrs = attrs;
     this.children = children2;
@@ -3691,6 +3750,9 @@ function classes(names) {
 function id(name) {
   return attribute("id", name);
 }
+function role(name) {
+  return attribute("role", name);
+}
 function href(uri) {
   return attribute("href", uri);
 }
@@ -3728,6 +3790,9 @@ function element(tag, attrs, children2) {
   } else {
     return new Element("", "", tag, attrs, children2, false, false);
   }
+}
+function namespaced(namespace2, tag, attrs, children2) {
+  return new Element("", namespace2, tag, attrs, children2, false, false);
 }
 function text(content) {
   return new Text(content);
@@ -3882,9 +3947,9 @@ function morph(prev, next, dispatch) {
   return out;
 }
 function createElementNode({ prev, next, dispatch, stack }) {
-  const namespace = next.namespace || "http://www.w3.org/1999/xhtml";
+  const namespace2 = next.namespace || "http://www.w3.org/1999/xhtml";
   const canMorph = prev && prev.nodeType === Node.ELEMENT_NODE && prev.localName === next.tag && prev.namespaceURI === (next.namespace || "http://www.w3.org/1999/xhtml");
-  const el = canMorph ? prev : namespace ? document.createElementNS(namespace, next.tag) : document.createElement(next.tag);
+  const el = canMorph ? prev : namespace2 ? document.createElementNS(namespace2, next.tag) : document.createElement(next.tag);
   let handlersForEl;
   if (!registeredHandlers.has(el)) {
     const emptyHandlers = /* @__PURE__ */ new Map();
@@ -4042,14 +4107,14 @@ function lustreServerEventHandler(event2) {
     tag,
     data: include.reduce(
       (data2, property) => {
-        const path = property.split(".");
-        for (let i = 0, o = data2, e = event2; i < path.length; i++) {
-          if (i === path.length - 1) {
-            o[path[i]] = e[path[i]];
+        const path2 = property.split(".");
+        for (let i = 0, o = data2, e = event2; i < path2.length; i++) {
+          if (i === path2.length - 1) {
+            o[path2[i]] = e[path2[i]];
           } else {
-            o[path[i]] ??= {};
-            e = e[path[i]];
-            o = o[path[i]];
+            o[path2[i]] ??= {};
+            e = e[path2[i]];
+            o = o[path2[i]];
           }
         }
         return data2;
@@ -4132,11 +4197,11 @@ var LustreClientApplication = class _LustreClientApplication {
    *
    * @returns {Gleam.Ok<(action: Lustre.Action<Lustre.Client, Msg>>) => void>}
    */
-  static start({ init: init4, update: update2, view: view2 }, selector, flags) {
+  static start({ init: init5, update: update3, view: view3 }, selector, flags) {
     if (!is_browser()) return new Error(new NotABrowser());
     const root = selector instanceof HTMLElement ? selector : document.querySelector(selector);
     if (!root) return new Error(new ElementNotFound(selector));
-    const app = new _LustreClientApplication(root, init4(flags), update2, view2);
+    const app = new _LustreClientApplication(root, init5(flags), update3, view3);
     return new Ok((action) => app.send(action));
   }
   /**
@@ -4147,11 +4212,11 @@ var LustreClientApplication = class _LustreClientApplication {
    *
    * @returns {LustreClientApplication}
    */
-  constructor(root, [init4, effects], update2, view2) {
+  constructor(root, [init5, effects], update3, view3) {
     this.root = root;
-    this.#model = init4;
-    this.#update = update2;
-    this.#view = view2;
+    this.#model = init5;
+    this.#update = update3;
+    this.#view = view3;
     this.#tickScheduled = window.setTimeout(
       () => this.#tick(effects.all.toArray(), true),
       0
@@ -4266,20 +4331,20 @@ var LustreClientApplication = class _LustreClientApplication {
 };
 var start = LustreClientApplication.start;
 var LustreServerApplication = class _LustreServerApplication {
-  static start({ init: init4, update: update2, view: view2, on_attribute_change }, flags) {
+  static start({ init: init5, update: update3, view: view3, on_attribute_change }, flags) {
     const app = new _LustreServerApplication(
-      init4(flags),
-      update2,
-      view2,
+      init5(flags),
+      update3,
+      view3,
       on_attribute_change
     );
     return new Ok((action) => app.send(action));
   }
-  constructor([model, effects], update2, view2, on_attribute_change) {
+  constructor([model, effects], update3, view3, on_attribute_change) {
     this.#model = model;
-    this.#update = update2;
-    this.#view = view2;
-    this.#html = view2(model);
+    this.#update = update3;
+    this.#view = view3;
+    this.#html = view3(model);
     this.#onAttributeChange = on_attribute_change;
     this.#renderers = /* @__PURE__ */ new Map();
     this.#handlers = handlers(this.#html);
@@ -4376,11 +4441,11 @@ var is_browser = () => globalThis.window && window.document;
 
 // build/dev/javascript/lustre/lustre.mjs
 var App = class extends CustomType {
-  constructor(init4, update2, view2, on_attribute_change) {
+  constructor(init5, update3, view3, on_attribute_change) {
     super();
-    this.init = init4;
-    this.update = update2;
-    this.view = view2;
+    this.init = init5;
+    this.update = update3;
+    this.view = view3;
     this.on_attribute_change = on_attribute_change;
   }
 };
@@ -4392,8 +4457,8 @@ var ElementNotFound = class extends CustomType {
 };
 var NotABrowser = class extends CustomType {
 };
-function application(init4, update2, view2) {
-  return new App(init4, update2, view2, new None());
+function application(init5, update3, view3) {
+  return new App(init5, update3, view3, new None());
 }
 function start2(app, selector, flags) {
   return guard(
@@ -4441,6 +4506,15 @@ function ul(attrs, children2) {
 }
 function a(attrs, children2) {
   return element("a", attrs, children2);
+}
+function span(attrs, children2) {
+  return element("span", attrs, children2);
+}
+function img(attrs) {
+  return element("img", attrs, toList([]));
+}
+function svg(attrs, children2) {
+  return namespaced("http://www.w3.org/2000/svg", "svg", attrs, children2);
 }
 function button(attrs, children2) {
   return element("button", attrs, children2);
@@ -4577,7 +4651,7 @@ var relative = /* @__PURE__ */ new Uri(
   /* @__PURE__ */ new None(),
   /* @__PURE__ */ new None()
 );
-function replace2(path, query, fragment) {
+function replace2(path2, query, fragment) {
   return from(
     (_) => {
       return guard(
@@ -4592,7 +4666,7 @@ function replace2(path, query, fragment) {
                 _record.userinfo,
                 _record.host,
                 _record.port,
-                path,
+                path2,
                 query,
                 fragment
               );
@@ -4671,7 +4745,7 @@ function scheme_from_string(scheme) {
 
 // build/dev/javascript/gleam_http/gleam/http/request.mjs
 var Request = class extends CustomType {
-  constructor(method, headers, body, scheme, host, port, path, query) {
+  constructor(method, headers, body, scheme, host, port, path2, query) {
     super();
     this.method = method;
     this.headers = headers;
@@ -4679,7 +4753,7 @@ var Request = class extends CustomType {
     this.scheme = scheme;
     this.host = host;
     this.port = port;
-    this.path = path;
+    this.path = path2;
     this.query = query;
   }
 };
@@ -4739,33 +4813,6 @@ var Response = class extends CustomType {
     this.body = body;
   }
 };
-
-// build/dev/javascript/gleam_javascript/gleam_javascript_ffi.mjs
-var PromiseLayer = class _PromiseLayer {
-  constructor(promise) {
-    this.promise = promise;
-  }
-  static wrap(value) {
-    return value instanceof Promise ? new _PromiseLayer(value) : value;
-  }
-  static unwrap(value) {
-    return value instanceof _PromiseLayer ? value.promise : value;
-  }
-};
-function resolve(value) {
-  return Promise.resolve(PromiseLayer.wrap(value));
-}
-function then_await(promise, fn) {
-  return promise.then((value) => fn(PromiseLayer.unwrap(value)));
-}
-function map_promise(promise, fn) {
-  return promise.then(
-    (value) => PromiseLayer.wrap(fn(PromiseLayer.unwrap(value)))
-  );
-}
-function rescue(promise, fn) {
-  return promise.catch((error) => fn(error));
-}
 
 // build/dev/javascript/gleam_javascript/gleam/javascript/promise.mjs
 function tap(promise, callback) {
@@ -5012,7 +5059,7 @@ var Unknown = class extends CustomType {
 function view_article_content(view_subtitle2, view_h22, view_h3, view_h4, view_paragraph2, view_unknown2, contents) {
   let view_block = (contents2, current_level) => {
     let _pipe = contents2;
-    return map(
+    return map2(
       _pipe,
       (content) => {
         let _block;
@@ -5103,7 +5150,6 @@ function article_decoder() {
                     new None(),
                     optional(list2(content_decoder())),
                     (content) => {
-                      echo(content, "src\\article\\article.gleam", 118);
                       let _block;
                       if (content instanceof Some && content[0].hasLength(0)) {
                         _block = new None();
@@ -5111,7 +5157,6 @@ function article_decoder() {
                         _block = content;
                       }
                       let content$1 = _block;
-                      echo(content$1, "src\\article\\article.gleam", 123);
                       return success(
                         new Article(id2, title, leading, subtitle, content$1)
                       );
@@ -5133,6 +5178,529 @@ function get_article(msg, id2) {
 function get_metadata_all(msg) {
   let url = "http://127.0.0.1:1234/priv/static/articles.json";
   return get(url, expect_json(list2(article_decoder()), msg));
+}
+
+// build/dev/javascript/lustre/lustre/element/svg.mjs
+var namespace = "http://www.w3.org/2000/svg";
+function path(attrs) {
+  return namespaced(namespace, "path", attrs, toList([]));
+}
+
+// build/dev/javascript/jst_lustre/chat/chat.mjs
+var Model2 = class extends CustomType {
+  constructor(messages, is_open, contacts) {
+    super();
+    this.messages = messages;
+    this.is_open = is_open;
+    this.contacts = contacts;
+  }
+};
+var ChatMsg = class extends CustomType {
+  constructor(id2, sender, content, image) {
+    super();
+    this.id = id2;
+    this.sender = sender;
+    this.content = content;
+    this.image = image;
+  }
+};
+var Contact = class extends CustomType {
+  constructor(id2, name, status, image, username) {
+    super();
+    this.id = id2;
+    this.name = name;
+    this.status = status;
+    this.image = image;
+    this.username = username;
+  }
+};
+var CloseChat = class extends CustomType {
+};
+var OpenChat = class extends CustomType {
+};
+function init3() {
+  let model = new Model2(
+    toList([
+      new ChatMsg(1, "User", "Hello, how are you?", ""),
+      new ChatMsg(2, "Assistant", "I'm fine, thank you!", "")
+    ]),
+    false,
+    toList([
+      new Contact(
+        1,
+        "John Doe",
+        true,
+        "https://images.unsplash.com/photo-1519244703995-f4e0f30006d5?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80",
+        "@john_doe"
+      ),
+      new Contact(
+        2,
+        "Jane Smith",
+        false,
+        "https://images.unsplash.com/photo-1494790108377-be9c29b29330?ixlib=rb-1.2.1&ixid=eyJhcHBfaWQiOjEyMDd9&auto=format&fit=facearea&facepad=2&w=256&h=256&q=80",
+        "@jane_smith"
+      )
+    ])
+  );
+  return [model, none()];
+}
+function update(msg, model) {
+  echo(msg, "src\\chat\\chat.gleam", 74);
+  echo(model, "src\\chat\\chat.gleam", 75);
+  if (msg instanceof CloseChat) {
+    return [
+      (() => {
+        let _record = model;
+        return new Model2(_record.messages, false, _record.contacts);
+      })(),
+      none()
+    ];
+  } else if (msg instanceof OpenChat) {
+    return [
+      (() => {
+        let _record = model;
+        return new Model2(_record.messages, true, _record.contacts);
+      })(),
+      none()
+    ];
+  } else {
+    echo(msg, "src\\chat\\chat.gleam", 84);
+    throw makeError(
+      "todo",
+      "chat/chat",
+      85,
+      "update",
+      "chat.Msg not implemented",
+      {}
+    );
+  }
+}
+function view_open_button(msg) {
+  return button(
+    toList([
+      class$(
+        "w-16 h-16 rounded-full fixed bottom-2 right-2 bg-zinc-800 grid grid-cols-1 place-content-center shadow-lg w-max-content mx-auto text-zinc-400 font-mono font-normal"
+      ),
+      on_click(msg(new OpenChat()))
+    ]),
+    toList([text2("Talk")])
+  );
+}
+function view_contact(msg, contact) {
+  return li(
+    toList([]),
+    toList([
+      div(
+        toList([class$("group relative flex items-center px-5 py-6")]),
+        toList([
+          a(
+            toList([class$("-m-1 block flex-1 p-1")]),
+            toList([
+              div(
+                toList([
+                  class$("absolute inset-0 group-hover:bg-gray-50")
+                ]),
+                toList([])
+              ),
+              div(
+                toList([
+                  class$("relative flex min-w-0 flex-1 items-center")
+                ]),
+                toList([
+                  span(
+                    toList([class$("relative inline-block shrink-0")]),
+                    toList([
+                      img(
+                        toList([
+                          class$("size-10 rounded-full"),
+                          attribute("src", contact.image),
+                          attribute("alt", "persona")
+                        ])
+                      ),
+                      span(
+                        toList([
+                          class$(
+                            "absolute right-0 top-0 block size-2.5 rounded-full ring-2 ring-white"
+                          ),
+                          classes(
+                            toList([
+                              ["bg-green-400", contact.status],
+                              ["bg-gray-300", !contact.status]
+                            ])
+                          ),
+                          attribute("aria-hidden", "true")
+                        ]),
+                        toList([])
+                      )
+                    ])
+                  ),
+                  div(
+                    toList([class$("ml-4 truncate")]),
+                    toList([
+                      p(
+                        toList([
+                          class$(
+                            "truncate text-sm font-medium text-gray-900"
+                          )
+                        ]),
+                        toList([text2(contact.name)])
+                      ),
+                      p(
+                        toList([
+                          class$("truncate text-sm text-gray-500")
+                        ]),
+                        toList([text2(contact.username)])
+                      )
+                    ])
+                  )
+                ])
+              )
+            ])
+          ),
+          div(
+            toList([
+              class$("relative ml-2 inline-block shrink-0 text-left")
+            ]),
+            toList([
+              button(
+                toList([
+                  class$(
+                    "group relative inline-flex size-8 items-center justify-center rounded-full bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                  ),
+                  id("options-menu-0-button"),
+                  attribute("aria-expanded", "false"),
+                  attribute("aria-haspopup", "true")
+                ]),
+                toList([
+                  span(
+                    toList([class$("absolute -inset-1.5")]),
+                    toList([])
+                  ),
+                  span(
+                    toList([class$("sr-only")]),
+                    toList([text2("Open options menu")])
+                  ),
+                  span(
+                    toList([
+                      class$(
+                        "flex size-full items-center justify-center rounded-full"
+                      )
+                    ]),
+                    toList([
+                      svg(
+                        toList([
+                          class$(
+                            "size-5 text-gray-400 group-hover:text-gray-500"
+                          ),
+                          attribute("viewBox", "0 0 20 20"),
+                          attribute("fill", "currentColor"),
+                          attribute("aria-hidden", "true"),
+                          attribute("data-slot", "icon")
+                        ]),
+                        toList([
+                          path(
+                            toList([
+                              attribute(
+                                "d",
+                                "M10 3a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM10 8.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM11.5 15.5a1.5 1.5 0 1 0-3 0 1.5 1.5 0 0 0 3 0Z"
+                              )
+                            ])
+                          )
+                        ])
+                      )
+                    ])
+                  )
+                ])
+              ),
+              div(
+                toList([
+                  class$(
+                    "absolute right-9 top-0 z-10 w-48 origin-top-right rounded-md bg-white shadow-lg ring-1 ring-black/5 focus:outline-none"
+                  ),
+                  attribute("role", "menu"),
+                  attribute("aria-orientation", "vertical"),
+                  attribute(
+                    "aria-labelledby",
+                    "options-menu-0-button"
+                  ),
+                  attribute("tabindex", "-1")
+                ]),
+                toList([
+                  div(
+                    toList([
+                      class$("py-1"),
+                      attribute("role", "none")
+                    ]),
+                    toList([
+                      a(
+                        toList([
+                          class$(
+                            "block px-4 py-2 text-sm text-gray-700"
+                          ),
+                          attribute("role", "menuitem"),
+                          attribute("tabindex", "-1"),
+                          attribute("id", "options-menu-0-item-0")
+                        ]),
+                        toList([text2("View profile")])
+                      ),
+                      a(
+                        toList([
+                          class$(
+                            "block px-4 py-2 text-sm text-gray-700"
+                          ),
+                          attribute("role", "menuitem"),
+                          attribute("tabindex", "-1"),
+                          attribute("id", "options-menu-0-item-1")
+                        ]),
+                        toList([text2("Send message")])
+                      )
+                    ])
+                  )
+                ])
+              )
+            ])
+          )
+        ])
+      )
+    ])
+  );
+}
+function view_contacts(msg, model) {
+  return ul(
+    toList([
+      class$("flex-1 divide-y divide-gray-200 overflow-y-auto"),
+      attribute("role", "list")
+    ]),
+    (() => {
+      let _pipe = model.contacts;
+      return map2(
+        _pipe,
+        (contact) => {
+          return view_contact(msg, contact);
+        }
+      );
+    })()
+  );
+}
+function view(msg, model) {
+  return toList([
+    view_open_button(msg),
+    div(
+      toList([
+        class$("relative z-10"),
+        classes(toList([["pointer-events-none", !model.is_open]])),
+        role("dialog"),
+        attribute("aria-labelledby", "slide-over-title"),
+        attribute("aria-modal", "true"),
+        on_click(msg(new CloseChat()))
+      ]),
+      toList([
+        div(
+          toList([
+            class$("fixed inset-0"),
+            classes(toList([["hidden", !model.is_open]]))
+          ]),
+          toList([])
+        ),
+        div(
+          toList([class$("fixed inset-0 overflow-hidden")]),
+          toList([
+            div(
+              toList([class$("absolute inset-0 overflow-hidden")]),
+              toList([
+                div(
+                  toList([
+                    class$(
+                      "pointer-events-none fixed inset-y-0 right-0 flex max-w-full pl-10 sm:pl-16"
+                    )
+                  ]),
+                  toList([
+                    div(
+                      toList([
+                        class$(
+                          "pointer-events-auto w-screen max-w-md transform transition ease-in-out duration-500 sm:duration-700"
+                        ),
+                        classes(
+                          toList([
+                            ["translate-x-full", !model.is_open],
+                            ["translate-x-0", model.is_open]
+                          ])
+                        )
+                      ]),
+                      toList([
+                        div(
+                          toList([
+                            class$(
+                              "flex h-full flex-col overflow-y-scroll bg-white shadow-xl"
+                            )
+                          ]),
+                          toList([
+                            div(
+                              toList([class$("p-6")]),
+                              toList([
+                                div(
+                                  toList([
+                                    class$(
+                                      "flex items-start justify-between"
+                                    )
+                                  ]),
+                                  toList([
+                                    h2(
+                                      toList([
+                                        class$(
+                                          "text-base font-semibold text-gray-900"
+                                        )
+                                      ]),
+                                      toList([text2("Team")])
+                                    ),
+                                    div(
+                                      toList([
+                                        class$(
+                                          "ml-3 flex h-7 items-center"
+                                        )
+                                      ]),
+                                      toList([
+                                        button(
+                                          toList([
+                                            class$(
+                                              "relative rounded-md bg-white text-gray-400 hover:text-gray-500 focus:ring-2 focus:ring-indigo-500"
+                                            ),
+                                            on_click(
+                                              msg(new CloseChat())
+                                            )
+                                          ]),
+                                          toList([
+                                            span(
+                                              toList([
+                                                class$(
+                                                  "absolute -inset-2.5"
+                                                )
+                                              ]),
+                                              toList([])
+                                            ),
+                                            span(
+                                              toList([
+                                                class$("sr-only")
+                                              ]),
+                                              toList([text2("Close panel")])
+                                            ),
+                                            svg(
+                                              toList([
+                                                class$("size-6"),
+                                                attribute(
+                                                  "fill",
+                                                  "none"
+                                                ),
+                                                attribute(
+                                                  "viewBox",
+                                                  "0 0 24 24"
+                                                ),
+                                                attribute(
+                                                  "stroke-width",
+                                                  "1.5"
+                                                ),
+                                                attribute(
+                                                  "stroke",
+                                                  "currentColor"
+                                                ),
+                                                attribute(
+                                                  "aria-hidden",
+                                                  "true"
+                                                ),
+                                                attribute(
+                                                  "data-slot",
+                                                  "icon"
+                                                )
+                                              ]),
+                                              toList([
+                                                path(
+                                                  toList([
+                                                    attribute(
+                                                      "stroke-linecap",
+                                                      "round"
+                                                    ),
+                                                    attribute(
+                                                      "stroke-linejoin",
+                                                      "round"
+                                                    ),
+                                                    attribute(
+                                                      "d",
+                                                      "M6 18 18 6M6 6l12 12"
+                                                    )
+                                                  ])
+                                                )
+                                              ])
+                                            )
+                                          ])
+                                        )
+                                      ])
+                                    )
+                                  ])
+                                )
+                              ])
+                            ),
+                            div(
+                              toList([
+                                class$("border-b border-gray-200")
+                              ]),
+                              toList([
+                                div(
+                                  toList([class$("px-6")]),
+                                  toList([
+                                    nav(
+                                      toList([
+                                        class$(
+                                          "-mb-px flex space-x-6"
+                                        )
+                                      ]),
+                                      toList([
+                                        a(
+                                          toList([
+                                            class$(
+                                              "border-indigo-500 text-indigo-600"
+                                            ),
+                                            attribute("href", "#")
+                                          ]),
+                                          toList([text2("All")])
+                                        ),
+                                        a(
+                                          toList([
+                                            class$(
+                                              "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                                            ),
+                                            attribute("href", "#")
+                                          ]),
+                                          toList([text2("Online")])
+                                        ),
+                                        a(
+                                          toList([
+                                            class$(
+                                              "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                                            ),
+                                            attribute("href", "#")
+                                          ]),
+                                          toList([text2("Offline")])
+                                        )
+                                      ])
+                                    )
+                                  ])
+                                )
+                              ])
+                            ),
+                            view_contacts(msg, model)
+                          ])
+                        )
+                      ])
+                    )
+                  ])
+                )
+              ])
+            )
+          ])
+        )
+      ])
+    )
+  ]);
 }
 function echo(value, file, line) {
   const grey = "\x1B[90m";
@@ -5175,11 +5743,11 @@ function echo$inspectString(str) {
   new_str += '"';
   return new_str;
 }
-function echo$inspectDict(map7) {
+function echo$inspectDict(map8) {
   let body = "dict.from_list([";
   let first2 = true;
   let key_value_pairs = [];
-  map7.forEach((value, key) => {
+  map8.forEach((value, key) => {
     key_value_pairs.push([key, value]);
   });
   key_value_pairs.sort();
@@ -5276,9 +5844,9 @@ function dynamic_error(error) {
   {
     let expected = error.expected;
     let found = error.found;
-    let path = error.path;
+    let path2 = error.path;
     return "expected: " + expected + ", found: " + found + ", path: " + join(
-      path,
+      path2,
       "/"
     );
   }
@@ -5296,9 +5864,9 @@ function decode_error(error) {
   {
     let expected = error.expected;
     let found = error.found;
-    let path = error.path;
+    let path2 = error.path;
     return "expected: " + expected + ", found: " + found + ", path: " + join(
-      path,
+      path2,
       "/"
     );
   }
@@ -5345,12 +5913,13 @@ function http_error(error) {
 }
 
 // build/dev/javascript/jst_lustre/jst_lustre.mjs
-var Model2 = class extends CustomType {
-  constructor(articles, route, user_messages) {
+var Model3 = class extends CustomType {
+  constructor(articles, route, user_messages, chat) {
     super();
     this.articles = articles;
     this.route = route;
     this.user_messages = user_messages;
+    this.chat = chat;
   }
 };
 var UserError = class extends CustomType {
@@ -5454,6 +6023,12 @@ var UserMessageDismissed = class extends CustomType {
     this.msg = msg;
   }
 };
+var ChatMsg2 = class extends CustomType {
+  constructor(msg) {
+    super();
+    this.msg = msg;
+  }
+};
 function parse_route(uri) {
   let $ = path_segments(uri.path);
   if ($.hasLength(0)) {
@@ -5504,7 +6079,7 @@ function effect_navigation(route) {
     return none();
   }
 }
-function init3(_) {
+function init4(_) {
   let _block;
   let $ = do_initial_uri();
   if ($.isOk()) {
@@ -5518,7 +6093,10 @@ function init3(_) {
   let _pipe = toList([]);
   _block$1 = from_list(_pipe);
   let articles = _block$1;
-  let model = new Model2(articles, route, toList([]));
+  let $1 = init3();
+  let chat_model = $1[0];
+  let chat_effect = $1[1];
+  let model = new Model3(articles, route, toList([]), chat_model);
   let effect_articles = get_metadata_all(
     (var0) => {
       return new GotArticleSummaries(var0);
@@ -5534,12 +6112,21 @@ function init3(_) {
   let effect_route = effect_navigation(model.route);
   return [
     model,
-    batch(toList([effect_modem, effect_articles, effect_route]))
+    batch(
+      toList([
+        effect_modem,
+        effect_articles,
+        effect_route,
+        map5(chat_effect, (msg) => {
+          return new ChatMsg2(msg);
+        })
+      ])
+    )
   ];
 }
 function articles_update(old_articles, new_articles) {
   let _pipe = new_articles;
-  let _pipe$1 = map(_pipe, (article2) => {
+  let _pipe$1 = map2(_pipe, (article2) => {
     return [article2.id, article2];
   });
   let _pipe$2 = from_list(_pipe$1);
@@ -5554,14 +6141,19 @@ function next_user_message_id(user_messages) {
     return 0;
   }
 }
-function update(model, msg) {
+function update2(model, msg) {
   if (msg instanceof UserNavigatedTo) {
     let route = msg.route;
     let effect = effect_navigation(route);
     return [
       (() => {
         let _record = model;
-        return new Model2(_record.articles, route, _record.user_messages);
+        return new Model3(
+          _record.articles,
+          route,
+          _record.user_messages,
+          _record.chat
+        );
       })(),
       effect
     ];
@@ -5588,7 +6180,12 @@ function update(model, msg) {
       return [
         (() => {
           let _record = model;
-          return new Model2(_record.articles, _record.route, user_messages);
+          return new Model3(
+            _record.articles,
+            _record.route,
+            user_messages,
+            _record.chat
+          );
         })(),
         none()
       ];
@@ -5605,7 +6202,12 @@ function update(model, msg) {
       return [
         (() => {
           let _record = model;
-          return new Model2(_record.articles, _record.route, user_messages);
+          return new Model3(
+            _record.articles,
+            _record.route,
+            user_messages,
+            _record.chat
+          );
         })(),
         none()
       ];
@@ -5624,7 +6226,12 @@ function update(model, msg) {
     return [
       (() => {
         let _record = model;
-        return new Model2(_record.articles, _record.route, user_messages);
+        return new Model3(
+          _record.articles,
+          _record.route,
+          user_messages,
+          _record.chat
+        );
       })(),
       none()
     ];
@@ -5642,7 +6249,12 @@ function update(model, msg) {
     return [
       (() => {
         let _record = model;
-        return new Model2(_record.articles, _record.route, user_messages);
+        return new Model3(
+          _record.articles,
+          _record.route,
+          user_messages,
+          _record.chat
+        );
       })(),
       none()
     ];
@@ -5660,7 +6272,12 @@ function update(model, msg) {
     return [
       (() => {
         let _record = model;
-        return new Model2(_record.articles, _record.route, user_messages);
+        return new Model3(
+          _record.articles,
+          _record.route,
+          user_messages,
+          _record.chat
+        );
       })(),
       none()
     ];
@@ -5678,7 +6295,12 @@ function update(model, msg) {
     return [
       (() => {
         let _record = model;
-        return new Model2(_record.articles, _record.route, user_messages);
+        return new Model3(
+          _record.articles,
+          _record.route,
+          user_messages,
+          _record.chat
+        );
       })(),
       none()
     ];
@@ -5690,7 +6312,12 @@ function update(model, msg) {
       return [
         (() => {
           let _record = model;
-          return new Model2(articles$1, _record.route, _record.user_messages);
+          return new Model3(
+            articles$1,
+            _record.route,
+            _record.user_messages,
+            _record.chat
+          );
         })(),
         none()
       ];
@@ -5706,7 +6333,12 @@ function update(model, msg) {
       return [
         (() => {
           let _record = model;
-          return new Model2(_record.articles, _record.route, user_messages);
+          return new Model3(
+            _record.articles,
+            _record.route,
+            user_messages,
+            _record.chat
+          );
         })(),
         none()
       ];
@@ -5716,18 +6348,23 @@ function update(model, msg) {
     if (result.isOk()) {
       let article2 = result[0];
       let articles = insert(model.articles, article2.id, article2);
-      echo2(articles, "src\\jst_lustre.gleam", 224);
+      echo2(articles, "src\\jst_lustre.gleam", 238);
       return [
         (() => {
           let _record = model;
-          return new Model2(articles, _record.route, _record.user_messages);
+          return new Model3(
+            articles,
+            _record.route,
+            _record.user_messages,
+            _record.chat
+          );
         })(),
         none()
       ];
     } else {
       let err = result[0];
       let error_string = http_error(err);
-      echo2(err, "src\\jst_lustre.gleam", 229);
+      echo2(err, "src\\jst_lustre.gleam", 243);
       if (err instanceof JsonError && err[0] instanceof UnexpectedByte && err[0][0] === "") {
         let user_messages = append(
           model.user_messages,
@@ -5741,7 +6378,12 @@ function update(model, msg) {
         return [
           (() => {
             let _record = model;
-            return new Model2(_record.articles, _record.route, user_messages);
+            return new Model3(
+              _record.articles,
+              _record.route,
+              user_messages,
+              _record.chat
+            );
           })(),
           replace2("/articles", new None(), new None())
         ];
@@ -5758,16 +6400,21 @@ function update(model, msg) {
         return [
           (() => {
             let _record = model;
-            return new Model2(_record.articles, _record.route, user_messages);
+            return new Model3(
+              _record.articles,
+              _record.route,
+              user_messages,
+              _record.chat
+            );
           })(),
           none()
         ];
       }
     }
-  } else {
+  } else if (msg instanceof UserMessageDismissed) {
     let msg$1 = msg.msg;
-    echo2("msg dismissed", "src\\jst_lustre.gleam", 259);
-    echo2(msg$1, "src\\jst_lustre.gleam", 260);
+    echo2("msg dismissed", "src\\jst_lustre.gleam", 273);
+    echo2(msg$1, "src\\jst_lustre.gleam", 274);
     let user_messages = filter(
       model.user_messages,
       (m) => {
@@ -5777,9 +6424,33 @@ function update(model, msg) {
     return [
       (() => {
         let _record = model;
-        return new Model2(_record.articles, _record.route, user_messages);
+        return new Model3(
+          _record.articles,
+          _record.route,
+          user_messages,
+          _record.chat
+        );
       })(),
       none()
+    ];
+  } else {
+    let msg$1 = msg.msg;
+    let $ = update(msg$1, model.chat);
+    let chat_model = $[0];
+    let chat_effect = $[1];
+    return [
+      (() => {
+        let _record = model;
+        return new Model3(
+          _record.articles,
+          _record.route,
+          _record.user_messages,
+          chat_model
+        );
+      })(),
+      map5(chat_effect, (msg2) => {
+        return new ChatMsg2(msg2);
+      })
     ];
   }
 }
@@ -5834,7 +6505,7 @@ function view_header(model) {
                   if ($.hasLength(0)) {
                     return "";
                   } else {
-                    let num = length(model.user_messages);
+                    let num = length2(model.user_messages);
                     return "got " + to_string(num) + " messages";
                   }
                 })()
@@ -6017,58 +6688,28 @@ function view_user_messages(msgs) {
 }
 function view_title(title) {
   return h1(
-    toList([class$("text-3xl pt-8 text-pink-700 font-light")]),
+    toList([
+      class$("text-3xl pt-8 text-pink-700 font-light"),
+      class$("article-title")
+    ]),
     toList([text2(title)])
   );
 }
-function view_article_listing(articles) {
-  let _block;
-  let _pipe = articles;
-  let _pipe$1 = values(_pipe);
-  let _pipe$2 = sort(
-    _pipe$1,
-    (a2, b) => {
-      return compare2(a2.id, b.id);
-    }
-  );
-  _block = map(
-    _pipe$2,
-    (article2) => {
-      return article(
-        toList([class$("mt-14")]),
-        toList([
-          h3(
-            toList([class$("text-xl text-pink-700 font-light")]),
-            toList([
-              a(
-                toList([
-                  class$("hover:underline"),
-                  href2(new ArticleById(article2.id))
-                ]),
-                toList([text2(article2.title)])
-              )
-            ])
-          ),
-          p(
-            toList([class$("mt-1")]),
-            toList([text2(article2.leading)])
-          )
-        ])
-      );
-    }
-  );
-  let articles$1 = _block;
-  return prepend(view_title("Articles"), articles$1);
-}
 function view_subtitle(title) {
   return div(
-    toList([class$("text-md text-zinc-500 font-light")]),
+    toList([
+      class$("text-md text-zinc-500 font-light"),
+      class$("article-subtitle")
+    ]),
     toList([text2(title)])
   );
 }
 function view_leading(text3) {
   return p(
-    toList([class$("font-bold pt-8")]),
+    toList([
+      class$("font-bold pt-8"),
+      class$("article-leading")
+    ]),
     toList([text2(text3)])
   );
 }
@@ -6083,6 +6724,49 @@ function view_paragraph(text3) {
     toList([class$("pt-8")]),
     toList([text2(text3)])
   );
+}
+function view_article_listing(articles) {
+  let _block;
+  let _pipe = articles;
+  let _pipe$1 = values(_pipe);
+  let _pipe$2 = sort(
+    _pipe$1,
+    (a2, b) => {
+      return compare2(a2.id, b.id);
+    }
+  );
+  _block = map2(
+    _pipe$2,
+    (article2) => {
+      return article(
+        toList([class$("mt-14")]),
+        toList([
+          a(
+            toList([
+              class$(
+                "group block  border-l border-zinc-700  pl-4 hover:border-pink-700"
+              ),
+              href2(new ArticleById(article2.id))
+            ]),
+            toList([
+              h3(
+                toList([
+                  id("article-title-" + to_string(article2.id)),
+                  class$("article-title"),
+                  class$("text-xl text-pink-700 font-light")
+                ]),
+                toList([text2(article2.title)])
+              ),
+              view_subtitle(article2.subtitle),
+              view_paragraph(article2.leading)
+            ])
+          )
+        ])
+      );
+    }
+  );
+  let articles$1 = _block;
+  return prepend(view_title("Articles"), articles$1);
 }
 function view_about() {
   return toList([
@@ -6188,52 +6872,59 @@ function view_article(article2) {
     )
   ]);
 }
-function view(model) {
+function view2(model) {
   return div(
     toList([
       class$("text-zinc-400 h-full w-full text-lg font-thin mx-auto")
     ]),
-    toList([
+    prepend(
       view_header(model),
-      div(
-        toList([class$("fixed top-18 left-0 right-0")]),
-        view_user_messages(model.user_messages)
-      ),
-      main(
-        toList([class$("px-10 py-4 max-w-screen-md mx-auto")]),
-        (() => {
-          let $ = model.route;
-          if ($ instanceof Index) {
-            return view_index();
-          } else if ($ instanceof Articles) {
-            return view_article_listing(model.articles);
-          } else if ($ instanceof ArticleById) {
-            let id2 = $.id;
-            let article2 = map_get(model.articles, id2);
-            if (article2.isOk()) {
-              let article$1 = article2[0];
-              return view_article(article$1);
-            } else {
-              return view_not_found();
-            }
-          } else if ($ instanceof About) {
-            return view_about();
-          } else {
-            return view_not_found();
-          }
-        })()
+      prepend(
+        div(
+          toList([class$("fixed top-18 left-0 right-0")]),
+          view_user_messages(model.user_messages)
+        ),
+        prepend(
+          main(
+            toList([class$("px-10 py-4 max-w-screen-md mx-auto")]),
+            (() => {
+              let $ = model.route;
+              if ($ instanceof Index) {
+                return view_index();
+              } else if ($ instanceof Articles) {
+                return view_article_listing(model.articles);
+              } else if ($ instanceof ArticleById) {
+                let id2 = $.id;
+                let article2 = map_get(model.articles, id2);
+                if (article2.isOk()) {
+                  let article$1 = article2[0];
+                  return view_article(article$1);
+                } else {
+                  return view_not_found();
+                }
+              } else if ($ instanceof About) {
+                return view_about();
+              } else {
+                return view_not_found();
+              }
+            })()
+          ),
+          view((var0) => {
+            return new ChatMsg2(var0);
+          }, model.chat)
+        )
       )
-    ])
+    )
   );
 }
 function main2() {
-  let app = application(init3, update, view);
+  let app = application(init4, update2, view2);
   let $ = start2(app, "#app", void 0);
   if (!$.isOk()) {
     throw makeError(
       "let_assert",
       "jst_lustre",
-      26,
+      28,
       "main",
       "Pattern match failed, no pattern matched the value.",
       { value: $ }
@@ -6282,11 +6973,11 @@ function echo$inspectString2(str) {
   new_str += '"';
   return new_str;
 }
-function echo$inspectDict2(map7) {
+function echo$inspectDict2(map8) {
   let body = "dict.from_list([";
   let first2 = true;
   let key_value_pairs = [];
-  map7.forEach((value, key) => {
+  map8.forEach((value, key) => {
     key_value_pairs.push([key, value]);
   });
   key_value_pairs.sort();

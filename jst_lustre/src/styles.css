@@ -10,15 +10,34 @@
   }
 }
 
-
 @supports selector(:view-transition-name(article-content)) {
-  #article-content {
-    view-transition-name: article-content;
-  }
-  #article-content::view-transition-old(article-content) {
-    opacity: 1;
-  }
-  #article-content::view-transition-new(article-content) {
-    opacity: 0;
+  @layer view-transition {
+    .article-title {
+      view-transition-name: article-title;
+    }
+    .article-title::view-transition-old(article-title) {
+      opacity: 1;
+    }
+    .article-title::view-transition-new(article-title) {
+      opacity: 0;
+    }
+    .article-subtitle {
+      view-transition-name: article-subtitle;
+    }
+    .article-subtitle::view-transition-old(article-subtitle) {
+      opacity: 1;
+    }
+    .article-subtitle::view-transition-new(article-subtitle) {
+      opacity: 0;
+    }
+    .article-content {
+      view-transition-name: article-content;
+    }
+    .article-content::view-transition-old(article-content) {
+      opacity: 1;
+    }
+    .article-content::view-transition-new(article-content) {
+      opacity: 0;
+    }
   }
 }

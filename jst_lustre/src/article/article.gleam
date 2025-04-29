@@ -115,11 +115,9 @@ fn article_decoder() -> decode.Decoder(Article) {
     None,
     decode.optional(decode.list(content_decoder())),
   )
-  echo content
   let content = case content {
     Some([]) -> None
     _ -> content
   }
-  echo content
   decode.success(Article(id:, title:, leading:, subtitle:, content:))
 }

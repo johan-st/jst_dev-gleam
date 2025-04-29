@@ -1,9 +1,11 @@
 // IMPORTS ---------------------------------------------------------------------
 
 import article/article.{type Article}
+import chat/chat
 import gleam/dict.{type Dict}
 import gleam/int
 import gleam/io
+import gleam/javascript/array
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -35,6 +37,7 @@ type Model {
     articles: Dict(Int, article.Article),
     route: Route,
     user_messages: List(UserMessage),
+    chat: chat.Model,
   )
 }
 
@@ -99,7 +102,8 @@ fn init(_) -> #(Model, Effect(Msg)) {
     []
     |> dict.from_list
 
-  let model = Model(route:, articles:, user_messages: [])
+  let #(chat_model, chat_effect) = chat.init()
+  let model = Model(route:, articles:, user_messages: [], chat: chat_model)
   let effect_articles = article.get_metadata_all(GotArticleSummaries)
   let effect_modem =
     modem.init(fn(uri) {
@@ -108,7 +112,15 @@ fn init(_) -> #(Model, Effect(Msg)) {
       |> UserNavigatedTo
     })
   let effect_route = effect_navigation(model.route)
-  #(model, effect.batch([effect_modem, effect_articles, effect_route]))
+  #(
+    model,
+    effect.batch([
+      effect_modem,
+      effect_articles,
+      effect_route,
+      effect.map(chat_effect, fn(msg) { ChatMsg(msg) }),
+    ]),
+  )
 }
 
 // UPDATE ----------------------------------------------------------------------
@@ -126,6 +138,8 @@ type Msg {
   GotArticle(result: Result(Article, HttpError))
   GotArticleSummaries(result: Result(List(Article), http.HttpError))
   UserMessageDismissed(msg: UserMessage)
+  // CHAT
+  ChatMsg(msg: chat.Msg)
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -262,6 +276,13 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       let user_messages = list.filter(model.user_messages, fn(m) { m != msg })
       #(Model(..model, user_messages:), effect.none())
     }
+    ChatMsg(msg:) -> {
+      let #(chat_model, chat_effect) = chat.update(msg, model.chat)
+      #(
+        Model(..model, chat: chat_model),
+        effect.map(chat_effect, fn(msg) { ChatMsg(msg) }),
+      )
+    }
   }
 }
 
@@ -318,6 +339,7 @@ fn view(model: Model) -> Element(Msg) {
           NotFound(_) -> view_not_found()
         }
       }),
+      ..chat.view(ChatMsg, model.chat)
     ],
   )
 }
@@ -578,13 +600,26 @@ fn view_article_listing(
     |> list.sort(fn(a, b) { int.compare(a.id, b.id) })
     |> list.map(fn(article) {
       html.article([attribute.class("mt-14")], [
-        html.h3([attribute.class("text-xl text-pink-700 font-light")], [
-          html.a(
-            [attribute.class("hover:underline"), href(ArticleById(article.id))],
-            [html.text(article.title)],
-          ),
-        ]),
-        html.p([attribute.class("mt-1")], [html.text(article.leading)]),
+        html.a(
+          [
+            attribute.class(
+              "group block  border-l border-zinc-700  pl-4 hover:border-pink-700",
+            ),
+            href(ArticleById(article.id)),
+          ],
+          [
+            html.h3(
+              [
+                attribute.id("article-title-" <> int.to_string(article.id)),
+                attribute.class("article-title"),
+                attribute.class("text-xl text-pink-700 font-light"),
+              ],
+              [html.text(article.title)],
+            ),
+            view_subtitle(article.subtitle),
+            view_paragraph(article.leading),
+          ],
+        ),
       ])
     })
 
@@ -651,19 +686,33 @@ fn view_not_found() -> List(Element(msg)) {
 // VIEW HELPERS ----------------------------------------------------------------
 
 fn view_title(title: String) -> Element(msg) {
-  html.h1([attribute.class("text-3xl pt-8 text-pink-700 font-light")], [
-    html.text(title),
-  ])
+  html.h1(
+    [
+      attribute.class("text-3xl pt-8 text-pink-700 font-light"),
+      attribute.class("article-title"),
+    ],
+    [html.text(title)],
+  )
 }
 
 fn view_subtitle(title: String) -> Element(msg) {
-  html.div([attribute.class("text-md text-zinc-500 font-light")], [
-    html.text(title),
-  ])
+  html.div(
+    [
+      attribute.class("text-md text-zinc-500 font-light"),
+      attribute.class("article-subtitle"),
+    ],
+    [html.text(title)],
+  )
 }
 
 fn view_leading(text: String) -> Element(msg) {
-  html.p([attribute.class("font-bold pt-8")], [html.text(text)])
+  html.p(
+    [
+      attribute.class("font-bold pt-8"),
+      attribute.class("article-leading"),
+    ],
+    [html.text(text)],
+  )
 }
 
 fn view_h2(title: String) -> Element(msg) {

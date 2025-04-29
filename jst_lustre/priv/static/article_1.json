@@ -15,6 +15,18 @@
         {
             "type": "paragraph",
             "text": "ASIDE: NATS is a messaging system that allows you to send and receive messages between different systems. It's a bit like email, but it's designed for the cloud and for modern systems. In go applications I tend to embed the server in my library and use nats as an in-process messaging system."
+        },
+        {
+            "type": "heading",
+            "text": "Sadness ensues"
+        },
+        {
+            "type": "paragraph",
+            "text": "When realizing how much of the backend can be replaced by a nats server I got a bit disheartened.. I enjoy writing go servers.. but maybe the sane choice is to use synadia and just add whatever pieces are not available there.."
+        },
+        {
+            "type": "paragraph",
+            "text": "For now I will use the nats server in mh go application but I will probably offload a lot of logic to the client. `Gleam` really is a delightfull language to write!"
         }
     ]
 }
