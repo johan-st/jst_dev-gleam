@@ -288,7 +288,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
 fn effect_navigation(route: Route) -> Effect(Msg) {
   case route {
-    ArticleById(id) -> article.get_article(GotArticle, id)
+    // ArticleById(id) -> article.get_article(GotArticle, id)
     _ -> effect.none()
   }
 }
@@ -560,15 +560,17 @@ fn view_user_message(msg: UserMessage) -> Element(Msg) {
 
 fn view_index() -> List(Element(msg)) {
   [
-    view_title("Welcome to jst.dev!"),
+    view_title("Welcome to jst.dev!", 0),
     view_subtitle(
       "...or, A lession on overengineering for fun and.. 
       well just for fun.",
+      0,
     ),
     view_leading(
       "This site and it's underlying IT-infrastructure is the primary 
       place for me to experiment with technologies and topologies. I 
       also share some of my thoughts and learnings here.",
+      0,
     ),
     html.p([attribute.class("mt-14")], [
       html.text(
@@ -599,7 +601,7 @@ fn view_article_listing(
     |> dict.values
     |> list.sort(fn(a, b) { int.compare(a.id, b.id) })
     |> list.map(fn(article) {
-      html.article([attribute.class("mt-14")], [
+      html.article([attribute.class("mt-14 wi")], [
         html.a(
           [
             attribute.class(
@@ -616,33 +618,32 @@ fn view_article_listing(
               ],
               [html.text(article.title)],
             ),
-            view_subtitle(article.subtitle),
+            view_subtitle(article.subtitle, article.id),
             view_paragraph(article.leading),
           ],
         ),
       ])
     })
 
-  [view_title("Articles"), ..articles]
+  [view_title("Articles", 0), ..articles]
 }
 
 fn view_article(article: article.Article) -> List(Element(msg)) {
   let content = case article.content {
     None -> [
-      view_title(article.title),
-      view_subtitle(article.subtitle),
-      view_leading(article.leading),
+      view_title(article.title, article.id),
+      view_subtitle(article.subtitle, article.id),
+      view_leading(article.leading, article.id),
       view_paragraph("failed to fetch article.."),
     ]
     Some(content) -> [
-      view_title(article.title),
-      view_subtitle(article.subtitle),
-      view_leading(article.leading),
+      view_title(article.title, article.id),
+      view_subtitle(article.subtitle, article.id),
+      view_leading(article.leading, article.id),
       ..article.view_article_content(
         view_h2,
         view_h2,
         view_h2,
-        view_subtitle,
         view_paragraph,
         view_unknown,
         content,
@@ -651,14 +652,14 @@ fn view_article(article: article.Article) -> List(Element(msg)) {
   }
 
   [
-    html.article([], content),
+    html.article([attribute.class("with-transition")], content),
     html.p([attribute.class("mt-14")], [view_link(Articles, "<- Go back?")]),
   ]
 }
 
 fn view_about() -> List(Element(msg)) {
   [
-    view_title("About"),
+    view_title("About", 0),
     view_paragraph(
       "I'm a software developer and a writer. I'm also a father and a husband. 
       I'm also a software developer and a writer. I'm also a father and a 
@@ -675,7 +676,7 @@ fn view_about() -> List(Element(msg)) {
 
 fn view_not_found() -> List(Element(msg)) {
   [
-    view_title("Not found"),
+    view_title("Not found", 0),
     view_paragraph(
       "You glimpse into the void and see -- nothing?
        Well that was somewhat expected.",
@@ -685,9 +686,10 @@ fn view_not_found() -> List(Element(msg)) {
 
 // VIEW HELPERS ----------------------------------------------------------------
 
-fn view_title(title: String) -> Element(msg) {
+fn view_title(title: String, id: Int) -> Element(msg) {
   html.h1(
     [
+      attribute.id("article-title-" <> int.to_string(id)),
       attribute.class("text-3xl pt-8 text-pink-700 font-light"),
       attribute.class("article-title"),
     ],
@@ -695,9 +697,10 @@ fn view_title(title: String) -> Element(msg) {
   )
 }
 
-fn view_subtitle(title: String) -> Element(msg) {
+fn view_subtitle(title: String, id: Int) -> Element(msg) {
   html.div(
     [
+      attribute.id("article-subtitle-" <> int.to_string(id)),
       attribute.class("text-md text-zinc-500 font-light"),
       attribute.class("article-subtitle"),
     ],
@@ -705,9 +708,10 @@ fn view_subtitle(title: String) -> Element(msg) {
   )
 }
 
-fn view_leading(text: String) -> Element(msg) {
+fn view_leading(text: String, id: Int) -> Element(msg) {
   html.p(
     [
+      attribute.id("article-lead-" <> int.to_string(id)),
       attribute.class("font-bold pt-8"),
       attribute.class("article-leading"),
     ],
@@ -716,21 +720,33 @@ fn view_leading(text: String) -> Element(msg) {
 }
 
 fn view_h2(title: String) -> Element(msg) {
-  html.h2([attribute.class("text-2xl text-pink-600 font-light pt-16")], [
-    html.text(title),
-  ])
+  html.h2(
+    [
+      attribute.class("text-2xl text-pink-600 font-light pt-16"),
+      attribute.class("article-h2"),
+    ],
+    [html.text(title)],
+  )
 }
 
 fn view_h3(title: String) -> Element(msg) {
-  html.h3([attribute.class("text-xl text-pink-600 font-light")], [
-    html.text(title),
-  ])
+  html.h3(
+    [
+      attribute.class("text-xl text-pink-600 font-light"),
+      attribute.class("article-h3"),
+    ],
+    [html.text(title)],
+  )
 }
 
 fn view_h4(title: String) -> Element(msg) {
-  html.h4([attribute.class("text-lg text-pink-600 font-light")], [
-    html.text(title),
-  ])
+  html.h4(
+    [
+      attribute.class("text-lg text-pink-600 font-light"),
+      attribute.class("article-h4"),
+    ],
+    [html.text(title)],
+  )
 }
 
 fn view_paragraph(text: String) -> Element(msg) {

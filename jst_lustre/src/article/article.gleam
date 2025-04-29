@@ -19,7 +19,6 @@ pub type Article {
 pub type Content {
   Block(List(Content))
   Heading(String)
-  Subtitle(String)
   Paragraph(String)
   Unknown(String)
 }
@@ -27,7 +26,6 @@ pub type Content {
 // VIEW ------------------------------------------------------------------------
 
 pub fn view_article_content(
-  view_subtitle: fn(String) -> Element(msg),
   view_h2: fn(String) -> Element(msg),
   view_h3: fn(String) -> Element(msg),
   view_h4: fn(String) -> Element(msg),
@@ -47,7 +45,6 @@ pub fn view_article_content(
         _ -> view_h4
       }
       case content {
-        Subtitle(text) -> view_subtitle(text)
         Heading(text) -> view_heading(text)
         // Leading(text) -> view_leading(text)
         Paragraph(text) -> view_paragraph(text)
@@ -75,18 +72,10 @@ pub fn get_metadata_all(msg) -> Effect(a) {
 fn content_decoder() -> decode.Decoder(Content) {
   use content_type <- decode.field("type", decode.string)
   case content_type {
-    "subtitle" -> {
-      use text <- decode.field("text", decode.string)
-      decode.success(Subtitle(text))
-    }
     "heading" -> {
       use text <- decode.field("text", decode.string)
       decode.success(Heading(text))
     }
-    // "leading" -> {
-    //   use text <- decode.field("text", decode.string)
-    //   decode.success(Leading(text))
-    // }
     "paragraph" -> {
       use text <- decode.field("text", decode.string)
       decode.success(Paragraph(text))
@@ -94,10 +83,6 @@ fn content_decoder() -> decode.Decoder(Content) {
     _ -> {
       decode.success(Unknown(content_type))
     }
-    // _ -> {
-    //   let msg = "failed to decode content with type: " <> content_type
-    //   decode.failure(Paragraph(msg), msg)
-    // }
   }
 }
 

@@ -3911,40 +3911,41 @@ if (globalThis.customElements && !globalThis.customElements.get("lustre-fragment
   );
 }
 function morph(prev, next, dispatch) {
-  let out;
-  let stack = [{ prev, next, parent: prev.parentNode }];
-  while (stack.length) {
-    let { prev: prev2, next: next2, parent } = stack.pop();
-    while (next2.subtree !== void 0) next2 = next2.subtree();
-    if (next2.content !== void 0) {
-      if (!prev2) {
-        const created = document.createTextNode(next2.content);
-        parent.appendChild(created);
-        out ??= created;
-      } else if (prev2.nodeType === Node.TEXT_NODE) {
-        if (prev2.textContent !== next2.content) prev2.textContent = next2.content;
-        out ??= prev2;
-      } else {
-        const created = document.createTextNode(next2.content);
-        parent.replaceChild(created, prev2);
+  document.startViewTransition(() => {
+    let out;
+    let stack = [{ prev, next, parent: prev.parentNode }];
+    while (stack.length) {
+      let { prev: prev2, next: next2, parent } = stack.pop();
+      while (next2.subtree !== void 0) next2 = next2.subtree();
+      if (next2.content !== void 0) {
+        if (!prev2) {
+          const created = document.createTextNode(next2.content);
+          parent.appendChild(created);
+          out ??= created;
+        } else if (prev2.nodeType === Node.TEXT_NODE) {
+          if (prev2.textContent !== next2.content) prev2.textContent = next2.content;
+          out ??= prev2;
+        } else {
+          const created = document.createTextNode(next2.content);
+          parent.replaceChild(created, prev2);
+          out ??= created;
+        }
+      } else if (next2.tag !== void 0) {
+        const created = createElementNode({
+          prev: prev2,
+          next: next2,
+          dispatch,
+          stack
+        });
+        if (!prev2) {
+          parent.appendChild(created);
+        } else if (prev2 !== created) {
+          parent.replaceChild(created, prev2);
+        }
         out ??= created;
       }
-    } else if (next2.tag !== void 0) {
-      const created = createElementNode({
-        prev: prev2,
-        next: next2,
-        dispatch,
-        stack
-      });
-      if (!prev2) {
-        parent.appendChild(created);
-      } else if (prev2 !== created) {
-        parent.replaceChild(created, prev2);
-      }
-      out ??= created;
     }
-  }
-  return out;
+  });
 }
 function createElementNode({ prev, next, dispatch, stack }) {
   const namespace2 = next.namespace || "http://www.w3.org/1999/xhtml";
@@ -4049,8 +4050,8 @@ function createElementNode({ prev, next, dispatch, stack }) {
   let incomingKeyedChildren = null;
   let firstChild = children(next).next().value;
   if (canMorph && firstChild !== void 0 && // Explicit checks are more verbose but truthy checks force a bunch of comparisons
-  // we don't care about: it's never gonna be a number etc.
-  firstChild.key !== void 0 && firstChild.key !== "") {
+    // we don't care about: it's never gonna be a number etc.
+    firstChild.key !== void 0 && firstChild.key !== "") {
     seenKeys = /* @__PURE__ */ new Set();
     keyedChildren = getKeyedChildren(prev);
     incomingKeyedChildren = getKeyedChildren(next);
@@ -5038,12 +5039,6 @@ var Heading = class extends CustomType {
     this[0] = x0;
   }
 };
-var Subtitle = class extends CustomType {
-  constructor(x0) {
-    super();
-    this[0] = x0;
-  }
-};
 var Paragraph = class extends CustomType {
   constructor(x0) {
     super();
@@ -5056,7 +5051,7 @@ var Unknown = class extends CustomType {
     this[0] = x0;
   }
 };
-function view_article_content(view_subtitle2, view_h22, view_h3, view_h4, view_paragraph2, view_unknown2, contents) {
+function view_article_content(view_h22, view_h3, view_h4, view_paragraph2, view_unknown2, contents) {
   let view_block = (contents2, current_level) => {
     let _pipe = contents2;
     return map2(
@@ -5073,10 +5068,7 @@ function view_article_content(view_subtitle2, view_h22, view_h3, view_h4, view_p
           _block = view_h4;
         }
         let view_heading = _block;
-        if (content instanceof Subtitle) {
-          let text3 = content[0];
-          return view_subtitle2(text3);
-        } else if (content instanceof Heading) {
+        if (content instanceof Heading) {
           let text3 = content[0];
           return view_heading(text3);
         } else if (content instanceof Paragraph) {
@@ -5098,15 +5090,7 @@ function content_decoder() {
     "type",
     string2,
     (content_type) => {
-      if (content_type === "subtitle") {
-        return field(
-          "text",
-          string2,
-          (text3) => {
-            return success(new Subtitle(text3));
-          }
-        );
-      } else if (content_type === "heading") {
+      if (content_type === "heading") {
         return field(
           "text",
           string2,
@@ -5170,10 +5154,6 @@ function article_decoder() {
       );
     }
   );
-}
-function get_article(msg, id2) {
-  let url = "http://127.0.0.1:1234/priv/static/article_" + to_string(id2) + ".json";
-  return get(url, expect_json(article_decoder(), msg));
 }
 function get_metadata_all(msg) {
   let url = "http://127.0.0.1:1234/priv/static/articles.json";
@@ -6070,12 +6050,7 @@ function href2(route) {
   return href(route_url(route));
 }
 function effect_navigation(route) {
-  if (route instanceof ArticleById) {
-    let id2 = route.id;
-    return get_article((var0) => {
-      return new GotArticle(var0);
-    }, id2);
-  } else {
+  {
     return none();
   }
 }
@@ -6686,27 +6661,30 @@ function view_user_messages(msgs) {
     return prepend(view_user_message(msg), view_user_messages(msgs$1));
   }
 }
-function view_title(title) {
+function view_title(title, id2) {
   return h1(
     toList([
+      id("article-title-" + to_string(id2)),
       class$("text-3xl pt-8 text-pink-700 font-light"),
       class$("article-title")
     ]),
     toList([text2(title)])
   );
 }
-function view_subtitle(title) {
+function view_subtitle(title, id2) {
   return div(
     toList([
+      id("article-subtitle-" + to_string(id2)),
       class$("text-md text-zinc-500 font-light"),
       class$("article-subtitle")
     ]),
     toList([text2(title)])
   );
 }
-function view_leading(text3) {
+function view_leading(text3, id2) {
   return p(
     toList([
+      id("article-lead-" + to_string(id2)),
       class$("font-bold pt-8"),
       class$("article-leading")
     ]),
@@ -6715,7 +6693,10 @@ function view_leading(text3) {
 }
 function view_h2(title) {
   return h2(
-    toList([class$("text-2xl text-pink-600 font-light pt-16")]),
+    toList([
+      class$("text-2xl text-pink-600 font-light pt-16"),
+      class$("article-h2")
+    ]),
     toList([text2(title)])
   );
 }
@@ -6739,7 +6720,7 @@ function view_article_listing(articles) {
     _pipe$2,
     (article2) => {
       return article(
-        toList([class$("mt-14")]),
+        toList([class$("mt-14 wi")]),
         toList([
           a(
             toList([
@@ -6757,7 +6738,7 @@ function view_article_listing(articles) {
                 ]),
                 toList([text2(article2.title)])
               ),
-              view_subtitle(article2.subtitle),
+              view_subtitle(article2.subtitle, article2.id),
               view_paragraph(article2.leading)
             ])
           )
@@ -6766,11 +6747,11 @@ function view_article_listing(articles) {
     }
   );
   let articles$1 = _block;
-  return prepend(view_title("Articles"), articles$1);
+  return prepend(view_title("Articles", 0), articles$1);
 }
 function view_about() {
   return toList([
-    view_title("About"),
+    view_title("About", 0),
     view_paragraph(
       "I'm a software developer and a writer. I'm also a father and a husband. \n      I'm also a software developer and a writer. I'm also a father and a \n      husband. I'm also a software developer and a writer. I'm also a father \n      and a husband. I'm also a software developer and a writer. I'm also a \n      father and a husband."
     ),
@@ -6781,7 +6762,7 @@ function view_about() {
 }
 function view_not_found() {
   return toList([
-    view_title("Not found"),
+    view_title("Not found", 0),
     view_paragraph(
       "You glimpse into the void and see -- nothing?\n       Well that was somewhat expected."
     )
@@ -6808,12 +6789,14 @@ function view_link(target, title) {
 }
 function view_index() {
   return toList([
-    view_title("Welcome to jst.dev!"),
+    view_title("Welcome to jst.dev!", 0),
     view_subtitle(
-      "...or, A lession on overengineering for fun and.. \n      well just for fun."
+      "...or, A lession on overengineering for fun and.. \n      well just for fun.",
+      0
     ),
     view_leading(
-      "This site and it's underlying IT-infrastructure is the primary \n      place for me to experiment with technologies and topologies. I \n      also share some of my thoughts and learnings here."
+      "This site and it's underlying IT-infrastructure is the primary \n      place for me to experiment with technologies and topologies. I \n      also share some of my thoughts and learnings here.",
+      0
     ),
     p(
       toList([class$("mt-14")]),
@@ -6837,24 +6820,23 @@ function view_article(article2) {
   let $ = article2.content;
   if ($ instanceof None) {
     _block = toList([
-      view_title(article2.title),
-      view_subtitle(article2.subtitle),
-      view_leading(article2.leading),
+      view_title(article2.title, article2.id),
+      view_subtitle(article2.subtitle, article2.id),
+      view_leading(article2.leading, article2.id),
       view_paragraph("failed to fetch article..")
     ]);
   } else {
     let content2 = $[0];
     _block = prepend(
-      view_title(article2.title),
+      view_title(article2.title, article2.id),
       prepend(
-        view_subtitle(article2.subtitle),
+        view_subtitle(article2.subtitle, article2.id),
         prepend(
-          view_leading(article2.leading),
+          view_leading(article2.leading, article2.id),
           view_article_content(
             view_h2,
             view_h2,
             view_h2,
-            view_subtitle,
             view_paragraph,
             view_unknown,
             content2
@@ -6865,7 +6847,7 @@ function view_article(article2) {
   }
   let content = _block;
   return toList([
-    article(toList([]), content),
+    article(toList([class$("with-transition")]), content),
     p(
       toList([class$("mt-14")]),
       toList([view_link(new Articles(), "<- Go back?")])
