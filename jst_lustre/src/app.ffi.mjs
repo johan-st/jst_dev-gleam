@@ -1,6 +1,8 @@
 import { Ok, Error } from "./gleam.mjs";
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { kv } from '@nats-io/kv';
+import { connect, deferred, nuid } from "@nats-io/transport-node";
 
 
 
@@ -62,4 +64,12 @@ export function setup_websocket(path, on_open, on_message, on_close, on_error) {
         on_error(data);
     };
     return new Ok(undefined);
+}
+
+export async function nats_init(on_unhandled) {
+    const nc = await connect({ servers: "localhost:4222" });
+    nc.subscribe('>', (msg) => {
+        console.log("ffi: nats_init: Message received", msg);
+        on_unhandled(msg);
+    });
 }

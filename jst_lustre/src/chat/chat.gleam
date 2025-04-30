@@ -47,7 +47,7 @@ pub fn init() -> #(Model, Effect(Msg)) {
           image: "",
         ),
       ],
-      is_open: False,
+      is_open: True,
       contacts: [
         Contact(
           id: 1,
@@ -90,185 +90,41 @@ pub fn update(msg: Msg, model: Model) -> #(Model, Effect(Msg)) {
 // VIEW ------------------------------------------------------------------------
 
 pub fn view(msg, model: Model) -> List(Element(msg)) {
-  [
-    view_open_button(msg),
-    html.div(
-      [
-        attribute.class("relative z-10"),
-        attribute.classes([#("pointer-events-none", !model.is_open)]),
-        attribute.role("dialog"),
-        attribute.attribute("aria-labelledby", "slide-over-title"),
-        attribute.attribute("aria-modal", "true"),
-        event.on_click(msg(CloseChat)),
-      ],
-      [
-        html.div(
-          [
-            attribute.class("fixed inset-0"),
-            attribute.classes([#("hidden", !model.is_open)]),
-          ],
-          [],
-        ),
-        html.div([attribute.class("fixed inset-0 overflow-hidden")], [
-          html.div([attribute.class("absolute inset-0 overflow-hidden")], [
-            html.div(
-              [
-                attribute.class(
-                  "pointer-events-none fixed inset-y-0 right-0 flex max-w-full pl-10 sm:pl-16",
-                ),
-              ],
-              [
-                html.div(
-                  [
-                    attribute.class(
-                      "pointer-events-auto w-screen max-w-md transform transition ease-in-out duration-500 sm:duration-700",
-                    ),
-                    attribute.classes([
-                      #("translate-x-full", !model.is_open),
-                      #("translate-x-0", model.is_open),
-                    ]),
-                  ],
-                  [
-                    html.div(
-                      [
-                        attribute.class(
-                          "flex h-full flex-col overflow-y-scroll bg-white shadow-xl",
-                        ),
-                      ],
-                      [
-                        html.div([attribute.class("p-6")], [
-                          html.div(
-                            [
-                              attribute.class(
-                                "flex items-start justify-between",
-                              ),
-                            ],
-                            [
-                              html.h2(
-                                [
-                                  attribute.class(
-                                    "text-base font-semibold text-gray-900",
-                                  ),
-                                ],
-                                [html.text("Team")],
-                              ),
-                              html.div(
-                                [attribute.class("ml-3 flex h-7 items-center")],
-                                [
-                                  html.button(
-                                    [
-                                      attribute.class(
-                                        "relative rounded-md bg-white text-gray-400 hover:text-gray-500 focus:ring-2 focus:ring-indigo-500",
-                                      ),
-                                      event.on_click(msg(CloseChat)),
-                                    ],
-                                    [
-                                      html.span(
-                                        [attribute.class("absolute -inset-2.5")],
-                                        [],
-                                      ),
-                                      html.span([attribute.class("sr-only")], [
-                                        html.text("Close panel"),
-                                      ]),
-                                      html.svg(
-                                        [
-                                          attribute.class("size-6"),
-                                          attribute.attribute("fill", "none"),
-                                          attribute.attribute(
-                                            "viewBox",
-                                            "0 0 24 24",
-                                          ),
-                                          attribute.attribute(
-                                            "stroke-width",
-                                            "1.5",
-                                          ),
-                                          attribute.attribute(
-                                            "stroke",
-                                            "currentColor",
-                                          ),
-                                          attribute.attribute(
-                                            "aria-hidden",
-                                            "true",
-                                          ),
-                                          attribute.attribute(
-                                            "data-slot",
-                                            "icon",
-                                          ),
-                                        ],
-                                        [
-                                          svg.path([
-                                            attribute.attribute(
-                                              "stroke-linecap",
-                                              "round",
-                                            ),
-                                            attribute.attribute(
-                                              "stroke-linejoin",
-                                              "round",
-                                            ),
-                                            attribute.attribute(
-                                              "d",
-                                              "M6 18 18 6M6 6l12 12",
-                                            ),
-                                          ]),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ]),
-                        html.div([attribute.class("border-b border-gray-200")], [
-                          html.div([attribute.class("px-6")], [
-                            // <!-- Tab component -->
-                            html.nav(
-                              [attribute.class("-mb-px flex space-x-6")],
-                              [
-                                // <!-- Current: "border-indigo-500 text-indigo-600", Default: "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700" -->
-                                html.a(
-                                  [
-                                    attribute.class(
-                                      "border-indigo-500 text-indigo-600",
-                                    ),
-                                    attribute.attribute("href", "#"),
-                                  ],
-                                  [html.text("All")],
-                                ),
-                                html.a(
-                                  [
-                                    attribute.class(
-                                      "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700",
-                                    ),
-                                    attribute.attribute("href", "#"),
-                                  ],
-                                  [html.text("Online")],
-                                ),
-                                html.a(
-                                  [
-                                    attribute.class(
-                                      "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700",
-                                    ),
-                                    attribute.attribute("href", "#"),
-                                  ],
-                                  [html.text("Offline")],
-                                ),
-                              ],
-                            ),
-                          ]),
-                        ]),
-                        view_contacts(msg, model),
-                      ],
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ]),
-        ]),
-      ],
-    ),
-  ]
+  [view_open_button(msg), view_drawer(msg, model)]
+}
+
+fn view_tabs(msg, model: Model) -> Element(msg) {
+  html.div([attribute.class("px-6")], [
+    // <!-- Tab component -->
+    html.nav([attribute.class("-mb-px flex space-x-6")], [
+      // <!-- Current: "border-indigo-500 text-indigo-600", Default: "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700" -->
+      html.a(
+        [
+          attribute.class("border-pink-700 text-pink-700 font-normal"),
+          attribute.attribute("href", "#"),
+        ],
+        [html.text("All")],
+      ),
+      html.a(
+        [
+          attribute.class(
+            "border-transparent text-zinc-200 hover:border-zinc-400 hover:text-zinc-400",
+          ),
+          attribute.attribute("href", "#"),
+        ],
+        [html.text("Online")],
+      ),
+      html.a(
+        [
+          attribute.class(
+            "border-transparent text-zinc-200 hover:border-zinc-400 hover:text-zinc-400",
+          ),
+          attribute.attribute("href", "#"),
+        ],
+        [html.text("Offline")],
+      ),
+    ]),
+  ])
 }
 
 fn view_open_button(msg) -> Element(msg) {
@@ -280,6 +136,47 @@ fn view_open_button(msg) -> Element(msg) {
       event.on_click(msg(OpenChat)),
     ],
     [html.text("Talk")],
+  )
+}
+
+fn view_svg_cross() -> Element(msg) {
+  html.svg(
+    [
+      attribute.class("size-6"),
+      attribute.attribute("fill", "none"),
+      attribute.attribute("viewBox", "0 0 24 24"),
+      attribute.attribute("stroke-width", "1.5"),
+      attribute.attribute("stroke", "currentColor"),
+      attribute.attribute("aria-hidden", "true"),
+      attribute.attribute("data-slot", "icon"),
+    ],
+    [
+      svg.path([
+        attribute.attribute("stroke-linecap", "round"),
+        attribute.attribute("stroke-linejoin", "round"),
+        attribute.attribute("d", "M6 18 18 6M6 6l12 12"),
+      ]),
+    ],
+  )
+}
+
+fn view_svg_dots() -> Element(msg) {
+  html.svg(
+    [
+      attribute.class("size-5 text-zinc-400 group-hover:text-pink-700"),
+      attribute.attribute("viewBox", "0 0 20 20"),
+      attribute.attribute("fill", "currentColor"),
+      attribute.attribute("aria-hidden", "true"),
+      attribute.attribute("data-slot", "icon"),
+    ],
+    [
+      svg.path([
+        attribute.attribute(
+          "d",
+          "M10 3a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM10 8.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM11.5 15.5a1.5 1.5 0 1 0-3 0 1.5 1.5 0 0 0 3 0Z",
+        ),
+      ]),
+    ],
   )
 }
 
@@ -299,7 +196,7 @@ fn view_contact(msg, contact: Contact) -> Element(msg) {
     html.div([attribute.class("group relative flex items-center px-5 py-6")], [
       html.a([attribute.class("-m-1 block flex-1 p-1")], [
         html.div(
-          [attribute.class("absolute inset-0 group-hover:bg-gray-50")],
+          [attribute.class("absolute inset-0 group-hover:bg-zinc-700")],
           [],
         ),
         html.div(
@@ -319,7 +216,7 @@ fn view_contact(msg, contact: Contact) -> Element(msg) {
                   ),
                   attribute.classes([
                     #("bg-green-400", contact.status),
-                    #("bg-gray-300", !contact.status),
+                    #("bg-zinc-300", !contact.status),
                   ]),
                   attribute.attribute("aria-hidden", "true"),
                 ],
@@ -328,10 +225,10 @@ fn view_contact(msg, contact: Contact) -> Element(msg) {
             ]),
             html.div([attribute.class("ml-4 truncate")], [
               html.p(
-                [attribute.class("truncate text-sm font-medium text-gray-900")],
+                [attribute.class("truncate text-sm font-medium text-zinc-200")],
                 [html.text(contact.name)],
               ),
-              html.p([attribute.class("truncate text-sm text-gray-500")], [
+              html.p([attribute.class("truncate text-sm text-zinc-400")], [
                 html.text(contact.username),
               ]),
             ]),
@@ -361,27 +258,7 @@ fn view_contact(msg, contact: Contact) -> Element(msg) {
                     "flex size-full items-center justify-center rounded-full",
                   ),
                 ],
-                [
-                  html.svg(
-                    [
-                      attribute.class(
-                        "size-5 text-gray-400 group-hover:text-gray-500",
-                      ),
-                      attribute.attribute("viewBox", "0 0 20 20"),
-                      attribute.attribute("fill", "currentColor"),
-                      attribute.attribute("aria-hidden", "true"),
-                      attribute.attribute("data-slot", "icon"),
-                    ],
-                    [
-                      svg.path([
-                        attribute.attribute(
-                          "d",
-                          "M10 3a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM10 8.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM11.5 15.5a1.5 1.5 0 1 0-3 0 1.5 1.5 0 0 0 3 0Z",
-                        ),
-                      ]),
-                    ],
-                  ),
-                ],
+                [view_svg_dots()],
               ),
             ],
           ),
@@ -398,7 +275,7 @@ fn view_contact(msg, contact: Contact) -> Element(msg) {
           html.div(
             [
               attribute.class(
-                "absolute right-9 top-0 z-10 w-48 origin-top-right rounded-md bg-white shadow-lg ring-1 ring-black/5 focus:outline-none",
+                "absolute right-9 top-0 z-10 w-48 origin-top-right rounded-md bg-white shadow-lg ring-1 ring-black/5 focus:outline-none hidden",
               ),
               attribute.attribute("role", "menu"),
               attribute.attribute("aria-orientation", "vertical"),
@@ -437,4 +314,103 @@ fn view_contact(msg, contact: Contact) -> Element(msg) {
       ),
     ]),
   ])
+}
+
+fn view_drawer(msg, model: Model) -> Element(msg) {
+  html.div(
+    [
+      attribute.class("relative z-10"),
+      attribute.classes([#("pointer-events-none", !model.is_open)]),
+      attribute.role("dialog"),
+      attribute.attribute("aria-labelledby", "slide-over-title"),
+      attribute.attribute("aria-modal", "true"),
+      event.on_click(msg(CloseChat)),
+    ],
+    [
+      html.div(
+        [
+          attribute.class("fixed inset-0"),
+          attribute.classes([#("hidden", !model.is_open)]),
+        ],
+        [],
+      ),
+      html.div([attribute.class("fixed inset-0 overflow-hidden")], [
+        html.div([attribute.class("absolute inset-0 overflow-hidden")], [
+          html.div(
+            [
+              attribute.class(
+                "pointer-events-none fixed inset-y-0 right-0 flex max-w-full pl-10 sm:pl-16",
+              ),
+            ],
+            [
+              html.div(
+                [
+                  attribute.class(
+                    "pointer-events-auto w-screen max-w-md transform transition ease-in-out duration-500 sm:duration-700",
+                  ),
+                  attribute.classes([
+                    #("translate-x-full", !model.is_open),
+                    #("translate-x-0", model.is_open),
+                  ]),
+                ],
+                [
+                  html.div(
+                    [
+                      attribute.class(
+                        "flex h-full flex-col overflow-y-scroll border-l border-zinc-700 bg-zinc-800 shadow-xl",
+                      ),
+                    ],
+                    [
+                      html.div([attribute.class("p-6")], [
+                        html.div(
+                          [attribute.class("flex items-start justify-between")],
+                          [
+                            html.h2(
+                              [
+                                attribute.class(
+                                  "text-base font-semibold text-zinc-200",
+                                ),
+                              ],
+                              [html.text("Who's online?")],
+                            ),
+                            html.div(
+                              [attribute.class("ml-3 flex h-7 items-center")],
+                              [
+                                html.button(
+                                  [
+                                    attribute.class(
+                                      "relative rounded-md bg-zinc-800 hover:bg-zinc-900 text-zinc-400 hover:text-zinc-300 focus:ring-2 focus:ring-pink-700",
+                                    ),
+                                    event.on_click(msg(CloseChat)),
+                                  ],
+                                  [
+                                    html.span(
+                                      [attribute.class("absolute -inset-2.5")],
+                                      [],
+                                    ),
+                                    html.span([attribute.class("sr-only")], [
+                                      html.text("Close panel"),
+                                    ]),
+                                    view_svg_cross(),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ]),
+                      html.div([attribute.class("border-b border-zinc-400")], [
+                        view_tabs(msg, model),
+                      ]),
+                      view_contacts(msg, model),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ]),
+      ]),
+    ],
+  )
 }

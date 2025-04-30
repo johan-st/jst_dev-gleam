@@ -7,12 +7,20 @@ import lustre/element.{type Element}
 import utils/http
 
 pub type Article {
-  Article(
+  ArticleSummary(id: Int, title: String, leading: String, subtitle: String)
+  ArticleFull(
     id: Int,
     title: String,
     leading: String,
     subtitle: String,
-    content: Option(List(Content)),
+    content: List(Content),
+  )
+  ArticleWithError(
+    id: Int,
+    title: String,
+    leading: String,
+    subtitle: String,
+    error: String,
   )
 }
 
@@ -46,7 +54,6 @@ pub fn view_article_content(
       }
       case content {
         Heading(text) -> view_heading(text)
-        // Leading(text) -> view_leading(text)
         Paragraph(text) -> view_paragraph(text)
         Unknown(text) -> view_unknown(text)
         Block(_) -> view_unknown("Block")
@@ -91,10 +98,6 @@ fn article_decoder() -> decode.Decoder(Article) {
   use title <- decode.field("title", decode.string)
   use leading <- decode.field("leading", decode.string)
   use subtitle <- decode.field("subtitle", decode.string)
-  // use content <- decode.field(
-  //   "content",
-  //   decode.optional(decode.list(content_decoder())),
-  // )
   use content <- decode.optional_field(
     "content",
     None,
@@ -104,5 +107,23 @@ fn article_decoder() -> decode.Decoder(Article) {
     Some([]) -> None
     _ -> content
   }
-  decode.success(Article(id:, title:, leading:, subtitle:, content:))
+  case content {
+    Some(content) -> {
+      decode.success(ArticleFull(id:, title:, leading:, subtitle:, content:))
+    }
+    None -> {
+      decode.success(ArticleSummary(id:, title:, leading:, subtitle:))
+    }
+  }
+}
+
+// Loading ---------------------------------------------------------------------
+
+pub fn loading_article() -> Article {
+  ArticleSummary(
+    id: 0,
+    title: "fetching articles..",
+    subtitle: "articles have not been fetched yet",
+    leading: "This is a placeholder article. At the moment, the articles are being fetched from the server.. please wait.",
+  )
 }

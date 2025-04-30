@@ -1,6 +1,8 @@
 // IMPORTS ---------------------------------------------------------------------
 
-import article/article.{type Article}
+import article/article.{
+  type Article, ArticleFull, ArticleSummary, ArticleWithError,
+}
 import chat/chat
 import gleam/dict.{type Dict}
 import gleam/int
@@ -34,7 +36,7 @@ pub fn main() {
 
 type Model {
   Model(
-    articles: Dict(Int, article.Article),
+    articles: Dict(Int, Article),
     route: Route,
     user_messages: List(UserMessage),
     chat: chat.Model,
@@ -111,7 +113,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
       |> parse_route
       |> UserNavigatedTo
     })
-  let effect_route = effect_navigation(model.route)
+  let effect_route = effect_navigation(model)
   #(
     model,
     effect.batch([
@@ -134,9 +136,9 @@ type Msg {
   WebsocketOnClose(data: String)
   WebsocketOnError(data: String)
   WebsocketOnOpen(data: String)
-  // ArticleMsg(msg: article.Msg)
-  GotArticle(result: Result(Article, HttpError))
+  GotArticle(id: Int, result: Result(Article, HttpError))
   GotArticleSummaries(result: Result(List(Article), http.HttpError))
+  ArticleHovered(article: Article)
   UserMessageDismissed(msg: UserMessage)
   // CHAT
   ChatMsg(msg: chat.Msg)
@@ -145,8 +147,7 @@ type Msg {
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
     UserNavigatedTo(route:) -> {
-      let effect = effect_navigation(route)
-      #(Model(..model, route:), effect)
+      update_user_navigated_to(model, route)
     }
     InjectMarkdownResult(_) -> {
       #(model, effect.none())
@@ -155,124 +156,61 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(model, article.get_metadata_all(GotArticleSummaries))
     }
     WebsocketConnetionResult(result:) -> {
-      case result {
+      let user_message = case result {
         Ok(_) -> {
-          let user_messages =
-            list.append(model.user_messages, [
-              UserInfo(next_user_message_id(model.user_messages), "connected"),
-            ])
-          #(Model(..model, user_messages:), effect.none())
+          UserInfo(user_message_id_next(model.user_messages), "connected")
         }
         Error(_) -> {
-          let user_messages =
-            list.append(model.user_messages, [
-              UserError(
-                next_user_message_id(model.user_messages),
-                "failed to connect",
-              ),
-            ])
-          #(Model(..model, user_messages:), effect.none())
+          UserError(
+            user_message_id_next(model.user_messages),
+            "failed to connect",
+          )
         }
       }
+      let user_messages = list.append(model.user_messages, [user_message])
+      #(Model(..model, user_messages:), effect.none())
     }
     WebsocketOnMessage(data:) -> {
-      let user_messages =
-        list.append(model.user_messages, [
-          UserInfo(
-            next_user_message_id(model.user_messages),
-            "ws msg: " <> data,
-          ),
-        ])
-      #(Model(..model, user_messages:), effect.none())
+      update_websocket_on_message(model, data)
     }
     WebsocketOnClose(data:) -> {
-      let user_messages =
-        list.append(model.user_messages, [
-          UserWarning(
-            next_user_message_id(model.user_messages),
-            "ws closed: " <> data,
-          ),
-        ])
-      #(Model(..model, user_messages:), effect.none())
+      update_websocket_on_close(model, data)
     }
     WebsocketOnError(data:) -> {
-      let user_messages =
-        list.append(model.user_messages, [
-          UserError(
-            next_user_message_id(model.user_messages),
-            "ws error: " <> data,
-          ),
-        ])
-      #(Model(..model, user_messages:), effect.none())
+      update_websocket_on_error(model, data)
     }
     WebsocketOnOpen(data:) -> {
-      let user_messages =
-        list.append(model.user_messages, [
-          UserInfo(
-            next_user_message_id(model.user_messages),
-            "ws open: " <> data,
-          ),
-        ])
-      #(Model(..model, user_messages:), effect.none())
+      update_websocket_on_open(model, data)
     }
     GotArticleSummaries(result:) -> {
-      case result {
-        Ok(articles) -> {
-          let articles = articles_update(model.articles, articles)
-          #(Model(..model, articles:), effect.none())
-        }
-        Error(err) -> {
-          let error_string = error_string.http_error(err)
-          let user_messages =
-            list.append(model.user_messages, [
-              UserError(next_user_message_id(model.user_messages), error_string),
-            ])
-          #(Model(..model, user_messages:), effect.none())
-        }
-      }
+      update_got_article_summaries(model, result)
     }
-    GotArticle(result:) -> {
+    GotArticle(id, result) -> {
       case result {
         Ok(article) -> {
           let articles = dict.insert(model.articles, article.id, article)
-          echo articles
           #(Model(..model, articles:), effect.none())
         }
-        Error(err) -> {
-          let error_string = error_string.http_error(err)
-          echo err
-          case err {
-            http.JsonError(json.UnexpectedByte("")) -> {
-              let user_messages =
-                list.append(model.user_messages, [
-                  UserInfo(
-                    next_user_message_id(model.user_messages),
-                    "Article content was not available",
-                  ),
-                ])
-              #(
-                Model(..model, user_messages:),
-                modem.replace("/articles", None, None),
-              )
-            }
-            _ -> {
-              let user_messages =
-                list.append(model.user_messages, [
-                  UserError(
-                    next_user_message_id(model.user_messages),
-                    "unhandled error\n" <> error_string,
-                  ),
-                ])
-              #(Model(..model, user_messages:), effect.none())
-            }
-          }
+        Error(err) -> update_got_article_error(model, err, id)
+      }
+    }
+    ArticleHovered(article:) -> {
+      case article {
+        ArticleSummary(id, _, _, _) -> {
+          #(
+            model,
+            article.get_article(fn(result) { GotArticle(id, result) }, id),
+          )
+        }
+        ArticleFull(_, _, _, _, _) -> {
+          #(model, effect.none())
+        }
+        ArticleWithError(_, _, _, _, _) -> {
+          #(model, effect.none())
         }
       }
     }
     UserMessageDismissed(msg) -> {
-      echo "msg dismissed"
-      echo msg
-
       let user_messages = list.filter(model.user_messages, fn(m) { m != msg })
       #(Model(..model, user_messages:), effect.none())
     }
@@ -286,24 +224,170 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   }
 }
 
-fn effect_navigation(route: Route) -> Effect(Msg) {
-  case route {
-    // ArticleById(id) -> article.get_article(GotArticle, id)
-    _ -> effect.none()
+fn update_user_navigated_to(model: Model, route: Route) -> #(Model, Effect(Msg)) {
+  #(Model(..model, route:), effect_navigation(model))
+}
+
+fn effect_navigation(model: Model) -> Effect(Msg) {
+  case model.route {
+    ArticleById(id) -> {
+      let article = dict.get(model.articles, id)
+      case article {
+        Ok(article) -> {
+          case article {
+            ArticleSummary(id, _, _, _) -> {
+              echo "loading article content"
+              article.get_article(fn(result) { GotArticle(id, result) }, id)
+            }
+            ArticleFull(_, _, _, _, _) -> {
+              echo "article content already loaded"
+              effect.none()
+            }
+            ArticleWithError(_, _, _, _, _) -> {
+              echo "article errored"
+              effect.none()
+            }
+          }
+        }
+        Error(_) -> {
+          echo "no article found for id: " <> int.to_string(id)
+          effect.none()
+        }
+      }
+    }
+    _ -> {
+      echo "no effect for route: " <> route_url(model.route)
+      effect.none()
+    }
+  }
+}
+
+fn update_websocket_on_message(
+  model: Model,
+  data: String,
+) -> #(Model, Effect(Msg)) {
+  echo "message: " <> data
+  #(model, effect.none())
+}
+
+fn update_websocket_on_close(
+  model: Model,
+  data: String,
+) -> #(Model, Effect(Msg)) {
+  echo "close: " <> data
+  #(model, effect.none())
+}
+
+fn update_websocket_on_error(
+  model: Model,
+  data: String,
+) -> #(Model, Effect(Msg)) {
+  echo "error: " <> data
+  #(model, effect.none())
+}
+
+fn update_websocket_on_open(model: Model, data: String) -> #(Model, Effect(Msg)) {
+  echo "open: " <> data
+  #(model, effect.none())
+}
+
+fn update_got_article_summaries(
+  model: Model,
+  result: Result(List(Article), http.HttpError),
+) {
+  case result {
+    Ok(articles) -> {
+      let articles = articles_update(model.articles, articles)
+      let effect = case model.route {
+        ArticleById(id) -> {
+          echo "loading article content"
+          effect_navigation(Model(..model, articles:))
+        }
+        _ -> {
+          echo "no effect for route: " <> route_url(model.route)
+          effect.none()
+        }
+      }
+      #(Model(..model, articles:), effect)
+    }
+    Error(err) -> {
+      let error_string = error_string.http_error(err)
+      let user_messages =
+        list.append(model.user_messages, [
+          UserError(user_message_id_next(model.user_messages), error_string),
+        ])
+      #(Model(..model, user_messages:), effect.none())
+    }
+  }
+}
+
+fn update_got_article_error(
+  model: Model,
+  err: HttpError,
+  id: Int,
+) -> #(Model, Effect(Msg)) {
+  let error_string =
+    "failed to load article (id: "
+    <> int.to_string(id)
+    <> "): "
+    <> error_string.http_error(err)
+  case err {
+    http.JsonError(json.UnexpectedByte(_)) -> {
+      let user_messages =
+        list.append(model.user_messages, [
+          UserError(user_message_id_next(model.user_messages), error_string),
+        ])
+      let articles =
+        dict.map_values(model.articles, fn(_, article) {
+          case article {
+            ArticleFull(article_id, _, _, _, _)
+            | ArticleSummary(article_id, _, _, _) -> {
+              case article_id == id {
+                True -> {
+                  ArticleWithError(
+                    id,
+                    article.title,
+                    article.leading,
+                    article.subtitle,
+                    error_string,
+                  )
+                }
+                False -> article
+              }
+            }
+            _ -> article
+          }
+        })
+      #(Model(..model, user_messages:, articles:), effect.none())
+    }
+    _ -> {
+      echo err
+      let user_messages =
+        list.append(model.user_messages, [
+          UserError(
+            user_message_id_next(model.user_messages),
+            "UNHANDLED ERROR while loading article (id:"
+              <> int.to_string(id)
+              <> "): "
+              <> error_string,
+          ),
+        ])
+      #(Model(..model, user_messages:), effect.none())
+    }
   }
 }
 
 fn articles_update(
-  old_articles: Dict(Int, article.Article),
-  new_articles: List(article.Article),
-) -> Dict(Int, article.Article) {
+  old_articles: Dict(Int, Article),
+  new_articles: List(Article),
+) -> Dict(Int, Article) {
   new_articles
   |> list.map(fn(article) { #(article.id, article) })
   |> dict.from_list
   |> dict.merge(old_articles)
 }
 
-fn next_user_message_id(user_messages: List(UserMessage)) -> Int {
+fn user_message_id_next(user_messages: List(UserMessage)) -> Int {
   case list.last(user_messages) {
     Ok(msg) -> msg.id + 1
     Error(_) -> 0
@@ -314,7 +398,12 @@ fn next_user_message_id(user_messages: List(UserMessage)) -> Int {
 
 fn view(model: Model) -> Element(Msg) {
   html.div(
-    [attribute.class("text-zinc-400 h-full w-full text-lg font-thin mx-auto")],
+    [
+      attribute.class("text-zinc-400 h-full w-full text-lg font-thin mx-auto"),
+      attribute.class(
+        "focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2 focus:ring-offset-orange-50",
+      ),
+    ],
     [
       view_header(model),
       html.div(
@@ -327,24 +416,40 @@ fn view(model: Model) -> Element(Msg) {
         // views based on the current page!
         case model.route {
           Index -> view_index()
-          Articles -> view_article_listing(model.articles)
+          Articles -> {
+            case dict.is_empty(model.articles) {
+              True ->
+                view_article_listing(
+                  dict.from_list([#(0, article.loading_article())]),
+                )
+              False -> view_article_listing(model.articles)
+            }
+          }
           ArticleById(id) -> {
-            let article = dict.get(model.articles, id)
-            case article {
-              Ok(article) -> view_article(article)
-              Error(_) -> view_not_found()
+            case dict.is_empty(model.articles) {
+              True -> {
+                echo "no articles loaded"
+                view_article(article.loading_article())
+              }
+              False -> {
+                let article = dict.get(model.articles, id)
+                case article {
+                  Ok(article) -> view_article(article)
+                  Error(_) -> view_not_found()
+                }
+              }
             }
           }
           About -> view_about()
           NotFound(_) -> view_not_found()
         }
       }),
-      ..chat.view(ChatMsg, model.chat)
+      // ..chat.view(ChatMsg, model.chat)
     ],
   )
 }
 
-// VIEW HEADER ----------------------------------------------------------------
+// VIEW HEADER ----------------------------------------------------------------påökjölmnnm,öoigbo9ybnpuhbp.,kb iuu
 fn view_header(model: Model) -> Element(Msg) {
   html.nav(
     [attribute.class("py-2 border-b bg-zinc-800 border-pink-700 font-mono ")],
@@ -516,44 +621,6 @@ fn view_user_message(msg: UserMessage) -> Element(Msg) {
       )
     }
   }
-  // <div class="border-l-4 border-yellow-400 bg-yellow-50 p-4">
-  //   <div class="flex">
-  //     <div class="shrink-0">
-  //       <svg class="size-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-slot="icon">
-  //         <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495ZM10 5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 10 5Zm0 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clip-rule="evenodd" />
-  //       </svg>
-  //     </div>
-  //     <div class="ml-3">
-  //       <p class="text-sm text-yellow-700">
-  //         You have no credits left.
-  //         <a href="#" class="font-medium text-yellow-700 underline hover:text-yellow-600">Upgrade your account to add more credits.</a>
-  //       </p>
-  //     </div>
-  //   </div>
-  // </div>
-
-  // <div class="rounded-md bg-green-50 p-4">
-  //   <div class="flex">
-  //     <div class="shrink-0">
-  //       <svg class="size-5 text-green-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-slot="icon">
-  //         <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clip-rule="evenodd" />
-  //       </svg>
-  //     </div>
-  //     <div class="ml-3">
-  //       <p class="text-sm font-medium text-green-800">Successfully uploaded</p>
-  //     </div>
-  //     <div class="ml-auto pl-3">
-  //       <div class="-mx-1.5 -my-1.5">
-  //         <button type="button" class="inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50">
-  //           <span class="sr-only">Dismiss</span>
-  //           <svg class="size-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-slot="icon">
-  //             <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-  //           </svg>
-  //         </button>
-  //       </div>
-  //     </div>
-  //   </div>
-  // </div>
 }
 
 // VIEW PAGES ------------------------------------------------------------------
@@ -593,61 +660,94 @@ fn view_index() -> List(Element(msg)) {
   ]
 }
 
-fn view_article_listing(
-  articles: Dict(Int, article.Article),
-) -> List(Element(msg)) {
+fn view_article_listing(articles: Dict(Int, Article)) -> List(Element(Msg)) {
   let articles =
     articles
     |> dict.values
     |> list.sort(fn(a, b) { int.compare(a.id, b.id) })
     |> list.map(fn(article) {
-      html.article([attribute.class("mt-14 wi")], [
-        html.a(
-          [
-            attribute.class(
-              "group block  border-l border-zinc-700  pl-4 hover:border-pink-700",
-            ),
-            href(ArticleById(article.id)),
-          ],
-          [
-            html.h3(
+      case article {
+        ArticleFull(id, title, leading, subtitle, _)
+        | ArticleSummary(id, title, leading, subtitle) -> {
+          html.article([attribute.class("mt-14")], [
+            html.a(
               [
-                attribute.id("article-title-" <> int.to_string(article.id)),
-                attribute.class("article-title"),
-                attribute.class("text-xl text-pink-700 font-light"),
+                attribute.class(
+                  "group block  border-l border-zinc-700  pl-4 hover:border-pink-700",
+                ),
+                href(ArticleById(article.id)),
+                event.on_mouse_enter(ArticleHovered(article)),
               ],
-              [html.text(article.title)],
+              [
+                html.h3(
+                  [
+                    attribute.id("article-title-" <> int.to_string(id)),
+                    attribute.class("article-title"),
+                    attribute.class("text-xl text-pink-700 font-light"),
+                  ],
+                  [html.text(title)],
+                ),
+                view_subtitle(subtitle, id),
+                view_paragraph(leading),
+              ],
             ),
-            view_subtitle(article.subtitle, article.id),
-            view_paragraph(article.leading),
-          ],
-        ),
-      ])
+          ])
+        }
+        ArticleWithError(id, title, leading, subtitle, error) -> {
+          html.article([attribute.class("mt-14")], [
+            html.a(
+              [
+                attribute.class(
+                  "group block  border-l border-zinc-700  pl-4 hover:border-pink-700",
+                ),
+              ],
+              [
+                html.h3(
+                  [
+                    attribute.id("article-title-" <> int.to_string(id)),
+                    attribute.class("article-title"),
+                    attribute.class("text-xl text-pink-700 font-light"),
+                  ],
+                  [html.text(title)],
+                ),
+                view_subtitle(subtitle, id),
+                view_error(error),
+              ],
+            ),
+          ])
+        }
+      }
     })
 
   [view_title("Articles", 0), ..articles]
 }
 
-fn view_article(article: article.Article) -> List(Element(msg)) {
-  let content = case article.content {
-    None -> [
-      view_title(article.title, article.id),
-      view_subtitle(article.subtitle, article.id),
-      view_leading(article.leading, article.id),
-      view_paragraph("failed to fetch article.."),
+fn view_article(article: Article) -> List(Element(msg)) {
+  let content = case article {
+    ArticleSummary(id, title, leading, subtitle) -> [
+      view_title(title, id),
+      view_subtitle(subtitle, id),
+      view_leading(leading, id),
+      view_paragraph("loading content.."),
     ]
-    Some(content) -> [
-      view_title(article.title, article.id),
-      view_subtitle(article.subtitle, article.id),
-      view_leading(article.leading, article.id),
+    ArticleFull(id, title, leading, subtitle, content) -> [
+      view_title(title, id),
+      view_subtitle(subtitle, id),
+      view_leading(leading, id),
       ..article.view_article_content(
         view_h2,
         view_h2,
         view_h2,
         view_paragraph,
-        view_unknown,
+        view_error,
         content,
       )
+    ]
+    ArticleWithError(id, title, leading, subtitle, error) -> [
+      view_title(title, id),
+      view_subtitle(subtitle, id),
+      view_leading(leading, id),
+      view_error(error),
     ]
   }
 
@@ -753,12 +853,8 @@ fn view_paragraph(text: String) -> Element(msg) {
   html.p([attribute.class("pt-8")], [html.text(text)])
 }
 
-fn view_unknown(unknown_type: String) -> Element(msg) {
-  html.p([attribute.class("pt-8 text-orange-500")], [
-    html.text(
-      "Some content is missing. (Unknown content type: " <> unknown_type <> ")",
-    ),
-  ])
+fn view_error(error_string: String) -> Element(msg) {
+  html.p([attribute.class("pt-8 text-orange-500")], [html.text(error_string)])
 }
 
 fn view_link(target: Route, title: String) -> Element(msg) {
