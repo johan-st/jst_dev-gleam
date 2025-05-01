@@ -113,7 +113,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
       |> parse_route
       |> UserNavigatedTo
     })
-  let effect_route = effect_navigation(model)
+  let effect_route = effect_navigation(model, route)
   #(
     model,
     effect.batch([
@@ -147,7 +147,7 @@ type Msg {
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
     UserNavigatedTo(route:) -> {
-      update_user_navigated_to(model, route)
+      #(Model(..model, route:), effect_navigation(model, route))
     }
     InjectMarkdownResult(_) -> {
       #(model, effect.none())
@@ -224,12 +224,8 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   }
 }
 
-fn update_user_navigated_to(model: Model, route: Route) -> #(Model, Effect(Msg)) {
-  #(Model(..model, route:), effect_navigation(model))
-}
-
-fn effect_navigation(model: Model) -> Effect(Msg) {
-  case model.route {
+fn effect_navigation(model: Model, route: Route) -> Effect(Msg) {
+  case route {
     ArticleById(id) -> {
       let article = dict.get(model.articles, id)
       case article {
@@ -245,7 +241,7 @@ fn effect_navigation(model: Model) -> Effect(Msg) {
             }
             ArticleWithError(_, _, _, _, _) -> {
               echo "article errored"
-              effect.none()
+              article.get_article(fn(result) { GotArticle(id, result) }, id)
             }
           }
         }
@@ -256,7 +252,6 @@ fn effect_navigation(model: Model) -> Effect(Msg) {
       }
     }
     _ -> {
-      echo "no effect for route: " <> route_url(model.route)
       effect.none()
     }
   }
@@ -299,9 +294,9 @@ fn update_got_article_summaries(
     Ok(articles) -> {
       let articles = articles_update(model.articles, articles)
       let effect = case model.route {
-        ArticleById(id) -> {
+        ArticleById(_) -> {
           echo "loading article content"
-          effect_navigation(Model(..model, articles:))
+          effect_navigation(Model(..model, articles:), model.route)
         }
         _ -> {
           echo "no effect for route: " <> route_url(model.route)
@@ -665,56 +660,73 @@ fn view_article_listing(articles: Dict(Int, Article)) -> List(Element(Msg)) {
     articles
     |> dict.values
     |> list.sort(fn(a, b) { int.compare(a.id, b.id) })
-    |> list.map(fn(article) {
+    |> list.index_map(fn(article, index) {
       case article {
         ArticleFull(id, title, leading, subtitle, _)
         | ArticleSummary(id, title, leading, subtitle) -> {
-          html.article([attribute.class("mt-14")], [
-            html.a(
-              [
-                attribute.class(
-                  "group block  border-l border-zinc-700  pl-4 hover:border-pink-700",
-                ),
-                href(ArticleById(article.id)),
-                event.on_mouse_enter(ArticleHovered(article)),
-              ],
-              [
-                html.h3(
-                  [
-                    attribute.id("article-title-" <> int.to_string(id)),
-                    attribute.class("article-title"),
-                    attribute.class("text-xl text-pink-700 font-light"),
-                  ],
-                  [html.text(title)],
-                ),
-                view_subtitle(subtitle, id),
-                view_paragraph(leading),
-              ],
-            ),
-          ])
+          html.article(
+            [
+              attribute.class("mt-14"),
+            ],
+            [
+              html.a(
+                [
+                  attribute.class(
+                    "group block  border-l border-zinc-700  pl-4 hover:border-pink-700 transition-colors duration-50",
+                  ),
+                  href(ArticleById(id)),
+                  event.on_mouse_enter(ArticleHovered(article)),
+                ],
+                [
+                  html.h3(
+                    [
+                      attribute.id("article-title-" <> int.to_string(id)),
+                      attribute.class("article-title"),
+                      attribute.class("text-xl text-pink-700 font-light"),
+                    ],
+                    [html.text(title)],
+                  ),
+                  view_subtitle(subtitle, id),
+                  view_paragraph(leading),
+                ],
+              ),
+            ],
+          )
         }
-        ArticleWithError(id, title, leading, subtitle, error) -> {
-          html.article([attribute.class("mt-14")], [
-            html.a(
-              [
-                attribute.class(
-                  "group block  border-l border-zinc-700  pl-4 hover:border-pink-700",
-                ),
-              ],
-              [
-                html.h3(
-                  [
-                    attribute.id("article-title-" <> int.to_string(id)),
-                    attribute.class("article-title"),
-                    attribute.class("text-xl text-pink-700 font-light"),
-                  ],
-                  [html.text(title)],
-                ),
-                view_subtitle(subtitle, id),
-                view_error(error),
-              ],
-            ),
-          ])
+        ArticleWithError(id, title, _leading, _subtitle, error) -> {
+          html.article(
+            [
+              attribute.class(
+                "mt-14",
+              ),
+              attribute.class("animate-break"),
+            ],
+            [
+              html.a(
+                [
+                  href(ArticleById(id)),
+                  attribute.class(
+                    "group block  border-l border-zinc-700 pl-4 hover:border-zinc-500",
+                  ),
+                ],
+                [
+                  html.h3(
+                    [
+                      attribute.id("article-title-" <> int.to_string(id)),
+                      attribute.class("article-title"),
+                      attribute.class("text-xl font-light w-max-content"),
+                      attribute.class("animate-break--mirror"),
+                    ],
+                    [html.text(title)],
+                  ),
+                  view_subtitle(error, id),
+                  view_error(
+                    "there was an error loading this article. Click to try again.",
+                  ),
+                ],
+              ),
+            ],
+          )
         }
       }
     })
