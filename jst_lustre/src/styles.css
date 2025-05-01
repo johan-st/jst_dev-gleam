@@ -15,7 +15,7 @@
     animation: break 0.15s ease-out 1 forwards;
   }
   .animate-break--mirror {
-    animation: break--mirror 0.45s ease-out 1 forwards;
+    animation: break--mirror 0.15s ease-out 0.08s 1 forwards;
   }
   @keyframes break {
     0% {

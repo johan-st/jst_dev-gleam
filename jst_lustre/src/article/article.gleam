@@ -1,5 +1,6 @@
 import gleam/dynamic/decode
 import gleam/int
+import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import lustre/effect.{type Effect}
@@ -7,9 +8,16 @@ import lustre/element.{type Element}
 import utils/http
 
 pub type Article {
-  ArticleSummary(id: Int, title: String, leading: String, subtitle: String)
+  ArticleSummary(
+    id: Int,
+    revision: Int,
+    title: String,
+    leading: String,
+    subtitle: String,
+  )
   ArticleFull(
     id: Int,
+    revision: Int,
     title: String,
     leading: String,
     subtitle: String,
@@ -17,6 +25,7 @@ pub type Article {
   )
   ArticleWithError(
     id: Int,
+    revision: Int,
     title: String,
     leading: String,
     subtitle: String,
@@ -73,7 +82,7 @@ pub fn get_article(msg, id: Int) -> Effect(a) {
 
 pub fn get_metadata_all(msg) -> Effect(a) {
   let url = "http://127.0.0.1:1234/priv/static/articles.json"
-  http.get(url, http.expect_json(decode.list(article_decoder()), msg))
+  http.get(url, http.expect_json(metadata_decoder(), msg))
 }
 
 fn content_decoder() -> decode.Decoder(Content) {
@@ -93,8 +102,14 @@ fn content_decoder() -> decode.Decoder(Content) {
   }
 }
 
-fn article_decoder() -> decode.Decoder(Article) {
+fn metadata_decoder() -> decode.Decoder(List(Article)) {
+  use articles <- decode.field("articles", decode.list(article_decoder()))
+  decode.success(articles)
+}
+
+pub fn article_decoder() -> decode.Decoder(Article) {
   use id <- decode.field("id", decode.int)
+  use revision <- decode.field("revision", decode.int)
   use title <- decode.field("title", decode.string)
   use leading <- decode.field("leading", decode.string)
   use subtitle <- decode.field("subtitle", decode.string)
@@ -109,10 +124,85 @@ fn article_decoder() -> decode.Decoder(Article) {
   }
   case content {
     Some(content) -> {
-      decode.success(ArticleFull(id:, title:, leading:, subtitle:, content:))
+      decode.success(ArticleFull(
+        id:,
+        revision:,
+        title:,
+        leading:,
+        subtitle:,
+        content:,
+      ))
     }
     None -> {
-      decode.success(ArticleSummary(id:, title:, leading:, subtitle:))
+      decode.success(ArticleSummary(id:, revision:, title:, leading:, subtitle:))
+    }
+  }
+}
+
+// ENCODE ----------------------------------------------------------------------
+
+pub fn article_encoder(article: Article) -> json.Json {
+  case article {
+    ArticleSummary(id, revision, title, leading, subtitle) -> {
+      json.object([
+        #("type", json.string("ArticleSummary_v1")),
+        #("revision", json.int(revision)),
+        #("id", json.int(id)),
+        #("title", json.string(title)),
+        #("leading", json.string(leading)),
+        #("subtitle", json.string(subtitle)),
+      ])
+    }
+    ArticleFull(id, revision, title, leading, subtitle, content) -> {
+      json.object([
+        #("type", json.string("ArticleFull_v1")),
+        #("revision", json.int(revision)),
+        #("id", json.int(id)),
+        #("title", json.string(title)),
+        #("leading", json.string(leading)),
+        #("subtitle", json.string(subtitle)),
+        #("content", json.array(content, of: content_encoder)),
+      ])
+    }
+    ArticleWithError(id, revision, title, leading, subtitle, error) -> {
+      json.object([
+        #("type", json.string("ArticleWithError_v1")),
+        #("revision", json.int(revision)),
+        #("id", json.int(id)),
+        #("title", json.string(title)),
+        #("leading", json.string(leading)),
+        #("subtitle", json.string(subtitle)),
+        #("error", json.string(error)),
+      ])
+    }
+  }
+}
+
+pub fn content_encoder(content: Content) -> json.Json {
+  case content {
+    Block(contents) -> {
+      json.object([
+        #("type", json.string("block")),
+        #("contents", json.array(contents, of: content_encoder)),
+      ])
+    }
+    Heading(text) -> {
+      json.object([
+        #("type", json.string("heading")),
+        #("text", json.string(text)),
+      ])
+    }
+    Paragraph(text) -> {
+      json.object([
+        #("type", json.string("paragraph")),
+        #("text", json.string(text)),
+      ])
+    }
+    Unknown(text) -> {
+      json.object([
+        #("type", json.string("unknown")),
+        #("text", json.string(text)),
+      ])
     }
   }
 }
@@ -121,6 +211,7 @@ fn article_decoder() -> decode.Decoder(Article) {
 
 pub fn loading_article() -> Article {
   ArticleSummary(
+    revision: 0,
     id: 0,
     title: "fetching articles..",
     subtitle: "articles have not been fetched yet",

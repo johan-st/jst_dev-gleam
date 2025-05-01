@@ -5,12 +5,14 @@ import article/article.{
 }
 import chat/chat
 import gleam/dict.{type Dict}
+import gleam/dynamic/decode.{type Decoder, type Dynamic}
 import gleam/int
 import gleam/io
 import gleam/javascript/array
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import gleam/string
 import gleam/uri.{type Uri}
 import lustre
@@ -26,13 +28,15 @@ import utils/http.{type HttpError}
 // MAIN ------------------------------------------------------------------------
 
 pub fn main() {
-  let app = lustre.application(init, update, view)
+  let app = lustre.application(init, update_with_localstorage, view)
   let assert Ok(_) = lustre.start(app, "#app", Nil)
 
   Nil
 }
 
 // MODEL -----------------------------------------------------------------------
+
+const model_localstorage_key = "jst_lustre_state"
 
 type Model {
   Model(
@@ -41,6 +45,10 @@ type Model {
     user_messages: List(UserMessage),
     chat: chat.Model,
   )
+}
+
+type PersistentModel {
+  PersistentModelV1(version: Int, articles: Dict(Int, Article))
 }
 
 type UserMessage {
@@ -73,14 +81,6 @@ fn parse_route(uri: Uri) -> Route {
   }
 }
 
-/// We also need a way to turn a Route back into a an `href` attribute that we
-/// can then use on `html.a` elements. It is important to keep this function in
-/// sync with the parsing, but once you do, all links are guaranteed to work!
-///
-fn href(route: Route) -> Attribute(msg) {
-  attribute.href(route_url(route))
-}
-
 fn route_url(route: Route) -> String {
   case route {
     Index -> "/"
@@ -89,6 +89,10 @@ fn route_url(route: Route) -> String {
     ArticleById(post_id) -> "/article/" <> int.to_string(post_id)
     NotFound(_) -> "/404"
   }
+}
+
+fn href(route: Route) -> Attribute(msg) {
+  attribute.href(route_url(route))
 }
 
 fn init(_) -> #(Model, Effect(Msg)) {
@@ -106,7 +110,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
 
   let #(chat_model, chat_effect) = chat.init()
   let model = Model(route:, articles:, user_messages: [], chat: chat_model)
-  let effect_articles = article.get_metadata_all(GotArticleSummaries)
+  let effect_articles = article.get_metadata_all(GotArticlesMetadata)
   let effect_modem =
     modem.init(fn(uri) {
       uri
@@ -120,7 +124,8 @@ fn init(_) -> #(Model, Effect(Msg)) {
       effect_modem,
       effect_articles,
       effect_route,
-      effect.map(chat_effect, fn(msg) { ChatMsg(msg) }),
+      effect.map(chat_effect, ChatMsg),
+      localstorage_get(model, model_localstorage_key),
     ]),
   )
 }
@@ -128,33 +133,42 @@ fn init(_) -> #(Model, Effect(Msg)) {
 // UPDATE ----------------------------------------------------------------------
 
 type Msg {
+  // User
   UserNavigatedTo(route: Route)
-  InjectMarkdownResult(result: Result(Nil, Nil))
-  ClickedConnectButton
+  ArticleHovered(article: Article)
+  UserMessageDismissed(msg: UserMessage)
+  // LOCALSTORAGE
+  LocalStorageReturned(result: Result(Model, Nil))
+  // WEBSOCKET
   WebsocketConnetionResult(result: Result(Nil, Nil))
   WebsocketOnMessage(data: String)
   WebsocketOnClose(data: String)
   WebsocketOnError(data: String)
   WebsocketOnOpen(data: String)
+  // ARTICLES
   GotArticle(id: Int, result: Result(Article, HttpError))
-  GotArticleSummaries(result: Result(List(Article), http.HttpError))
-  ArticleHovered(article: Article)
-  UserMessageDismissed(msg: UserMessage)
+  GotArticlesMetadata(result: Result(List(Article), HttpError))
+  // USER ACTIONS
   // CHAT
   ChatMsg(msg: chat.Msg)
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
+    // USER
     UserNavigatedTo(route:) -> {
       #(Model(..model, route:), effect_navigation(model, route))
     }
-    InjectMarkdownResult(_) -> {
-      #(model, effect.none())
+    // LOCALSTORAGE
+    LocalStorageReturned(result:) -> {
+      let new_model = case result {
+        Ok(new_model) -> new_model
+        // Ok(new_model) -> model_merge(model, new_model)
+        Error(_) -> model
+      }
+      #(new_model, effect.none())
     }
-    ClickedConnectButton -> {
-      #(model, article.get_metadata_all(GotArticleSummaries))
-    }
+    // WEBSOCKET
     WebsocketConnetionResult(result:) -> {
       let user_message = case result {
         Ok(_) -> {
@@ -182,8 +196,8 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     WebsocketOnOpen(data:) -> {
       update_websocket_on_open(model, data)
     }
-    GotArticleSummaries(result:) -> {
-      update_got_article_summaries(model, result)
+    GotArticlesMetadata(result:) -> {
+      update_got_articles_metadata(model, result)
     }
     GotArticle(id, result) -> {
       case result {
@@ -196,16 +210,16 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     ArticleHovered(article:) -> {
       case article {
-        ArticleSummary(id, _, _, _) -> {
+        ArticleSummary(id, _, _, _, _) -> {
           #(
             model,
             article.get_article(fn(result) { GotArticle(id, result) }, id),
           )
         }
-        ArticleFull(_, _, _, _, _) -> {
+        ArticleFull(_, _, _, _, _, _) -> {
           #(model, effect.none())
         }
-        ArticleWithError(_, _, _, _, _) -> {
+        ArticleWithError(_, _, _, _, _, _) -> {
           #(model, effect.none())
         }
       }
@@ -216,10 +230,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     ChatMsg(msg:) -> {
       let #(chat_model, chat_effect) = chat.update(msg, model.chat)
-      #(
-        Model(..model, chat: chat_model),
-        effect.map(chat_effect, fn(msg) { ChatMsg(msg) }),
-      )
+      #(Model(..model, chat: chat_model), effect.map(chat_effect, ChatMsg))
     }
   }
 }
@@ -231,15 +242,15 @@ fn effect_navigation(model: Model, route: Route) -> Effect(Msg) {
       case article {
         Ok(article) -> {
           case article {
-            ArticleSummary(id, _, _, _) -> {
+            ArticleSummary(id, _, _, _, _) -> {
               echo "loading article content"
               article.get_article(fn(result) { GotArticle(id, result) }, id)
             }
-            ArticleFull(_, _, _, _, _) -> {
+            ArticleFull(_, _, _, _, _, _) -> {
               echo "article content already loaded"
               effect.none()
             }
-            ArticleWithError(_, _, _, _, _) -> {
+            ArticleWithError(_, _, _, _, _, _) -> {
               echo "article errored"
               article.get_article(fn(result) { GotArticle(id, result) }, id)
             }
@@ -286,9 +297,9 @@ fn update_websocket_on_open(model: Model, data: String) -> #(Model, Effect(Msg))
   #(model, effect.none())
 }
 
-fn update_got_article_summaries(
+fn update_got_articles_metadata(
   model: Model,
-  result: Result(List(Article), http.HttpError),
+  result: Result(List(Article), HttpError),
 ) {
   case result {
     Ok(articles) -> {
@@ -335,12 +346,13 @@ fn update_got_article_error(
       let articles =
         dict.map_values(model.articles, fn(_, article) {
           case article {
-            ArticleFull(article_id, _, _, _, _)
-            | ArticleSummary(article_id, _, _, _) -> {
+            ArticleFull(article_id, _, _, _, _, _)
+            | ArticleSummary(article_id, _, _, _, _) -> {
               case article_id == id {
                 True -> {
                   ArticleWithError(
                     id,
+                    article.revision,
                     article.title,
                     article.leading,
                     article.subtitle,
@@ -662,43 +674,36 @@ fn view_article_listing(articles: Dict(Int, Article)) -> List(Element(Msg)) {
     |> list.sort(fn(a, b) { int.compare(a.id, b.id) })
     |> list.index_map(fn(article, index) {
       case article {
-        ArticleFull(id, title, leading, subtitle, _)
-        | ArticleSummary(id, title, leading, subtitle) -> {
-          html.article(
-            [
-              attribute.class("mt-14"),
-            ],
-            [
-              html.a(
-                [
-                  attribute.class(
-                    "group block  border-l border-zinc-700  pl-4 hover:border-pink-700 transition-colors duration-50",
-                  ),
-                  href(ArticleById(id)),
-                  event.on_mouse_enter(ArticleHovered(article)),
-                ],
-                [
-                  html.h3(
-                    [
-                      attribute.id("article-title-" <> int.to_string(id)),
-                      attribute.class("article-title"),
-                      attribute.class("text-xl text-pink-700 font-light"),
-                    ],
-                    [html.text(title)],
-                  ),
-                  view_subtitle(subtitle, id),
-                  view_paragraph(leading),
-                ],
-              ),
-            ],
-          )
+        ArticleFull(id, _, title, leading, subtitle, _)
+        | ArticleSummary(id, _, title, leading, subtitle) -> {
+          html.article([attribute.class("mt-14")], [
+            html.a(
+              [
+                attribute.class(
+                  "group block  border-l border-zinc-700  pl-4  hover:border-pink-700 transition-colors duration-25",
+                ),
+                href(ArticleById(id)),
+                event.on_mouse_enter(ArticleHovered(article)),
+              ],
+              [
+                html.h3(
+                  [
+                    attribute.id("article-title-" <> int.to_string(id)),
+                    attribute.class("article-title"),
+                    attribute.class("text-xl text-pink-700 font-light"),
+                  ],
+                  [html.text(title)],
+                ),
+                view_subtitle(subtitle, id),
+                view_paragraph(leading),
+              ],
+            ),
+          ])
         }
-        ArticleWithError(id, title, _leading, _subtitle, error) -> {
+        ArticleWithError(id, _revision, title, _leading, _subtitle, error) -> {
           html.article(
             [
-              attribute.class(
-                "mt-14",
-              ),
+              attribute.class("mt-14 group group-hover"),
               attribute.class("animate-break"),
             ],
             [
@@ -706,7 +711,7 @@ fn view_article_listing(articles: Dict(Int, Article)) -> List(Element(Msg)) {
                 [
                   href(ArticleById(id)),
                   attribute.class(
-                    "group block  border-l border-zinc-700 pl-4 hover:border-zinc-500",
+                    "group block  border-l border-zinc-700 pl-4 hover:border-zinc-500 transition-colors duration-25",
                   ),
                 ],
                 [
@@ -715,7 +720,9 @@ fn view_article_listing(articles: Dict(Int, Article)) -> List(Element(Msg)) {
                       attribute.id("article-title-" <> int.to_string(id)),
                       attribute.class("article-title"),
                       attribute.class("text-xl font-light w-max-content"),
-                      attribute.class("animate-break--mirror"),
+                      attribute.class(
+                        "animate-break--mirror hover:animate-break",
+                      ),
                     ],
                     [html.text(title)],
                   ),
@@ -736,13 +743,13 @@ fn view_article_listing(articles: Dict(Int, Article)) -> List(Element(Msg)) {
 
 fn view_article(article: Article) -> List(Element(msg)) {
   let content = case article {
-    ArticleSummary(id, title, leading, subtitle) -> [
+    ArticleSummary(id, revision, title, leading, subtitle) -> [
       view_title(title, id),
       view_subtitle(subtitle, id),
       view_leading(leading, id),
       view_paragraph("loading content.."),
     ]
-    ArticleFull(id, title, leading, subtitle, content) -> [
+    ArticleFull(id, revision, title, leading, subtitle, content) -> [
       view_title(title, id),
       view_subtitle(subtitle, id),
       view_leading(leading, id),
@@ -755,7 +762,7 @@ fn view_article(article: Article) -> List(Element(msg)) {
         content,
       )
     ]
-    ArticleWithError(id, title, leading, subtitle, error) -> [
+    ArticleWithError(id, revision, title, leading, subtitle, error) -> [
       view_title(title, id),
       view_subtitle(subtitle, id),
       view_leading(leading, id),
@@ -877,4 +884,84 @@ fn view_link(target: Route, title: String) -> Element(msg) {
     ],
     [html.text(title)],
   )
+}
+
+// Persistent model -------------------------------------------------------------
+
+fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
+  case msg {
+    GotArticlesMetadata(result:) -> {
+      let #(new_model, effect) = update(model, msg)
+      localstorage_set_model(new_model)
+      #(new_model, effect)
+    }
+    GotArticle(id, result:) -> {
+      let #(new_model, effect) = update(model, msg)
+      localstorage_set_model(new_model)
+      #(new_model, effect)
+    }
+    _ -> update(model, msg)
+  }
+}
+
+fn localstorage_set_model(model: Model) {
+  echo "localstorage_set_model"
+  localstorage_set(
+    model_localstorage_key,
+    model_encoder(PersistentModelV1(version: 1, articles: model.articles)),
+  )
+}
+
+fn model_encoder(model: PersistentModel) -> String {
+  json.object([
+    #("version", json.int(1)),
+    #(
+      "articles",
+      json.dict(model.articles, int.to_string, article.article_encoder),
+    ),
+  ])
+  |> json.to_string
+}
+
+fn model_decoder(model: Model) -> Decoder(Model) {
+  let model_v0_decoder = {
+    decode.success(model)
+  }
+  let model_v1_decoder = {
+    use articles <- decode.field(
+      "articles",
+      decode.dict(decode.int, article.article_decoder()),
+    )
+    decode.success(Model(..model, articles:))
+  }
+
+  // pub fn then(decoder: Decoder(a), next: fn(a) -> Decoder(b)) -> Decoder(b)
+
+  use version <- decode.field("version", decode.int)
+  case version {
+    0 -> model_v0_decoder
+    1 -> model_v1_decoder
+    _ -> decode.failure(model, "Unsupported model version")
+  }
+}
+
+// FFI -------------------------------------------------------
+
+@external(javascript, "./app.ffi.mjs", "localstorage_set")
+fn localstorage_set(key: String, value: String) -> Nil
+
+@external(javascript, "./app.ffi.mjs", "localstorage_get")
+fn localstorage_get_external(key: String) -> Result(Dynamic, Nil)
+
+fn localstorage_get(model: Model, key: String) -> Effect(Msg) {
+  echo "localstorage_get"
+  use dispatch <- effect.from()
+  let result =
+    result.try(localstorage_get_external(key), fn(dyn) {
+      case decode.run(dyn, model_decoder(model)) {
+        Ok(model) -> Ok(model)
+        Error(_) -> Error(Nil)
+      }
+    })
+  dispatch(LocalStorageReturned(result))
 }

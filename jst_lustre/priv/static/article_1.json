@@ -1,5 +1,6 @@
 {
     "id": 1,
+    "revision": 1,
     "title": "NATS all the way down",
     "subtitle": "..or, how to replace your stack with one tool.",
     "leading": "I've fallen in love several times these last few years since I started writing code for a living. A few highlights are Docker, Elm, functional programming, Go, simple and portable file formats, my son, markdown, gleam and now NATS. Each infatuation has taught me something important about a technology and usually also about myself.",
