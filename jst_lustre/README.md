@@ -22,11 +22,23 @@ gleam test
 
 ```
 
-
 ## TODO
 
-- fix local storage
-- dict key should be slug
-- links should be by slug?
-  - or presta way. id <>"_"<>slug where only the id is used for routing
-- try listening to nats for articles?
+- article dict key should be slug
+- links to articles should be by slug?
+  - or presta way. id <>"-"<>slug where only the id is used for routing
+- try listening to nats for articles
+- add states for initial load of article meta and local storage data
+
+```gleam
+
+// CHECK "making impossible states impossible" again..
+type ModelLoadState {
+  NotLoaded
+  LoadedFromLocalStorage(local_storage_model: Model)
+  LoadedFromServer(server_model: Model)
+  LoadedBoth(local_storage_model: Model, server_model: Model)
+
+}
+
+```
