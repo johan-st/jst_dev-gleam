@@ -119,8 +119,12 @@ fn init(_) -> #(Model, Effect(Msg)) {
       effect_modem,
       effect_navigation(model, route),
       effect.map(chat_effect, ChatMsg),
-      article.get_metadata_all(GotArticlesMetadata),
-      persist.localstorage_get_model(PersistGotModel),
+      // article.get_metadata_all(GotArticlesMetadata),
+      persist.localstorage_get(
+        persist.model_localstorage_key,
+        persist.decoder(),
+        PersistGotModel,
+      ),
     ]),
   )
 }
@@ -149,7 +153,6 @@ type Msg {
 }
 
 fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
-  echo msg
   let #(new_model, effect) = update(model, msg)
   let persistent_model = fn(model: Model) -> PersistentModel {
     PersistentModelV1(
@@ -164,12 +167,16 @@ fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   }
   case msg {
     GotArticlesMetadata(_) -> {
-      echo msg
-      persist.localstorage_set_model(persistent_model(new_model))
+      persist.localstorage_set(
+        persist.model_localstorage_key,
+        persist.encode(persistent_model(new_model)),
+      )
     }
     GotArticle(_, _) -> {
-      echo msg
-      persist.localstorage_set_model(persistent_model(new_model))
+      persist.localstorage_set(
+        persist.model_localstorage_key,
+        persist.encode(persistent_model(new_model)),
+      )
     }
     _ -> Nil
   }
@@ -177,7 +184,6 @@ fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
-  echo msg
   case msg {
     // USER
     UserNavigatedTo(route:) -> {
@@ -185,48 +191,21 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     // Browser Persistance
     PersistGotModel(opt:) -> {
-      echo "PersistGotModel"
+      echo msg
       case opt {
         Some(PersistentModelV1(_, articles)) -> {
-          echo "persistent_model"
-          echo articles
           #(
             Model(..model, articles: article.list_to_dict(articles)),
             effect.none(),
           )
         }
         Some(PersistentModelV0(_)) -> {
-          echo "old model"
           #(model, effect.none())
         }
         None -> {
-          echo "no persistent model"
           #(model, effect.none())
         }
       }
-      // let #(persist_model, persist_effect) = persist.update(msg, model)
-      //   result.try(result, fn(dyn) {
-      //     case decode.run(dyn, model_decoder(model)) {
-      //       Ok(model_localstorage) -> model_localstorage
-      //       Error(err) -> {
-      //         echo err
-      //         model
-      //       }
-      //     }
-      //   })
-
-      // #(new_model, effect.none())
-      #(model, effect.none())
-      // let result = case decode.run(dyn, model_decoder(model)) {
-      //   Ok(model) -> Ok(model)
-      //   Error(_) -> Error(Nil)
-      // }
-
-      // let new_model = case result {
-      //   Ok(new_model) -> new_model
-      //   // Ok(new_model) -> model_merge(model, new_model)
-      //   Error(_) -> model
-      // }
     }
     // WEBSOCKET
     WebsocketConnetionResult(result:) -> {
@@ -303,15 +282,12 @@ fn effect_navigation(model: Model, route: Route) -> Effect(Msg) {
         Ok(article) -> {
           case article {
             ArticleSummary(id, _, _, _, _) -> {
-              echo "loading article content"
               article.get_article(fn(result) { GotArticle(id, result) }, id)
             }
             ArticleFull(_, _, _, _, _, _) -> {
-              echo "article content already loaded"
               effect.none()
             }
             ArticleWithError(_, _, _, _, _, _) -> {
-              echo "article errored"
               article.get_article(fn(result) { GotArticle(id, result) }, id)
             }
           }

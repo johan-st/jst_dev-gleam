@@ -109,35 +109,42 @@ fn metadata_decoder() -> decode.Decoder(List(Article)) {
 }
 
 pub fn article_decoder() -> decode.Decoder(Article) {
+  use article_type <- decode.optional_field("type", "not_set", decode.string)
   use id <- decode.field("id", decode.int)
   use revision <- decode.field("revision", decode.int)
   use title <- decode.field("title", decode.string)
   use leading <- decode.field("leading", decode.string)
   use subtitle <- decode.field("subtitle", decode.string)
-  use content <- decode.optional_field(
-    "content",
-    None,
-    decode.optional(decode.list(content_decoder())),
-  )
-  let content = case content {
-    Some([]) -> None
-    _ -> content
+
+  let decode_full = fn() -> decode.Decoder(Article) {
+    use content <- decode.field("content", decode.list(content_decoder()))
+    decode.success(ArticleFull(
+      id:,
+      revision:,
+      title:,
+      leading:,
+      subtitle:,
+      content:,
+    ))
   }
-  case content {
-    Some(content) -> {
-      decode.success(ArticleFull(
-        id:,
-        revision:,
-        title:,
-        leading:,
-        subtitle:,
-        content:,
-      ))
-    }
-    None -> {
-      decode.success(ArticleSummary(id:, revision:, title:, leading:, subtitle:))
-    }
+
+  let decode_error = fn() -> decode.Decoder(Article) {
+    use error <- decode.field("error", decode.string)
+    decode.success(ArticleWithError(
+      id:,
+      revision:,
+      title:,
+      leading:,
+      subtitle:,
+      error:,
+    ))
   }
+
+  let decode_summary = fn() -> decode.Decoder(Article) {
+    decode.success(ArticleSummary(id:, revision:, title:, leading:, subtitle:))
+  }
+
+  decode.one_of(decode_full(), [decode_error(), decode_summary()])
 }
 
 // ENCODE ----------------------------------------------------------------------
@@ -146,7 +153,7 @@ pub fn article_encoder(article: Article) -> json.Json {
   case article {
     ArticleSummary(id, revision, title, leading, subtitle) -> {
       json.object([
-        #("type", json.string("ArticleSummary_v1")),
+        #("type", json.string("metadata_v1")),
         #("revision", json.int(revision)),
         #("id", json.int(id)),
         #("title", json.string(title)),
@@ -156,7 +163,7 @@ pub fn article_encoder(article: Article) -> json.Json {
     }
     ArticleFull(id, revision, title, leading, subtitle, content) -> {
       json.object([
-        #("type", json.string("ArticleFull_v1")),
+        #("type", json.string("article_v1")),
         #("revision", json.int(revision)),
         #("id", json.int(id)),
         #("title", json.string(title)),
@@ -167,7 +174,7 @@ pub fn article_encoder(article: Article) -> json.Json {
     }
     ArticleWithError(id, revision, title, leading, subtitle, error) -> {
       json.object([
-        #("type", json.string("ArticleWithError_v1")),
+        #("type", json.string("with_error_v1")),
         #("revision", json.int(revision)),
         #("id", json.int(id)),
         #("title", json.string(title)),
