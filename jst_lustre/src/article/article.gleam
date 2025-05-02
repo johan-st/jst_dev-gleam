@@ -1,3 +1,4 @@
+import gleam/dict.{type Dict}
 import gleam/dynamic/decode
 import gleam/int
 import gleam/json
@@ -207,14 +208,23 @@ pub fn content_encoder(content: Content) -> json.Json {
   }
 }
 
+// Utils -----------------------------------------------------------------------
+
+pub fn list_to_dict(articles: List(Article)) -> Dict(Int, Article) {
+  articles
+  |> list.map(fn(article) { #(article.id, article) })
+  |> dict.from_list
+}
+
 // Loading ---------------------------------------------------------------------
 
 pub fn loading_article() -> Article {
-  ArticleSummary(
+  ArticleWithError(
     revision: 0,
     id: 0,
     title: "fetching articles..",
     subtitle: "articles have not been fetched yet",
     leading: "This is a placeholder article. At the moment, the articles are being fetched from the server.. please wait.",
+    error: "replace me with something that is not an article",
   )
 }

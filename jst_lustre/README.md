@@ -21,3 +21,12 @@ gleam test
 
 
 ```
+
+
+## TODO
+
+- fix local storage
+- dict key should be slug
+- links should be by slug?
+  - or presta way. id <>"_"<>slug where only the id is used for routing
+- try listening to nats for articles?

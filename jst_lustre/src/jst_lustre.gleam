@@ -24,6 +24,7 @@ import lustre/event
 import modem
 import utils/error_string
 import utils/http.{type HttpError}
+import utils/persist.{type PersistentModel, PersistentModelV0, PersistentModelV1}
 
 // MAIN ------------------------------------------------------------------------
 
@@ -36,8 +37,6 @@ pub fn main() {
 
 // MODEL -----------------------------------------------------------------------
 
-const model_localstorage_key = "jst_lustre_state"
-
 type Model {
   Model(
     articles: Dict(Int, Article),
@@ -45,10 +44,6 @@ type Model {
     user_messages: List(UserMessage),
     chat: chat.Model,
   )
-}
-
-type PersistentModel {
-  PersistentModelV1(version: Int, articles: Dict(Int, Article))
 }
 
 type UserMessage {
@@ -96,6 +91,7 @@ fn href(route: Route) -> Attribute(msg) {
 }
 
 fn init(_) -> #(Model, Effect(Msg)) {
+  echo "init"
   // The server for a typical SPA will often serve the application to *any*
   // HTTP request, and let the app itself determine what to show. Modem stores
   // the first URL so we can parse it for the app's initial route.
@@ -104,28 +100,27 @@ fn init(_) -> #(Model, Effect(Msg)) {
     Error(_) -> Index
   }
 
-  let articles =
+  let articles_empty =
     []
     |> dict.from_list
 
   let #(chat_model, chat_effect) = chat.init()
-  let model = Model(route:, articles:, user_messages: [], chat: chat_model)
-  let effect_articles = article.get_metadata_all(GotArticlesMetadata)
+  let model =
+    Model(route:, articles: articles_empty, user_messages: [], chat: chat_model)
   let effect_modem =
     modem.init(fn(uri) {
       uri
       |> parse_route
       |> UserNavigatedTo
     })
-  let effect_route = effect_navigation(model, route)
   #(
     model,
     effect.batch([
       effect_modem,
-      effect_articles,
-      effect_route,
+      effect_navigation(model, route),
       effect.map(chat_effect, ChatMsg),
-      localstorage_get(model, model_localstorage_key),
+      article.get_metadata_all(GotArticlesMetadata),
+      persist.localstorage_get_model(PersistGotModel),
     ]),
   )
 }
@@ -138,7 +133,7 @@ type Msg {
   ArticleHovered(article: Article)
   UserMessageDismissed(msg: UserMessage)
   // LOCALSTORAGE
-  LocalStorageReturned(result: Result(Model, Nil))
+  PersistGotModel(opt: Option(PersistentModel))
   // WEBSOCKET
   WebsocketConnetionResult(result: Result(Nil, Nil))
   WebsocketOnMessage(data: String)
@@ -153,20 +148,85 @@ type Msg {
   ChatMsg(msg: chat.Msg)
 }
 
+fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
+  echo msg
+  let #(new_model, effect) = update(model, msg)
+  let persistent_model = fn(model: Model) -> PersistentModel {
+    PersistentModelV1(
+      version: 1,
+      articles: model.articles
+        |> dict.to_list
+        |> list.map(fn(tuple) {
+          let #(_id, article) = tuple
+          article
+        }),
+    )
+  }
+  case msg {
+    GotArticlesMetadata(_) -> {
+      echo msg
+      persist.localstorage_set_model(persistent_model(new_model))
+    }
+    GotArticle(_, _) -> {
+      echo msg
+      persist.localstorage_set_model(persistent_model(new_model))
+    }
+    _ -> Nil
+  }
+  #(new_model, effect)
+}
+
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
+  echo msg
   case msg {
     // USER
     UserNavigatedTo(route:) -> {
       #(Model(..model, route:), effect_navigation(model, route))
     }
-    // LOCALSTORAGE
-    LocalStorageReturned(result:) -> {
-      let new_model = case result {
-        Ok(new_model) -> new_model
-        // Ok(new_model) -> model_merge(model, new_model)
-        Error(_) -> model
+    // Browser Persistance
+    PersistGotModel(opt:) -> {
+      echo "PersistGotModel"
+      case opt {
+        Some(PersistentModelV1(_, articles)) -> {
+          echo "persistent_model"
+          echo articles
+          #(
+            Model(..model, articles: article.list_to_dict(articles)),
+            effect.none(),
+          )
+        }
+        Some(PersistentModelV0(_)) -> {
+          echo "old model"
+          #(model, effect.none())
+        }
+        None -> {
+          echo "no persistent model"
+          #(model, effect.none())
+        }
       }
-      #(new_model, effect.none())
+      // let #(persist_model, persist_effect) = persist.update(msg, model)
+      //   result.try(result, fn(dyn) {
+      //     case decode.run(dyn, model_decoder(model)) {
+      //       Ok(model_localstorage) -> model_localstorage
+      //       Error(err) -> {
+      //         echo err
+      //         model
+      //       }
+      //     }
+      //   })
+
+      // #(new_model, effect.none())
+      #(model, effect.none())
+      // let result = case decode.run(dyn, model_decoder(model)) {
+      //   Ok(model) -> Ok(model)
+      //   Error(_) -> Error(Nil)
+      // }
+
+      // let new_model = case result {
+      //   Ok(new_model) -> new_model
+      //   // Ok(new_model) -> model_merge(model, new_model)
+      //   Error(_) -> model
+      // }
     }
     // WEBSOCKET
     WebsocketConnetionResult(result:) -> {
@@ -303,7 +363,7 @@ fn update_got_articles_metadata(
 ) {
   case result {
     Ok(articles) -> {
-      let articles = articles_update(model.articles, articles)
+      let articles = article.list_to_dict(articles)
       let effect = case model.route {
         ArticleById(_) -> {
           echo "loading article content"
@@ -339,10 +399,10 @@ fn update_got_article_error(
     <> error_string.http_error(err)
   case err {
     http.JsonError(json.UnexpectedByte(_)) -> {
-      let user_messages =
-        list.append(model.user_messages, [
-          UserError(user_message_id_next(model.user_messages), error_string),
-        ])
+      // let user_messages =
+      //   list.append(model.user_messages, [
+      //     UserError(user_message_id_next(model.user_messages), error_string),
+      //   ])
       let articles =
         dict.map_values(model.articles, fn(_, article) {
           case article {
@@ -365,7 +425,7 @@ fn update_got_article_error(
             _ -> article
           }
         })
-      #(Model(..model, user_messages:, articles:), effect.none())
+      #(Model(..model, articles:), effect.none())
     }
     _ -> {
       echo err
@@ -884,84 +944,4 @@ fn view_link(target: Route, title: String) -> Element(msg) {
     ],
     [html.text(title)],
   )
-}
-
-// Persistent model -------------------------------------------------------------
-
-fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
-  case msg {
-    GotArticlesMetadata(result:) -> {
-      let #(new_model, effect) = update(model, msg)
-      localstorage_set_model(new_model)
-      #(new_model, effect)
-    }
-    GotArticle(id, result:) -> {
-      let #(new_model, effect) = update(model, msg)
-      localstorage_set_model(new_model)
-      #(new_model, effect)
-    }
-    _ -> update(model, msg)
-  }
-}
-
-fn localstorage_set_model(model: Model) {
-  echo "localstorage_set_model"
-  localstorage_set(
-    model_localstorage_key,
-    model_encoder(PersistentModelV1(version: 1, articles: model.articles)),
-  )
-}
-
-fn model_encoder(model: PersistentModel) -> String {
-  json.object([
-    #("version", json.int(1)),
-    #(
-      "articles",
-      json.dict(model.articles, int.to_string, article.article_encoder),
-    ),
-  ])
-  |> json.to_string
-}
-
-fn model_decoder(model: Model) -> Decoder(Model) {
-  let model_v0_decoder = {
-    decode.success(model)
-  }
-  let model_v1_decoder = {
-    use articles <- decode.field(
-      "articles",
-      decode.dict(decode.int, article.article_decoder()),
-    )
-    decode.success(Model(..model, articles:))
-  }
-
-  // pub fn then(decoder: Decoder(a), next: fn(a) -> Decoder(b)) -> Decoder(b)
-
-  use version <- decode.field("version", decode.int)
-  case version {
-    0 -> model_v0_decoder
-    1 -> model_v1_decoder
-    _ -> decode.failure(model, "Unsupported model version")
-  }
-}
-
-// FFI -------------------------------------------------------
-
-@external(javascript, "./app.ffi.mjs", "localstorage_set")
-fn localstorage_set(key: String, value: String) -> Nil
-
-@external(javascript, "./app.ffi.mjs", "localstorage_get")
-fn localstorage_get_external(key: String) -> Result(Dynamic, Nil)
-
-fn localstorage_get(model: Model, key: String) -> Effect(Msg) {
-  echo "localstorage_get"
-  use dispatch <- effect.from()
-  let result =
-    result.try(localstorage_get_external(key), fn(dyn) {
-      case decode.run(dyn, model_decoder(model)) {
-        Ok(model) -> Ok(model)
-        Error(_) -> Error(Nil)
-      }
-    })
-  dispatch(LocalStorageReturned(result))
 }
