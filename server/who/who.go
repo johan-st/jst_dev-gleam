@@ -175,40 +175,48 @@ func (w *Who) userWatcher() error {
 		user    User
 		u       *User
 	)
-	watcher, err = w.usersKv.WatchAll()
+	
+	// Store the context in the Who struct
+	w.ctx = context.Background()
+	
+	watcher, err = w.usersKv.WatchAll(nats.Context(w.ctx))
 	if err != nil {
 		return fmt.Errorf("failed to watch users: %w", err)
 	}
 
-	for {
-		select {
-		case kv = <-watcher.Updates():
-			if kv == nil {
-				w.l.Debug("up to date. %d users loaded", len(w.users))
-				continue
-			}
-			switch kv.Operation() {
-			case nats.KeyValuePut:
-				err = json.Unmarshal(kv.Value(), &user)
-				if err != nil {
-					w.l.Error("failed to unmarshal user: %s", err.Error())
+	go func() {
+		for {
+			select {
+			case kv = <-watcher.Updates():
+				if kv == nil {
+					w.l.Debug("up to date. %d users loaded", len(w.users))
 					continue
 				}
-				u = w.userGet(user.ID)
-				if u == nil {
-					w.users = append(w.users, user)
-					w.l.Debug("new user(%s). %d users loaded", user.ID, len(w.users))
+				switch kv.Operation() {
+				case nats.KeyValuePut:
+					err = json.Unmarshal(kv.Value(), &user)
+					if err != nil {
+						w.l.Error("failed to unmarshal user: %s", err.Error())
+						continue
+					}
+					u = w.userGet(user.ID)
+					if u == nil {
+						w.users = append(w.users, user)
+						w.l.Debug("new user(%s). %d users loaded", user.ID, len(w.users))
+					}
+				case nats.KeyValueDelete:
+					w.l.Debug("deleted user(%s). %d users loaded", kv.Key(), len(w.users))
+				default:
+					w.l.Error("unknown operation: %s", kv.Operation())
 				}
-			case nats.KeyValueDelete:
-				w.l.Debug("deleted user(%s). %d users loaded", kv.Key(), len(w.users))
-			default:
-				w.l.Error("unknown operation: %s", kv.Operation())
+			case <-w.ctx.Done():
+				w.l.Debug("watcher: context done")
+				return
 			}
-		case <-watcher.Context().Done():
-			w.l.Debug("watcher: context done")
-			return nil
 		}
-	}
+	}()
+	
+	return nil
 }
 
 // ----------- HANDLERS -----------

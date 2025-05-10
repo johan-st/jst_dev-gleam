@@ -146,7 +146,7 @@ func (l *Logger) log(level Level, msg string, args ...any) {
 		"level":       []string{levelStr},
 		"timestamp":   []string{unixMicro},
 		"app":         []string{l.appName},
-		"breadcrumbs": l.breadcrumbs,
+		"breadcrumbs": []string{strings.Join(l.breadcrumbs, ".")},
 	}
 
 	// Create message with headers

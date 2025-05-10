@@ -21,6 +21,7 @@ import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
+import lustre_websocket as ws
 import modem
 import utils/error_string
 import utils/http.{type HttpError}
@@ -43,6 +44,7 @@ type Model {
     route: Route,
     user_messages: List(UserMessage),
     chat: chat.Model,
+    ws: Option(ws.WebSocket),
   )
 }
 
@@ -106,7 +108,13 @@ fn init(_) -> #(Model, Effect(Msg)) {
 
   let #(chat_model, chat_effect) = chat.init()
   let model =
-    Model(route:, articles: articles_empty, user_messages: [], chat: chat_model)
+    Model(
+      route:,
+      articles: articles_empty,
+      user_messages: [],
+      chat: chat_model,
+      ws: None,
+    )
   let effect_modem =
     modem.init(fn(uri) {
       uri
@@ -120,14 +128,21 @@ fn init(_) -> #(Model, Effect(Msg)) {
       effect_navigation(model, route),
       effect.map(chat_effect, ChatMsg),
       // article.get_metadata_all(GotArticlesMetadata),
+      ws.init("ws://127.0.0.1:8080/ws", WsMsg),
       persist.localstorage_get(
         persist.model_localstorage_key,
         persist.decoder(),
         PersistGotModel,
       ),
+      // flags_get(GotFlags),
     ]),
   )
 }
+
+// pub fn flags_get(msg) -> Effect(Msg) {
+//   let url = "http://127.0.0.1:1234/priv/static/flags.json"
+//   http.get(url, http.expect_json(article_decoder(), msg))
+// }
 
 // UPDATE ----------------------------------------------------------------------
 
@@ -139,11 +154,7 @@ type Msg {
   // LOCALSTORAGE
   PersistGotModel(opt: Option(PersistentModel))
   // WEBSOCKET
-  WebsocketConnetionResult(result: Result(Nil, Nil))
-  WebsocketOnMessage(data: String)
-  WebsocketOnClose(data: String)
-  WebsocketOnError(data: String)
-  WebsocketOnOpen(data: String)
+  WsMsg(ws.WebSocketEvent)
   // ARTICLES
   GotArticle(id: Int, result: Result(Article, HttpError))
   GotArticlesMetadata(result: Result(List(Article), HttpError))
@@ -208,32 +219,27 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       }
     }
     // WEBSOCKET
-    WebsocketConnetionResult(result:) -> {
-      let user_message = case result {
-        Ok(_) -> {
-          UserInfo(user_message_id_next(model.user_messages), "connected")
+    WsMsg(ws.InvalidUrl) -> panic
+    WsMsg(ws.OnOpen(socket)) -> #(
+      Model(..model, ws: Some(socket)),
+      ws.send(socket, "client-init"),
+    )
+    WsMsg(ws.OnTextMessage(msg)) -> {
+      echo "on text message"
+      case msg {
+        "articles_metadata:" <> data -> {
+          #(model, effect.none())
         }
-        Error(_) -> {
-          UserError(
-            user_message_id_next(model.user_messages),
-            "failed to connect",
-          )
+        _ -> {
+          #(model, effect.none())
         }
       }
-      let user_messages = list.append(model.user_messages, [user_message])
-      #(Model(..model, user_messages:), effect.none())
     }
-    WebsocketOnMessage(data:) -> {
-      update_websocket_on_message(model, data)
-    }
-    WebsocketOnClose(data:) -> {
-      update_websocket_on_close(model, data)
-    }
-    WebsocketOnError(data:) -> {
-      update_websocket_on_error(model, data)
-    }
-    WebsocketOnOpen(data:) -> {
-      update_websocket_on_open(model, data)
+    WsMsg(ws.OnBinaryMessage(msg)) -> todo as "either-or"
+    WsMsg(ws.OnClose(reason)) -> {
+      echo "on close"
+      echo reason
+      #(Model(..model, ws: None), effect.none())
     }
     GotArticlesMetadata(result:) -> {
       update_got_articles_metadata(model, result)

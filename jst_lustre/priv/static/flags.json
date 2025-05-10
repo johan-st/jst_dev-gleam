@@ -1,0 +1,7 @@
+[
+    {
+        "name": "socket_path",
+        "description": "The path to the socket",
+        "value": "/ws"
+    }
+]

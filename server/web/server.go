@@ -37,7 +37,7 @@ func NewServer(l *jst_log.Logger, kv nats.KeyValue, os nats.ObjectStore) *Server
 		},
 		l:          l,
 		kv:         kv,
-		wsEcho:     newWsServer(l),
+		wsEcho:     newWsServer(l.WithBreadcrumb("ws")),
 		fastestYet: 1 * time.Hour,
 	}
 }
