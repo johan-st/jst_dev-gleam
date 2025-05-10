@@ -106,7 +106,12 @@ fn init(_) -> #(Model, Effect(Msg)) {
 
   let #(chat_model, chat_effect) = chat.init()
   let model =
-    Model(route:, articles: articles_empty, user_messages: [], chat: chat_model)
+    Model(
+      route:,
+      articles: articles_empty,
+      user_messages: [],
+      chat: chat_model,
+    )
   let effect_modem =
     modem.init(fn(uri) {
       uri
@@ -119,15 +124,21 @@ fn init(_) -> #(Model, Effect(Msg)) {
       effect_modem,
       effect_navigation(model, route),
       effect.map(chat_effect, ChatMsg),
-      // article.get_metadata_all(GotArticlesMetadata),
+      article.get_metadata_all(GotArticlesMetadata),
       persist.localstorage_get(
         persist.model_localstorage_key,
         persist.decoder(),
         PersistGotModel,
       ),
+      // flags_get(GotFlags),
     ]),
   )
 }
+
+// pub fn flags_get(msg) -> Effect(Msg) {
+//   let url = "http://127.0.0.1:1234/priv/static/flags.json"
+//   http.get(url, http.expect_json(article_decoder(), msg))
+// }
 
 // UPDATE ----------------------------------------------------------------------
 
@@ -138,12 +149,6 @@ type Msg {
   UserMessageDismissed(msg: UserMessage)
   // LOCALSTORAGE
   PersistGotModel(opt: Option(PersistentModel))
-  // WEBSOCKET
-  WebsocketConnetionResult(result: Result(Nil, Nil))
-  WebsocketOnMessage(data: String)
-  WebsocketOnClose(data: String)
-  WebsocketOnError(data: String)
-  WebsocketOnOpen(data: String)
   // ARTICLES
   GotArticle(id: Int, result: Result(Article, HttpError))
   GotArticlesMetadata(result: Result(List(Article), HttpError))
@@ -206,34 +211,6 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           #(model, effect.none())
         }
       }
-    }
-    // WEBSOCKET
-    WebsocketConnetionResult(result:) -> {
-      let user_message = case result {
-        Ok(_) -> {
-          UserInfo(user_message_id_next(model.user_messages), "connected")
-        }
-        Error(_) -> {
-          UserError(
-            user_message_id_next(model.user_messages),
-            "failed to connect",
-          )
-        }
-      }
-      let user_messages = list.append(model.user_messages, [user_message])
-      #(Model(..model, user_messages:), effect.none())
-    }
-    WebsocketOnMessage(data:) -> {
-      update_websocket_on_message(model, data)
-    }
-    WebsocketOnClose(data:) -> {
-      update_websocket_on_close(model, data)
-    }
-    WebsocketOnError(data:) -> {
-      update_websocket_on_error(model, data)
-    }
-    WebsocketOnOpen(data:) -> {
-      update_websocket_on_open(model, data)
     }
     GotArticlesMetadata(result:) -> {
       update_got_articles_metadata(model, result)
