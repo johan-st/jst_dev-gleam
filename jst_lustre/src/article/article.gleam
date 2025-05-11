@@ -76,13 +76,12 @@ pub fn view_article_content(
 // Fetch ------------------------------------------------------------------------
 
 pub fn get_article(msg, id: Int) -> Effect(a) {
-  let url =
-    "http://127.0.0.1:1234/priv/static/article_" <> int.to_string(id) <> ".json"
+  let url = "http://127.0.0.1:8080/api/article/" <> int.to_string(id)
   http.get(url, http.expect_json(article_decoder(), msg))
 }
 
 pub fn get_metadata_all(msg) -> Effect(a) {
-  let url = "http://127.0.0.1:1234/priv/static/articles.json"
+  let url = "http://127.0.0.1:8080/api/article"
   http.get(url, http.expect_json(metadata_decoder(), msg))
 }
 

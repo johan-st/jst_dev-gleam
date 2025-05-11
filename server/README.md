@@ -18,3 +18,4 @@ BenchmarkMessagingLoopback-22              16885             61609 ns/op        
 PASS
 ok      jst_dev/server/talk     3.421s
 ```
+

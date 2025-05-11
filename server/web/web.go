@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"jst_dev/server/jst_log"
 	"jst_dev/server/web/api"
@@ -83,14 +84,14 @@ func (w *Web) Start(ctx context.Context) error {
 	}
 	w.routesKv = routesKv
 
-	routesSvcGroup := routesSvc.AddGroup("svc.web", micro.WithGroupQueueGroup(api.Subj.RouteGroup))
-	if err := routesSvcGroup.AddEndpoint("info", w.handleRoutesInfo(), micro.WithEndpointSubject(api.Subj.RouteInfo)); err != nil {
+	routesSvcGroup := routesSvc.AddGroup(api.Subj.RouteGroup, micro.WithGroupQueueGroup(api.Subj.RouteGroup))
+	if err := routesSvcGroup.AddEndpoint(api.Subj.RouteInfo, w.handleRoutesInfo(), micro.WithEndpointSubject(api.Subj.RouteInfo)); err != nil {
 		return fmt.Errorf("add routes endpoint (info): %w", err)
 	}
-	if err := routesSvcGroup.AddEndpoint("register", w.handleRoutesRegister(), micro.WithEndpointSubject(api.Subj.RouteRegister)); err != nil {
+	if err := routesSvcGroup.AddEndpoint(api.Subj.RouteRegister, w.handleRoutesRegister(), micro.WithEndpointSubject(api.Subj.RouteRegister)); err != nil {
 		return fmt.Errorf("add routes endpoint (register): %w", err)
 	}
-	if err := routesSvcGroup.AddEndpoint("remove", w.handleRoutesRemove(), micro.WithEndpointSubject(api.Subj.RouteRemove)); err != nil {
+	if err := routesSvcGroup.AddEndpoint(api.Subj.RouteRemove, w.handleRoutesRemove(), micro.WithEndpointSubject(api.Subj.RouteRemove)); err != nil {
 		return fmt.Errorf("add routes endpont (remove): %w", err)
 	}
 
@@ -123,17 +124,17 @@ func (w *Web) Start(ctx context.Context) error {
 	}
 	w.assetsObjStore = assetsObjStore
 
-	assetsSvcGroup := assetsSvc.AddGroup("svc.web", micro.WithGroupQueueGroup(api.Subj.AssetGroup))
-	if err := assetsSvcGroup.AddEndpoint("list", w.handleAssetsList(), micro.WithEndpointSubject(api.Subj.AssetInfo)); err != nil {
+	assetsSvcGroup := assetsSvc.AddGroup(api.Subj.AssetGroup, micro.WithGroupQueueGroup(api.Subj.AssetGroup))
+	if err := assetsSvcGroup.AddEndpoint(api.Subj.AssetInfo, w.handleAssetsList(), micro.WithEndpointSubject(api.Subj.AssetInfo)); err != nil {
 		return fmt.Errorf("add assets endpont (list): %w", err)
 	}
-	if err := assetsSvcGroup.AddEndpoint("find", w.handleTodo("find", "Not Implemented"), micro.WithEndpointSubject(api.Subj.AssetFind)); err != nil {
+	if err := assetsSvcGroup.AddEndpoint(api.Subj.AssetFind, w.handleTodo("find", "Not Implemented"), micro.WithEndpointSubject(api.Subj.AssetFind)); err != nil {
 		return fmt.Errorf("add assets endpont (find): %w", err)
 	}
-	if err := assetsSvcGroup.AddEndpoint("add", w.handleTodo("add", "Not Implemented"), micro.WithEndpointSubject(api.Subj.AssetAdd)); err != nil {
+	if err := assetsSvcGroup.AddEndpoint(api.Subj.AssetAdd, w.handleTodo("add", "Not Implemented"), micro.WithEndpointSubject(api.Subj.AssetAdd)); err != nil {
 		return fmt.Errorf("add assets endpont (put): %w", err)
 	}
-	if err := assetsSvcGroup.AddEndpoint("delete", w.handleTodo("delete", "Not Implemented"), micro.WithEndpointSubject(api.Subj.AssetDelete)); err != nil {
+	if err := assetsSvcGroup.AddEndpoint(api.Subj.AssetDelete, w.handleTodo("delete", "Not Implemented"), micro.WithEndpointSubject(api.Subj.AssetDelete)); err != nil {
 		return fmt.Errorf("add assets endpont (delete): %w", err)
 	}
 
@@ -205,7 +206,11 @@ func (w *Web) handleRoutesRegister() micro.HandlerFunc {
 			req.Respond([]byte(fmt.Sprintf("Unmarshaling page: %s", err.Error())))
 			return
 		}
-		rev, err := w.routesKv.Put(page.Path, []byte(page.Content))
+		path := page.Path
+		if !strings.HasPrefix(path, "/") {
+			path = "/" + path
+		}
+		rev, err := w.routesKv.Put(path, []byte(page.Content))
 		if err != nil {
 			req.Error("PUT_ERROR", "Registration Failed", []byte(fmt.Sprintf("failed to register route: %s", err.Error())))
 		}

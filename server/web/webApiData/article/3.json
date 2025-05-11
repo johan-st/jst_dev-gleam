@@ -1,0 +1,56 @@
+{
+    "id": 3,
+    "slug": "unsupported-format",
+    "revision": 4,
+    "title": "unsupported format",
+    "subtitle": "..or, dealing with the unknown",
+    "leading": "This article contains unsuportent content types",
+    "content": [
+        {
+            "type": "ingress",
+            "text": "This is an ingress."
+        },
+        {
+            "type": "paragraph",
+            "text": "This is a paragraph."
+        },
+        {
+            "type": "heading",
+            "text": "This is a heading."
+        },
+        {
+            "type": "image",
+            "src": "https://via.placeholder.com/150",
+            "alt": "This is an image."
+        },
+        {
+            "type": "paragraph",
+            "text": "This is another paragraph."
+        },
+        {
+            "type": "block",
+            "content": [
+                {
+                    "type": "heading",
+                    "text": "block 1 heading"
+                },
+                {
+                    "type": "paragraph",
+                    "text": "block 1 paragraph"
+                }
+            ]
+        },
+        {
+            "type": "paragraph",
+            "text": "This is another paragraph."
+        },
+        {
+            "type": "paragraph",
+            "text": "This is another paragraph."
+        },
+        {
+            "type": "paragraph",
+            "text": "This is another paragraph."
+        }
+    ]
+}

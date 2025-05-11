@@ -1,5 +1,6 @@
 import gleam/dynamic
 import gleam/dynamic/decode
+import gleam/int
 import gleam/json
 import gleam/string
 import utils/http
@@ -16,6 +17,15 @@ pub fn http_error(error: http.HttpError) -> String {
     }
     http.JsonError(error) -> {
       "json error\n" <> json_error(error)
+    }
+    http.NotFound -> {
+      "not found"
+    }
+    http.Unauthorized -> {
+      "unauthorized"
+    }
+    http.OtherError(code, body) -> {
+      "other error: " <> int.to_string(code) <> " " <> body
     }
     _ -> {
       "unhandled error"

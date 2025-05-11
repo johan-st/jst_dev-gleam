@@ -26,11 +26,13 @@ type Server struct {
 	kv         nats.KeyValue
 	wsEcho     *wsServer
 	fastestYet time.Duration
+	apiHandler http.Handler
 }
 
 // NewServer creates a new HTTP server instance
 func NewServer(l *jst_log.Logger, kv nats.KeyValue, os nats.ObjectStore) *Server {
 	l.Debug("NewServer")
+	apiHandler := NewApiHandler(l, kv, os)
 	return &Server{
 		routes: &RoutesStore{
 			routes: make(map[string][]byte),
@@ -39,6 +41,7 @@ func NewServer(l *jst_log.Logger, kv nats.KeyValue, os nats.ObjectStore) *Server
 		kv:         kv,
 		wsEcho:     newWsServer(l.WithBreadcrumb("ws")),
 		fastestYet: 1 * time.Hour,
+		apiHandler: apiHandler,
 	}
 }
 
@@ -46,6 +49,7 @@ func NewServer(l *jst_log.Logger, kv nats.KeyValue, os nats.ObjectStore) *Server
 func (s *Server) routeSet(subject string, page []byte) {
 	s.routes.mu.Lock()
 	defer s.routes.mu.Unlock()
+	subject = strings.TrimPrefix(subject, "/")
 	s.routes.routes[subject] = page
 }
 
@@ -69,7 +73,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var (
 		timeStart   time.Time = time.Now()
 		timeElapsed time.Duration
-		subject     string
+		key         string
 		page        []byte
 		exists      bool
 		tmpl        *template.Template
@@ -84,6 +88,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// handle api requests
+	if strings.HasPrefix(r.URL.Path, "/api") {
+		http.StripPrefix("/api", s.apiHandler).ServeHTTP(w, r)
+		return
+	}
+
 	// handle http requests
 	if r.Method != http.MethodGet {
 		s.l.Debug("Method not allowed")
@@ -91,15 +101,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	subject = r.URL.Path
-	if subject == "/" {
-		subject = "index"
+	key = r.URL.Path
+	if key == "/" {
+		key = "index"
 	}
-	subject = strings.TrimPrefix(subject, "/")
-	subject = strings.ReplaceAll(subject, "/", ".")
+	key = strings.TrimPrefix(key, "/")
+	// subject = strings.ReplaceAll(subject, "/", ".")
 
-	s.l.Debug(fmt.Sprintf("getPage subject: %s", subject))
-	page, exists = s.getPage(subject)
+	s.l.Debug(fmt.Sprintf("getPage path (key): %s", key))
+	page, exists = s.getPage(key)
 	if !exists {
 		s.l.Warn(fmt.Sprintf("unknown page requested at %s", r.URL.Path))
 		http.Error(w, "Page not found", http.StatusNotFound)
@@ -126,12 +136,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	timeElapsed = time.Since(timeStart)
 	if timeElapsed == 0 {
-		s.l.Debug(fmt.Sprintf("page %s was served faster than we could measure!", subject))
+		s.l.Debug(fmt.Sprintf("page %s was served faster than we could measure!", key))
 	} else {
 		if timeElapsed < s.fastestYet {
 			s.fastestYet = timeElapsed
 		}
-		s.l.Debug(fmt.Sprintf("page %s was served in %s (fastest yet: %s)", subject, timeElapsed, s.fastestYet))
+		s.l.Debug(fmt.Sprintf("page %s was served in %s (fastest yet: %s)", key, timeElapsed, s.fastestYet))
 	}
 }
 

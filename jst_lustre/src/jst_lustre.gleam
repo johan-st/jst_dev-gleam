@@ -29,7 +29,8 @@ import utils/persist.{type PersistentModel, PersistentModelV0, PersistentModelV1
 // MAIN ------------------------------------------------------------------------
 
 pub fn main() {
-  let app = lustre.application(init, update_with_localstorage, view)
+  let app = lustre.application(init, update, view)
+  // let app = lustre.application(init, update_with_localstorage, view)
   let assert Ok(_) = lustre.start(app, "#app", Nil)
 
   Nil
@@ -106,12 +107,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
 
   let #(chat_model, chat_effect) = chat.init()
   let model =
-    Model(
-      route:,
-      articles: articles_empty,
-      user_messages: [],
-      chat: chat_model,
-    )
+    Model(route:, articles: articles_empty, user_messages: [], chat: chat_model)
   let effect_modem =
     modem.init(fn(uri) {
       uri
@@ -356,6 +352,32 @@ fn update_got_article_error(
       //   list.append(model.user_messages, [
       //     UserError(user_message_id_next(model.user_messages), error_string),
       //   ])
+      let articles =
+        dict.map_values(model.articles, fn(_, article) {
+          case article {
+            ArticleFull(article_id, _, _, _, _, _)
+            | ArticleSummary(article_id, _, _, _, _) -> {
+              case article_id == id {
+                True -> {
+                  ArticleWithError(
+                    id,
+                    article.revision,
+                    article.title,
+                    article.leading,
+                    article.subtitle,
+                    error_string,
+                  )
+                }
+                False -> article
+              }
+            }
+            _ -> article
+          }
+        })
+      #(Model(..model, articles:), effect.none())
+    }
+    http.NotFound -> {
+      echo "not found: " <> error_string.http_error(err)
       let articles =
         dict.map_values(model.articles, fn(_, article) {
           case article {
