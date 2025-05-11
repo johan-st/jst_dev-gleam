@@ -348,59 +348,50 @@ fn update_got_article_error(
     <> error_string.http_error(err)
   case err {
     http.JsonError(json.UnexpectedByte(_)) -> {
-      // let user_messages =
-      //   list.append(model.user_messages, [
-      //     UserError(user_message_id_next(model.user_messages), error_string),
-      //   ])
-      let articles =
-        dict.map_values(model.articles, fn(_, article) {
-          case article {
-            ArticleFull(article_id, _, _, _, _, _)
-            | ArticleSummary(article_id, _, _, _, _) -> {
-              case article_id == id {
-                True -> {
-                  ArticleWithError(
-                    id,
-                    article.revision,
-                    article.title,
-                    article.leading,
-                    article.subtitle,
-                    error_string,
-                  )
-                }
-                False -> article
-              }
-            }
-            _ -> article
-          }
-        })
-      #(Model(..model, articles:), effect.none())
+      case dict.get(model.articles, id) {
+        Ok(article) -> {
+          let article =
+            ArticleWithError(
+              id,
+              article.revision,
+              article.title,
+              article.leading,
+              article.subtitle,
+              error_string,
+            )
+          #(
+            Model(..model, articles: articles_update([article], model.articles)),
+            effect.none(),
+          )
+        }
+        Error(_) -> {
+          echo error_string.http_error(err)
+          #(model, effect.none())
+        }
+      }
     }
     http.NotFound -> {
-      echo "not found: " <> error_string.http_error(err)
-      let articles =
-        dict.map_values(model.articles, fn(_, article) {
-          case article {
-            ArticleFull(article_id, _, _, _, _, _)
-            | ArticleSummary(article_id, _, _, _, _) -> {
-              case article_id == id {
-                True -> {
-                  ArticleWithError(
-                    id,
-                    article.revision,
-                    article.title,
-                    article.leading,
-                    article.subtitle,
-                    error_string,
-                  )
-                }
-                False -> article
-              }
-            }
-            _ -> article
-          }
-        })
-      #(Model(..model, articles:), effect.none())
+      case dict.get(model.articles, id) {
+        Ok(article) -> {
+          let article =
+            ArticleWithError(
+              id,
+              article.revision,
+              article.title,
+              article.leading,
+              article.subtitle,
+              error_string,
+            )
+          #(
+            Model(..model, articles: articles_update([article], model.articles)),
+            effect.none(),
+          )
+        }
+        Error(_) -> {
+          echo "not found: " <> error_string.http_error(err)
+          #(model, effect.none())
+        }
+      }
     }
     _ -> {
       echo err
@@ -420,13 +411,13 @@ fn update_got_article_error(
 }
 
 fn articles_update(
-  old_articles: Dict(Int, Article),
   new_articles: List(Article),
+  old_articles: Dict(Int, Article),
 ) -> Dict(Int, Article) {
   new_articles
   |> list.map(fn(article) { #(article.id, article) })
   |> dict.from_list
-  |> dict.merge(old_articles)
+  |> dict.merge(old_articles, _)
 }
 
 fn user_message_id_next(user_messages: List(UserMessage)) -> Int {
