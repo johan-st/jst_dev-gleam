@@ -1,6 +1,7 @@
 package talk_test
 
 import (
+	"context"
 	"jst_dev/server/jst_log"
 	"jst_dev/server/talk"
 	"testing"
@@ -19,7 +20,7 @@ func BenchmarkMessagingInProcess(b *testing.B) {
 	if err != nil {
 		b.Fatalf("Failed to initialize TALK: %v", err)
 	}
-	err = talk.Start()
+	conn, err := talk.Start(context.Background())
 	if err != nil {
 		b.Fatalf("Failed to start TALK: %v", err)
 	}
@@ -28,7 +29,7 @@ func BenchmarkMessagingInProcess(b *testing.B) {
 	b.ResetTimer()
 	// Run the benchmark
 	for n := 0; n < b.N; n++ {
-		msg, err := talk.Conn.Request("ping", []byte("ping"), 50*time.Millisecond)
+		msg, err := conn.Request("ping", []byte("ping"), 50*time.Millisecond)
 		if err != nil {
 			b.Fatalf("Request failed: %v", err)
 		}
@@ -50,7 +51,7 @@ func BenchmarkMessagingLoopback(b *testing.B) {
 	}
 	defer talk.Shutdown()
 
-	err = talk.Start()
+	_, err = talk.Start(context.Background())
 	if err != nil {
 		b.Fatalf("Failed to start TALK: %v", err)
 	}
