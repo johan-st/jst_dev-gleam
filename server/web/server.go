@@ -90,7 +90,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// handle api requests
 	if strings.HasPrefix(r.URL.Path, "/api") {
-		http.StripPrefix("/api", s.apiHandler).ServeHTTP(w, r)
+		s.l.Warn("api %s", r.URL.Path)
+		path := strings.TrimPrefix(r.URL.Path, "/api")
+		r.URL.Path = path
+		s.apiHandler.ServeHTTP(w, r)
 		return
 	}
 

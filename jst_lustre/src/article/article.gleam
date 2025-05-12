@@ -34,12 +34,22 @@ pub type Article {
   )
 }
 
+// pub type Content {
+//   Heading(List(Content))
+//   Paragraph(List(Content))
+//   Text(String)
+//   Link(String)
+//   Code(String)
+//   Unknown(String)
+// }
+
 pub type Content {
   Block(List(Content))
   Heading(String)
   Paragraph(String)
   Unknown(String)
 }
+
 
 // VIEW ------------------------------------------------------------------------
 
@@ -81,7 +91,7 @@ pub fn get_article(msg, id: Int) -> Effect(a) {
 }
 
 pub fn get_metadata_all(msg) -> Effect(a) {
-  let url = "http://127.0.0.1:8080/api/article"
+  let url = "http://127.0.0.1:8080/api/articles"
   http.get(url, http.expect_json(metadata_decoder(), msg))
 }
 

@@ -4,8 +4,6 @@ import (
 	"embed"
 	"jst_dev/server/jst_log"
 	"net/http"
-	"os"
-	"strings"
 
 	"io/fs"
 
@@ -22,6 +20,13 @@ type apiHandler struct {
 	kv       nats.KeyValue
 	os       nats.ObjectStore
 	embedded fs.FS
+	mux      http.ServeMux
+}
+
+func (h *apiHandler) routes() {
+	mux := *http.NewServeMux()
+	mux.HandleFunc("/articles", h.handlerArticles())
+	mux.HandleFunc("/article/{id}", h.handlerArticle())
 }
 
 //go:embed webApiData
@@ -32,21 +37,14 @@ func NewApiHandler(l *jst_log.Logger, kv nats.KeyValue, os nats.ObjectStore) Api
 	if err != nil {
 		panic(err)
 	}
-
-	// // Print content of index.json for debugging
-	// indexContent, err := fs.ReadFile(embedded, "article/index.json")
-	// if err != nil {
-	// 	l.Error("Failed to read index.json", "error", err)
-	// } else {
-	// 	l.Info("Index.json content", "content", string(indexContent))
-	// }
-
-	return &apiHandler{
-		l:        l,
+	handler := &apiHandler{
+		l:        l.WithBreadcrumb("api"),
 		kv:       kv,
 		os:       os,
 		embedded: embedded,
 	}
+	handler.routes()
+	return handler
 }
 func (h *apiHandler) GetVersion() string {
 	return "1.0.0"
@@ -54,55 +52,50 @@ func (h *apiHandler) GetVersion() string {
 
 func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.l.Info("API request received", "path", r.URL.Path, "method", r.Method)
+	h.mux.ServeHTTP(w, r)
 
-	// Set common headers
-	w.Header().Set("Content-Type", "application/json")
+}
 
-	// Handle article requests
-	if strings.HasPrefix(r.URL.Path, "/article") {
-		pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/article"), "/")
+func (h *apiHandler) handlerArticles() http.HandlerFunc {
+	l := h.l.WithBreadcrumb("articles")
 
-		// If path is just /article or /article/ serve the index
-		if len(pathParts) <= 1 || pathParts[1] == "" {
-			h.l.Info("Serving article index")
-			indexContent, err := fs.ReadFile(h.embedded, "article/index.json")
-			if err != nil {
-				h.l.Error("Failed to read article index", "error", err)
-				http.Error(w, "Internal server error", http.StatusInternalServerError)
-				return
-			}
-
-			w.WriteHeader(http.StatusOK)
-			w.Write(indexContent)
-			return
-		}
-		id := pathParts[1]
-		h.l.Info("Serving article", "id", id)
-		// Check if the article file exists
-		articlePath := "article/" + id + ".json"
-		_, err := fs.Stat(h.embedded, articlePath)
+	return func(w http.ResponseWriter, r *http.Request) {
+		indexContent, err := fs.ReadFile(h.embedded, "article/index.json")
 		if err != nil {
-			if os.IsNotExist(err) {
-				h.l.Warn("Article not found", "id", id)
-				http.Error(w, "Article not found", http.StatusNotFound)
-				return
-			}
-			h.l.Error("Failed to check article existence", "error", err)
+			l.Error("Failed to read article index", "error", err)
 			http.Error(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
-		articleContent, err := fs.ReadFile(h.embedded, "article/"+id+".json")
-		if err != nil {
-			h.l.Error("Failed to read article", "error", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+
+		w.WriteHeader(http.StatusOK)
+		w.Write(indexContent)
+		return
+
+	}
+}
+
+func (h *apiHandler) handlerArticle() http.HandlerFunc {
+	l := h.l.WithBreadcrumb("article")
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, ok := r.Context().Value("id").(string)
+		if !ok {
+			l.Warn("Failed to get id value from context")
+			http.NotFound(w, r)
 			return
 		}
+
+		filePath := "article/" + id + ".json"
+
+		articleContent, err := fs.ReadFile(h.embedded, filePath)
+		if err != nil {
+			l.Error("Failed to read article file", "id", id, "error", err)
+			http.NotFound(w, r)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+
 		w.WriteHeader(http.StatusOK)
 		w.Write(articleContent)
-		return
 	}
-
-	// If we get here, the path wasn't handled
-	h.l.Warn("Unhandled API path", "path", r.URL.Path)
-	http.Error(w, "Not found", http.StatusNotFound)
 }

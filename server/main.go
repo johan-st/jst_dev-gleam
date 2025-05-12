@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -25,24 +25,28 @@ const (
 )
 
 func main() {
-	err := run()
-	if err != nil {
-		log.Fatal(err)
+	ctx := context.Background()
+	if err := run(ctx, os.Stdout, os.Args); err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		os.Exit(1)
 	}
 }
 
-func run() error {
+func run(ctx context.Context, w io.Writer, args []string) error {
+	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
+	defer cancel()
 	var (
 		err     error
 		lRoot   *jst_log.Logger
 		l       *jst_log.Logger
 		blogSvc *blog.Blog
 		whoSvc  *who.Who
-		talkSvc *talk.Talk
 		nc      *nats.Conn
+		conf    *GlobalConfig
 	)
+
 	// - conf
-	conf, err := loadConf()
+	conf, err = loadConf()
 	if err != nil {
 		return fmt.Errorf("load conf: %w", err)
 	}
@@ -52,20 +56,21 @@ func run() error {
 	l = lRoot.WithBreadcrumb("main")
 
 	// - context
-	ctx := context.Background()
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel = context.WithCancel(ctx)
 	defer cancel()
 
 	// - talk
 	l.Debug("starting talk")
-	talkSvc, err = talk.New(conf.Talk, lRoot.WithBreadcrumb("talk"))
+	nc, err = talk.EmbeddedServer(
+		context.Background(),
+		conf.Talk,
+		lRoot.WithBreadcrumb("talk"),
+	)
 	if err != nil {
-		return fmt.Errorf("new talk: %w", err)
+		return fmt.Errorf("TALK, connection: %v", err)
+
 	}
-	nc, err = talkSvc.Start(ctx)
-	if err != nil {
-		return fmt.Errorf("new talk: %w", err)
-	}
+	defer nc.Close()
 
 	// - logger (connect)
 	lRoot.Connect(nc)
@@ -150,7 +155,6 @@ func run() error {
 
 	// Shutdown talk
 	// talkSvc.Shutdown()
-	talkSvc.WaitForShutdown()
 	fmt.Println("Server shutdown complete")
 
 	return nil
@@ -215,4 +219,3 @@ func initDefaultUser(l *jst_log.Logger, nc *nats.Conn) func() {
 		nc.Publish("who.users.delete", []byte(respData.ID))
 	}
 }
-
