@@ -12,7 +12,7 @@ func loadConf() (*GlobalConfig, error) {
 	conf := &GlobalConfig{
 		Talk: talk.Conf{
 			ServerName:        "jst",
-			EnableLogging:     true,
+			EnableLogging:     false,
 			ListenOnLocalhost: true,
 		},
 	}

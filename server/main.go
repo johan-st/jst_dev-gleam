@@ -4,16 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"jst_dev/server/blog"
 	"jst_dev/server/jst_log"
 	"jst_dev/server/talk"
-	"jst_dev/server/web"
+	web "jst_dev/server/web2"
 	"jst_dev/server/who"
 
 	"github.com/nats-io/nats.go"
@@ -26,34 +26,43 @@ const (
 
 func main() {
 	ctx := context.Background()
-	if err := run(ctx, os.Stdout, os.Args); err != nil {
+	if err := run(
+		ctx,
+		// os.Args,
+		// os.Stdin,
+		// os.Stdout,
+		// os.Stderr,
+		// os.Getenv,
+		// os.Getwd,
+	); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, w io.Writer, args []string) error {
+// isolating run enables easier testing and testing in perallell
+func run(
+	ctx context.Context,
+	// args []string, // The arguments passed in when executing your program. It’s also used for parsing flags.
+	// stdin io.Reader, // For reading input
+	// stdout io.Writer, // For writing output
+	// stderr io.Writer, // For writing error logs
+	// getenv func(string) string, //	For reading environment variables
+	// getwd func() (string, error), //	Get the working directory
+) error {
+	cleanShutdown := &sync.WaitGroup{}
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 	defer cancel()
-	var (
-		err     error
-		lRoot   *jst_log.Logger
-		l       *jst_log.Logger
-		blogSvc *blog.Blog
-		whoSvc  *who.Who
-		nc      *nats.Conn
-		conf    *GlobalConfig
-	)
 
 	// - conf
-	conf, err = loadConf()
+	conf, err := loadConf()
 	if err != nil {
 		return fmt.Errorf("load conf: %w", err)
 	}
 
 	// - logger (create)
-	lRoot = jst_log.NewLogger(SHARED_ENV_AppName, jst_log.DefaultSubjects())
-	l = lRoot.WithBreadcrumb("main")
+	lRoot := jst_log.NewLogger(SHARED_ENV_AppName, jst_log.DefaultSubjects())
+	l := lRoot.WithBreadcrumb("main")
 
 	// - context
 	ctx, cancel = context.WithCancel(ctx)
@@ -61,7 +70,7 @@ func run(ctx context.Context, w io.Writer, args []string) error {
 
 	// - talk
 	l.Debug("starting talk")
-	nc, err = talk.EmbeddedServer(
+	nc, err := talk.EmbeddedServer(
 		context.Background(),
 		conf.Talk,
 		lRoot.WithBreadcrumb("talk"),
@@ -79,7 +88,7 @@ func run(ctx context.Context, w io.Writer, args []string) error {
 
 	// - blog
 	l.Debug("starting blog")
-	blogSvc, err = blog.New(nc, lRoot.WithBreadcrumb("blog"))
+	blogSvc, err := blog.New(nc, lRoot.WithBreadcrumb("blog"))
 	if err != nil {
 		return fmt.Errorf("new blog: %w", err)
 	}
@@ -89,15 +98,9 @@ func run(ctx context.Context, w io.Writer, args []string) error {
 	}
 
 	// - web
-	l.Debug("starting web")
-	webSvc, err := web.New(ctx, nc, lRoot.WithBreadcrumb("web"))
-	if err != nil {
-		return fmt.Errorf("new web: %w", err)
-	}
-	err = webSvc.Start(ctx)
-	if err != nil {
-		return fmt.Errorf("start web: %w", err)
-	}
+	l.Debug("http server, start")
+	httpServer := web.New(ctx, nc, *lRoot.WithBreadcrumb("http"))
+	go httpServer.Run(cleanShutdown)
 
 	// --- Who ---
 	l.Debug("starting who")
@@ -107,7 +110,7 @@ func run(ctx context.Context, w io.Writer, args []string) error {
 		JwtSecret: []byte(SHARED_ENV_jwtSecret),
 		HashSalt:  "jst_dev_salt",
 	}
-	whoSvc, err = who.New(whoConf)
+	whoSvc, err := who.New(whoConf)
 	if err != nil {
 		return fmt.Errorf("new who: %w", err)
 	}
@@ -124,6 +127,11 @@ func run(ctx context.Context, w io.Writer, args []string) error {
 	// ------------------------------------------------------------
 
 	l.Debug("started all services")
+
+	// ------------------------------------------------------------
+	// SHUTDOWN
+	// ------------------------------------------------------------
+
 	// Wait for interrupt signal to gracefully shut down
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
@@ -149,14 +157,14 @@ func run(ctx context.Context, w io.Writer, args []string) error {
 		l.Warn("Received second interrupt signal, force quitting...")
 		fmt.Println("Received second interrupt signal, force quitting...")
 		// Sleep for a short time to allow for logging operations to complete
-		time.Sleep(5 * time.Second)
+		time.Sleep(1 * time.Second)
 		os.Exit(1)
 	}()
 
 	// Shutdown talk
 	// talkSvc.Shutdown()
+	cleanShutdown.Wait()
 	fmt.Println("Server shutdown complete")
-
 	return nil
 }
 
