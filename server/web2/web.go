@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"io/fs"
+	"jst_dev/server/articles"
 	"jst_dev/server/jst_log"
 	"net"
 	"net/http"
@@ -14,11 +15,11 @@ import (
 )
 
 type httpServer struct {
-	l        jst_log.Logger
-	ctx      context.Context
-	articles map[string]byte
-	mux      http.ServeMux
-	embedFs  fs.FS
+	l           jst_log.Logger
+	ctx         context.Context
+	articleRepo *articles.ArticleRepo
+	mux         http.ServeMux
+	embedFs     fs.FS
 }
 
 //go:embed static
@@ -30,7 +31,8 @@ func New(ctx context.Context, nc *nats.Conn, l jst_log.Logger) *httpServer {
 		l.Error("Failed to load static folder")
 		return nil
 	}
-	s := &httpServer{ctx: ctx, l: l, embedFs: fs}
+	artRepo, err := articles.Repo(ctx, nc, l.WithBreadcrumb("articleRepo"))
+	s := &httpServer{ctx: ctx, l: l, embedFs: fs, articleRepo: artRepo}
 	s.routes()
 
 	return s
@@ -44,7 +46,7 @@ func (s *httpServer) Run(cleanShutdown *sync.WaitGroup) {
 		Handler: &s.mux,
 	}
 	go func() {
-		s.l.Info("listening on %s\n", httpServer.Addr)
+		s.l.Info("listening on %s", httpServer.Addr)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			s.l.Error("error listening and serving: %s", err)
 		}
