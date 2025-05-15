@@ -18,24 +18,24 @@ const (
 
 type ArticleRepo struct {
 	ctx      context.Context
-	articles map[string]Article
-	kv       jetstream.KeyValue
 	lock     sync.RWMutex
+	articles map[string]*Article
+	kv       jetstream.KeyValue
 }
 
 type Article struct {
-	Version  int       `json:"version"`
-	Title    string    `json:"title"`
-	Subtitle string    `json:"subtitle"`
-	Leading  string    `json:"leading"`
-	Slug     string    `json:"slug"`
-	Content  []Content `json:"content"`
+	StructVersion int       `json:"struct_version"`
+	Slug          string    `json:"slug"`
+	Title         string    `json:"title"`
+	Subtitle      string    `json:"subtitle"`
+	Leading       string    `json:"leading"`
+	Content       []Content `json:"content"`
 }
 
 type Content struct {
 	Type    ContentType `json:"type"`
-	Text    string      `json:"text,omitempty"` // Only for type "Text"
-	Content []Content   `json:"content,omitempty"`
+	Text    string      `json:"text,omitempty"`    // Only for type "Text"
+	Content []Content   `json:"content,omitempty"` // Never for type "Text"
 }
 
 type ContentType string
@@ -57,7 +57,7 @@ func Repo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (*ArticleRepo, 
 		return nil, fmt.Errorf("repo setup: %w", err)
 	}
 	repo := &ArticleRepo{
-		articles: make(map[string]Article),
+		articles: make(map[string]*Article),
 		kv:       kv,
 		lock:     sync.RWMutex{},
 	}
@@ -70,19 +70,18 @@ func Repo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (*ArticleRepo, 
 	return repo, nil
 }
 
-func (r *ArticleRepo) GetById(id string) *Article {
-	art, ok := r.articles[id]
+func (r *ArticleRepo) Get(slug string) *Article {
+	art, ok := r.articles[slug]
 	if !ok {
 		return nil
 	}
-	return &art
-
+	return art
 }
 
 func (r *ArticleRepo) updater(ctx context.Context, w jetstream.KeyWatcher, l *jst_log.Logger) {
 	var (
 		err error
-		art Article
+		art *Article
 	)
 	defer w.Stop()
 	for {
@@ -104,6 +103,7 @@ func (r *ArticleRepo) updater(ctx context.Context, w jetstream.KeyWatcher, l *js
 			switch op {
 			case jetstream.KeyValuePut:
 				l.Debug("PUT - %s:%d", update.Key(), update.Revision())
+				art = &Article{}
 				err = json.Unmarshal(update.Value(), art)
 				if err != nil {
 					l.Error("decode put: %w", err)
