@@ -25,6 +25,7 @@ type ArticleRepo struct {
 
 type Article struct {
 	StructVersion int       `json:"struct_version"`
+	Rev           int       `json:"revision"`
 	Slug          string    `json:"slug"`
 	Title         string    `json:"title"`
 	Subtitle      string    `json:"subtitle"`
@@ -41,12 +42,12 @@ type Content struct {
 type ContentType string
 
 const (
-	Heading   ContentType = "heading"
-	Subtitle  ContentType = "subtitle"
-	Leading   ContentType = "leading"
-	Paragraph ContentType = "paragraph"
-	Link      ContentType = "link"
-	Text      ContentType = "text"
+	ContentHeading   ContentType = "heading"
+	ContentSubtitle  ContentType = "subtitle"
+	ContentLeading   ContentType = "leading"
+	ContentParagraph ContentType = "paragraph"
+	ContentLink      ContentType = "link"
+	ContentText      ContentType = "text"
 )
 
 // --- REPO ---
@@ -71,11 +72,53 @@ func Repo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (*ArticleRepo, 
 }
 
 func (r *ArticleRepo) Get(slug string) *Article {
+	r.lock.RLock()
+	defer r.lock.RUnlock()
 	art, ok := r.articles[slug]
 	if !ok {
 		return nil
 	}
 	return art
+}
+
+func (r *ArticleRepo) Put(art Article, rev int) error {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
+	// Validate the revision number
+	if rev > 0 {
+		// Check if article exists and revision matches
+		existing, exists := r.articles[art.Slug]
+		if !exists {
+			return fmt.Errorf("article with slug %s not found", art.Slug)
+		}
+		if existing.Rev != rev {
+			return fmt.Errorf("revision mismatch: expected %d, got %d", existing.Rev, rev)
+		}
+		// Increment revision for update
+		art.Rev = rev + 1
+	} else {
+		// For new articles, start at revision 1
+		art.Rev = 1
+	}
+
+	// Marshal article to JSON
+	data, err := json.Marshal(art)
+	if err != nil {
+		return fmt.Errorf("marshal article: %w", err)
+	}
+
+	// Store in JetStream KV
+	_, err = r.kv.Put(r.ctx, art.Slug, data)
+	if err != nil {
+		return fmt.Errorf("store article: %w", err)
+	}
+
+	// Update in-memory map (this will also be updated by the watcher,
+	// but we do it here for immediate consistency)
+	r.articles[art.Slug] = &art
+
+	return nil
 }
 
 func (r *ArticleRepo) updater(ctx context.Context, w jetstream.KeyWatcher, l *jst_log.Logger) {
