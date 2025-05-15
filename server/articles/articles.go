@@ -24,6 +24,15 @@ type ArticleRepo struct {
 	kv       jetstream.KeyValue
 }
 
+type ArticleMetadata struct {
+	StructVersion int    `json:"struct_version"`
+	Rev           int    `json:"revision"`
+	Slug          string `json:"slug"`
+	Title         string `json:"title"`
+	Subtitle      string `json:"subtitle"`
+	Leading       string `json:"leading"`
+}
+
 type Article struct {
 	StructVersion int       `json:"struct_version"`
 	Rev           int       `json:"revision"`
@@ -37,27 +46,27 @@ type Article struct {
 // --- CONTENT ---
 
 type Content struct {
-	Type    ContentType `json:"type"`
-	Text    string      `json:"text,omitempty"`    // Only for type "Text"
-	Content []Content   `json:"content,omitempty"` // Never for type "Text"
-	Url     string      `json:"url,omitempty"`     // Only for type "Link", "Image"
-	Alt     string      `json:"alt,omitempty"`     // Only for type "Image"
+	Type       ContentType `json:"type"`
+	Text       string      `json:"text,omitempty"`
+	Content    []Content   `json:"content,omitempty"`
+	Url        string      `json:"url,omitempty"`
+	Alt        string      `json:"alt,omitempty"`
+	Heading    string      `json:"heading,omitempty"`
+	Subheading string      `json:"subheading,omitempty"`
 }
 
 type ContentType string
 
 const (
-	ContentText      ContentType = "text"
-	ContentBlock     ContentType = "block"
-	ContentHeading   ContentType = "heading"
-	ContentSubtitle  ContentType = "subtitle"
-	ContentLeading   ContentType = "leading"
-	ContentParagraph ContentType = "paragraph"
-	ContentLink      ContentType = "link"
-	ContentImage     ContentType = "image"
+	ContentText         ContentType = "text"
+	ContentBlock        ContentType = "block"
+	ContentHeading      ContentType = "heading"
+	ContentParagraph    ContentType = "paragraph"
+	ContentLink         ContentType = "link"
+	ContentLinkExternal ContentType = "link_external"
+	ContentImage        ContentType = "image"
+	ContentList         ContentType = "list"
 )
-
-
 
 // --- GENERATORS ---
 
@@ -68,7 +77,7 @@ func Text(text string) Content {
 	}
 }
 
-func Block(heading string, contents ...Content) Content {
+func Block(contents ...Content) Content {
 	return Content{
 		Type:    ContentBlock,
 		Content: contents,
@@ -82,40 +91,40 @@ func Heading(text string) Content {
 	}
 }
 
-func Subtitle(text string) Content {
+func Paragraph(contents ...Content) Content {
 	return Content{
-		Type: ContentSubtitle,
-		Text: text,
+		Type:    ContentParagraph,
+		Content: contents,
 	}
 }
 
-func Leading(text string) Content {
+func Link(url string, contents ...Content) Content {
 	return Content{
-		Type: ContentLeading,
-		Text: text,
+		Type:    ContentLink,
+		Url:     url,
+		Content: contents,
 	}
 }
 
-func Paragraph(text string) Content {
+func LinkExternal(url string, contents ...Content) Content {
 	return Content{
-		Type: ContentParagraph,
-		Text: text,
+		Type:    ContentLinkExternal,
+		Url:     url,
+		Content: contents,
 	}
 }
-
-func Link(url string, text string) Content {
-	return Content{
-		Type: ContentLink,
-		Url:  url,
-		Text: text,
-	}
-}
-
 func Image(url string, alt string) Content {
 	return Content{
 		Type: ContentImage,
 		Url:  url,
 		Alt:  alt,
+	}
+}
+
+func List(contents ...Content) Content {
+	return Content{
+		Type:    ContentList,
+		Content: contents,
 	}
 }
 
@@ -128,6 +137,7 @@ func Repo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (*ArticleRepo, 
 		return nil, fmt.Errorf("repo setup: %w", err)
 	}
 	repo := &ArticleRepo{
+		ctx:      ctx,
 		articles: make(map[string]*Article),
 		kv:       kv,
 		lock:     sync.RWMutex{},
@@ -137,7 +147,7 @@ func Repo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (*ArticleRepo, 
 	if err != nil {
 		return nil, fmt.Errorf("watchAll: %w", err)
 	}
-	go repo.updater(ctx, watcher, l.WithBreadcrumb("watch"))
+	go repo.updater(ctx, watcher, l.WithBreadcrumb("watcher"))
 	return repo, nil
 }
 
@@ -150,6 +160,23 @@ func (r *ArticleRepo) Get(slug string) *Article {
 		return nil
 	}
 	return art
+}
+
+func (r *ArticleRepo) AllNoContent() []ArticleMetadata {
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+	articles := make([]ArticleMetadata, 0, len(r.articles))
+	for _, art := range r.articles {
+		articles = append(articles, ArticleMetadata{
+			StructVersion: art.StructVersion,
+			Slug:          art.Slug,
+			Rev:           art.Rev,
+			Title:         art.Title,
+			Subtitle:      art.Subtitle,
+			Leading:       art.Leading,
+		})
+	}
+	return articles
 }
 
 // Put updates an article.
@@ -171,6 +198,10 @@ func (r *ArticleRepo) Put(art Article, rev int) error {
 		art.Rev = rev + 1
 	} else {
 		// For new articles, start at revision 1
+		// Check if article already exists
+		if _, exists := r.articles[art.Slug]; exists {
+			return fmt.Errorf("article with slug %s already exists", art.Slug)
+		}
 		art.Rev = 1
 	}
 

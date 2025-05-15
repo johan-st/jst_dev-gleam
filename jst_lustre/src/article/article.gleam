@@ -10,14 +10,14 @@ import utils/http
 
 pub type Article {
   ArticleSummary(
-    id: Int,
+    slug: String,
     revision: Int,
     title: String,
     leading: String,
     subtitle: String,
   )
   ArticleFull(
-    id: Int,
+    slug: String,
     revision: Int,
     title: String,
     leading: String,
@@ -25,7 +25,7 @@ pub type Article {
     content: List(Content),
   )
   ArticleWithError(
-    id: Int,
+    slug: String,
     revision: Int,
     title: String,
     leading: String,
@@ -49,7 +49,6 @@ pub type Content {
   Paragraph(String)
   Unknown(String)
 }
-
 
 // VIEW ------------------------------------------------------------------------
 
@@ -85,13 +84,13 @@ pub fn view_article_content(
 
 // Fetch ------------------------------------------------------------------------
 
-pub fn get_article(msg, id: Int) -> Effect(a) {
-  let url = "http://127.0.0.1:8080/api/article/" <> int.to_string(id)
+pub fn get_article(msg, slug: String) -> Effect(a) {
+  let url = "http://127.0.0.1:8080/api/article/" <> slug
   http.get(url, http.expect_json(article_decoder(), msg))
 }
 
 pub fn get_metadata_all(msg) -> Effect(a) {
-  let url = "http://127.0.0.1:8080/api/articles"
+  let url = "http://127.0.0.1:8080/api/article"
   http.get(url, http.expect_json(metadata_decoder(), msg))
 }
 
@@ -119,7 +118,7 @@ fn metadata_decoder() -> decode.Decoder(List(Article)) {
 
 pub fn article_decoder() -> decode.Decoder(Article) {
   use article_type <- decode.optional_field("type", "not_set", decode.string)
-  use id <- decode.field("id", decode.int)
+  use slug <- decode.field("slug", decode.string)
   use revision <- decode.field("revision", decode.int)
   use title <- decode.field("title", decode.string)
   use leading <- decode.field("leading", decode.string)
@@ -128,7 +127,7 @@ pub fn article_decoder() -> decode.Decoder(Article) {
   let decode_full = fn() -> decode.Decoder(Article) {
     use content <- decode.field("content", decode.list(content_decoder()))
     decode.success(ArticleFull(
-      id:,
+      slug:,
       revision:,
       title:,
       leading:,
@@ -140,7 +139,7 @@ pub fn article_decoder() -> decode.Decoder(Article) {
   let decode_error = fn() -> decode.Decoder(Article) {
     use error <- decode.field("error", decode.string)
     decode.success(ArticleWithError(
-      id:,
+      slug:,
       revision:,
       title:,
       leading:,
@@ -150,7 +149,7 @@ pub fn article_decoder() -> decode.Decoder(Article) {
   }
 
   let decode_summary = fn() -> decode.Decoder(Article) {
-    decode.success(ArticleSummary(id:, revision:, title:, leading:, subtitle:))
+    decode.success(ArticleSummary(slug:, revision:, title:, leading:, subtitle:))
   }
 
   decode.one_of(decode_full(), [decode_error(), decode_summary()])
@@ -160,32 +159,32 @@ pub fn article_decoder() -> decode.Decoder(Article) {
 
 pub fn article_encoder(article: Article) -> json.Json {
   case article {
-    ArticleSummary(id, revision, title, leading, subtitle) -> {
+    ArticleSummary(slug, revision, title, leading, subtitle) -> {
       json.object([
         #("type", json.string("metadata_v1")),
         #("revision", json.int(revision)),
-        #("id", json.int(id)),
+        #("slug", json.string(slug)),
         #("title", json.string(title)),
         #("leading", json.string(leading)),
         #("subtitle", json.string(subtitle)),
       ])
     }
-    ArticleFull(id, revision, title, leading, subtitle, content) -> {
+    ArticleFull(slug, revision, title, leading, subtitle, content) -> {
       json.object([
         #("type", json.string("article_v1")),
         #("revision", json.int(revision)),
-        #("id", json.int(id)),
+        #("slug", json.string(slug)),
         #("title", json.string(title)),
         #("leading", json.string(leading)),
         #("subtitle", json.string(subtitle)),
         #("content", json.array(content, of: content_encoder)),
       ])
     }
-    ArticleWithError(id, revision, title, leading, subtitle, error) -> {
+    ArticleWithError(slug, revision, title, leading, subtitle, error) -> {
       json.object([
         #("type", json.string("with_error_v1")),
         #("revision", json.int(revision)),
-        #("id", json.int(id)),
+        #("slug", json.string(slug)),
         #("title", json.string(title)),
         #("leading", json.string(leading)),
         #("subtitle", json.string(subtitle)),
@@ -226,9 +225,9 @@ pub fn content_encoder(content: Content) -> json.Json {
 
 // Utils -----------------------------------------------------------------------
 
-pub fn list_to_dict(articles: List(Article)) -> Dict(Int, Article) {
+pub fn list_to_dict(articles: List(Article)) -> Dict(String, Article) {
   articles
-  |> list.map(fn(article) { #(article.id, article) })
+  |> list.map(fn(article) { #(article.slug, article) })
   |> dict.from_list
 }
 
@@ -237,7 +236,7 @@ pub fn list_to_dict(articles: List(Article)) -> Dict(Int, Article) {
 pub fn loading_article() -> Article {
   ArticleWithError(
     revision: 0,
-    id: 0,
+    slug: "placeholder",
     title: "fetching articles..",
     subtitle: "articles have not been fetched yet",
     leading: "This is a placeholder article. At the moment, the articles are being fetched from the server.. please wait.",

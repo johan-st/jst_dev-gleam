@@ -32,6 +32,10 @@ func New(ctx context.Context, nc *nats.Conn, l jst_log.Logger) *httpServer {
 		return nil
 	}
 	artRepo, err := articles.Repo(ctx, nc, l.WithBreadcrumb("articleRepo"))
+	if err != nil {
+		l.Error("Failed to create article repo: %s", err)
+		return nil
+	}
 	s := &httpServer{ctx: ctx, l: l, embedFs: fs, articleRepo: artRepo}
 	s.routes()
 

@@ -40,7 +40,7 @@ pub fn main() {
 
 type Model {
   Model(
-    articles: Dict(Int, Article),
+    articles: Dict(String, Article),
     route: Route,
     user_messages: List(UserMessage),
     chat: chat.Model,
@@ -56,7 +56,7 @@ type UserMessage {
 type Route {
   Index
   Articles
-  ArticleById(id: Int)
+  ArticleBySlug(slug: String)
   About
   /// It's good practice to store whatever `Uri` we failed to match in case we
   /// want to log it or hint to the user that maybe they made a typo.
@@ -67,11 +67,7 @@ fn parse_route(uri: Uri) -> Route {
   case uri.path_segments(uri.path) {
     [] | [""] -> Index
     ["articles"] -> Articles
-    ["article", article_id] ->
-      case int.parse(article_id) {
-        Ok(article_id) -> ArticleById(id: article_id)
-        Error(_) -> NotFound(uri:)
-      }
+    ["article", slug] -> ArticleBySlug(slug)
     ["about"] -> About
     _ -> NotFound(uri:)
   }
@@ -82,7 +78,7 @@ fn route_url(route: Route) -> String {
     Index -> "/"
     About -> "/about"
     Articles -> "/articles"
-    ArticleById(post_id) -> "/article/" <> int.to_string(post_id)
+    ArticleBySlug(slug) -> "/article/" <> slug
     NotFound(_) -> "/404"
   }
 }
@@ -146,7 +142,7 @@ type Msg {
   // LOCALSTORAGE
   PersistGotModel(opt: Option(PersistentModel))
   // ARTICLES
-  GotArticle(id: Int, result: Result(Article, HttpError))
+  GotArticle(slug: String, result: Result(Article, HttpError))
   GotArticlesMetadata(result: Result(List(Article), HttpError))
   // USER ACTIONS
   // CHAT
@@ -211,21 +207,21 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     GotArticlesMetadata(result:) -> {
       update_got_articles_metadata(model, result)
     }
-    GotArticle(id, result) -> {
+    GotArticle(slug, result) -> {
       case result {
         Ok(article) -> {
-          let articles = dict.insert(model.articles, article.id, article)
+          let articles = dict.insert(model.articles, article.slug, article)
           #(Model(..model, articles:), effect.none())
         }
-        Error(err) -> update_got_article_error(model, err, id)
+        Error(err) -> update_got_article_error(model, err, slug)
       }
     }
     ArticleHovered(article:) -> {
       case article {
-        ArticleSummary(id, _, _, _, _) -> {
+        ArticleSummary(slug, _, _, _, _) -> {
           #(
             model,
-            article.get_article(fn(result) { GotArticle(id, result) }, id),
+            article.get_article(fn(result) { GotArticle(slug, result) }, slug),
           )
         }
         ArticleFull(_, _, _, _, _, _) -> {
@@ -249,24 +245,24 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
 fn effect_navigation(model: Model, route: Route) -> Effect(Msg) {
   case route {
-    ArticleById(id) -> {
-      let article = dict.get(model.articles, id)
+    ArticleBySlug(slug) -> {
+      let article = dict.get(model.articles, slug)
       case article {
         Ok(article) -> {
           case article {
-            ArticleSummary(id, _, _, _, _) -> {
-              article.get_article(fn(result) { GotArticle(id, result) }, id)
+            ArticleSummary(slug, _, _, _, _) -> {
+              article.get_article(fn(result) { GotArticle(slug, result) }, slug)
             }
             ArticleFull(_, _, _, _, _, _) -> {
               effect.none()
             }
             ArticleWithError(_, _, _, _, _, _) -> {
-              article.get_article(fn(result) { GotArticle(id, result) }, id)
+              article.get_article(fn(result) { GotArticle(slug, result) }, slug)
             }
           }
         }
         Error(_) -> {
-          echo "no article found for id: " <> int.to_string(id)
+          echo "no article found for slug: " <> slug
           effect.none()
         }
       }
@@ -314,7 +310,7 @@ fn update_got_articles_metadata(
     Ok(articles) -> {
       let articles = article.list_to_dict(articles)
       let effect = case model.route {
-        ArticleById(_) -> {
+        ArticleBySlug(_) -> {
           echo "loading article content"
           effect_navigation(Model(..model, articles:), model.route)
         }
@@ -339,20 +335,20 @@ fn update_got_articles_metadata(
 fn update_got_article_error(
   model: Model,
   err: HttpError,
-  id: Int,
+  slug: String,
 ) -> #(Model, Effect(Msg)) {
   let error_string =
-    "failed to load article (id: "
-    <> int.to_string(id)
+    "failed to load article (slug: "
+    <> slug
     <> "): "
     <> error_string.http_error(err)
   case err {
     http.JsonError(json.UnexpectedByte(_)) -> {
-      case dict.get(model.articles, id) {
+      case dict.get(model.articles, slug) {
         Ok(article) -> {
           let article =
             ArticleWithError(
-              id,
+              slug,
               article.revision,
               article.title,
               article.leading,
@@ -371,11 +367,11 @@ fn update_got_article_error(
       }
     }
     http.NotFound -> {
-      case dict.get(model.articles, id) {
+      case dict.get(model.articles, slug) {
         Ok(article) -> {
           let article =
             ArticleWithError(
-              id,
+              slug,
               article.revision,
               article.title,
               article.leading,
@@ -399,8 +395,8 @@ fn update_got_article_error(
         list.append(model.user_messages, [
           UserError(
             user_message_id_next(model.user_messages),
-            "UNHANDLED ERROR while loading article (id:"
-              <> int.to_string(id)
+            "UNHANDLED ERROR while loading article (slug:"
+              <> slug
               <> "): "
               <> error_string,
           ),
@@ -412,10 +408,10 @@ fn update_got_article_error(
 
 fn articles_update(
   new_articles: List(Article),
-  old_articles: Dict(Int, Article),
-) -> Dict(Int, Article) {
+  old_articles: Dict(String, Article),
+) -> Dict(String, Article) {
   new_articles
-  |> list.map(fn(article) { #(article.id, article) })
+  |> list.map(fn(article) { #(article.slug, article) })
   |> dict.from_list
   |> dict.merge(old_articles, _)
 }
@@ -453,19 +449,19 @@ fn view(model: Model) -> Element(Msg) {
             case dict.is_empty(model.articles) {
               True ->
                 view_article_listing(
-                  dict.from_list([#(0, article.loading_article())]),
+                  dict.from_list([#("loading", article.loading_article())]),
                 )
               False -> view_article_listing(model.articles)
             }
           }
-          ArticleById(id) -> {
+          ArticleBySlug(slug) -> {
             case dict.is_empty(model.articles) {
               True -> {
                 echo "no articles loaded"
                 view_article(article.loading_article())
               }
               False -> {
-                let article = dict.get(model.articles, id)
+                let article = dict.get(model.articles, slug)
                 case article {
                   Ok(article) -> view_article(article)
                   Error(_) -> view_not_found()
@@ -528,7 +524,7 @@ fn view_header_link(
   label text: String,
 ) -> Element(msg) {
   let is_active = case current, target {
-    ArticleById(_), Articles -> True
+    ArticleBySlug(_), Articles -> True
     _, _ -> current == target
   }
 
@@ -660,17 +656,17 @@ fn view_user_message(msg: UserMessage) -> Element(Msg) {
 
 fn view_index() -> List(Element(msg)) {
   [
-    view_title("Welcome to jst.dev!", 0),
+    view_title("Welcome to jst.dev!", "welcome"),
     view_subtitle(
       "...or, A lession on overengineering for fun and.. 
       well just for fun.",
-      0,
+      "welcome",
     ),
     view_leading(
       "This site and it's underlying IT-infrastructure is the primary 
       place for me to experiment with technologies and topologies. I 
       also share some of my thoughts and learnings here.",
-      0,
+      "welcome",
     ),
     html.p([attribute.class("mt-14")], [
       html.text(
@@ -679,7 +675,10 @@ fn view_index() -> List(Element(msg)) {
         also share some of my thoughts and learnings here. Feel free to 
         check out my overview, ",
       ),
-      view_link(ArticleById(1), "NATS all the way down ->"),
+      view_link(
+        ArticleBySlug("nats-all-the-way-down"),
+        "NATS all the way down ->",
+      ),
     ]),
     view_paragraph(
       "It to is a work in progress and I mostly keep it here for my own reference.",
@@ -693,40 +692,40 @@ fn view_index() -> List(Element(msg)) {
   ]
 }
 
-fn view_article_listing(articles: Dict(Int, Article)) -> List(Element(Msg)) {
+fn view_article_listing(articles: Dict(String, Article)) -> List(Element(Msg)) {
   let articles =
     articles
     |> dict.values
-    |> list.sort(fn(a, b) { int.compare(a.id, b.id) })
+    |> list.sort(fn(a, b) { string.compare(a.slug, b.slug) })
     |> list.index_map(fn(article, index) {
       case article {
-        ArticleFull(id, _, title, leading, subtitle, _)
-        | ArticleSummary(id, _, title, leading, subtitle) -> {
+        ArticleFull(slug, _, title, leading, subtitle, _)
+        | ArticleSummary(slug, _, title, leading, subtitle) -> {
           html.article([attribute.class("mt-14")], [
             html.a(
               [
                 attribute.class(
                   "group block  border-l border-zinc-700  pl-4  hover:border-pink-700 transition-colors duration-25",
                 ),
-                href(ArticleById(id)),
+                href(ArticleBySlug(slug)),
                 event.on_mouse_enter(ArticleHovered(article)),
               ],
               [
                 html.h3(
                   [
-                    attribute.id("article-title-" <> int.to_string(id)),
+                    attribute.id("article-title-" <> slug),
                     attribute.class("article-title"),
                     attribute.class("text-xl text-pink-700 font-light"),
                   ],
                   [html.text(title)],
                 ),
-                view_subtitle(subtitle, id),
+                view_subtitle(subtitle, slug),
                 view_paragraph(leading),
               ],
             ),
           ])
         }
-        ArticleWithError(id, _revision, title, _leading, _subtitle, error) -> {
+        ArticleWithError(slug, _revision, title, _leading, _subtitle, error) -> {
           html.article(
             [
               attribute.class("mt-14 group group-hover"),
@@ -735,7 +734,7 @@ fn view_article_listing(articles: Dict(Int, Article)) -> List(Element(Msg)) {
             [
               html.a(
                 [
-                  href(ArticleById(id)),
+                  href(ArticleBySlug(slug)),
                   attribute.class(
                     "group block  border-l border-zinc-700 pl-4 hover:border-zinc-500 transition-colors duration-25",
                   ),
@@ -743,7 +742,7 @@ fn view_article_listing(articles: Dict(Int, Article)) -> List(Element(Msg)) {
                 [
                   html.h3(
                     [
-                      attribute.id("article-title-" <> int.to_string(id)),
+                      attribute.id("article-title-" <> slug),
                       attribute.class("article-title"),
                       attribute.class("text-xl font-light w-max-content"),
                       attribute.class(
@@ -752,7 +751,7 @@ fn view_article_listing(articles: Dict(Int, Article)) -> List(Element(Msg)) {
                     ],
                     [html.text(title)],
                   ),
-                  view_subtitle(error, id),
+                  view_subtitle(error, slug),
                   view_error(
                     "there was an error loading this article. Click to try again.",
                   ),
@@ -764,18 +763,18 @@ fn view_article_listing(articles: Dict(Int, Article)) -> List(Element(Msg)) {
       }
     })
 
-  [view_title("Articles", 0), ..articles]
+  [view_title("Articles", "articles"), ..articles]
 }
 
 fn view_article(article: Article) -> List(Element(msg)) {
   let content = case article {
-    ArticleSummary(id, revision, title, leading, subtitle) -> [
+    ArticleSummary(id, _revision, title, leading, subtitle) -> [
       view_title(title, id),
       view_subtitle(subtitle, id),
       view_leading(leading, id),
       view_paragraph("loading content.."),
     ]
-    ArticleFull(id, revision, title, leading, subtitle, content) -> [
+    ArticleFull(id, _revision, title, leading, subtitle, content) -> [
       view_title(title, id),
       view_subtitle(subtitle, id),
       view_leading(leading, id),
@@ -804,7 +803,7 @@ fn view_article(article: Article) -> List(Element(msg)) {
 
 fn view_about() -> List(Element(msg)) {
   [
-    view_title("About", 0),
+    view_title("About", "about"),
     view_paragraph(
       "I'm a software developer and a writer. I'm also a father and a husband. 
       I'm also a software developer and a writer. I'm also a father and a 
@@ -821,7 +820,7 @@ fn view_about() -> List(Element(msg)) {
 
 fn view_not_found() -> List(Element(msg)) {
   [
-    view_title("Not found", 0),
+    view_title("Not found", "not-found"),
     view_paragraph(
       "You glimpse into the void and see -- nothing?
        Well that was somewhat expected.",
@@ -831,10 +830,10 @@ fn view_not_found() -> List(Element(msg)) {
 
 // VIEW HELPERS ----------------------------------------------------------------
 
-fn view_title(title: String, id: Int) -> Element(msg) {
+fn view_title(title: String, slug: String) -> Element(msg) {
   html.h1(
     [
-      attribute.id("article-title-" <> int.to_string(id)),
+      attribute.id("article-title-" <> slug),
       attribute.class("text-3xl pt-8 text-pink-700 font-light"),
       attribute.class("article-title"),
     ],
@@ -842,10 +841,10 @@ fn view_title(title: String, id: Int) -> Element(msg) {
   )
 }
 
-fn view_subtitle(title: String, id: Int) -> Element(msg) {
+fn view_subtitle(title: String, slug: String) -> Element(msg) {
   html.div(
     [
-      attribute.id("article-subtitle-" <> int.to_string(id)),
+      attribute.id("article-subtitle-" <> slug),
       attribute.class("text-md text-zinc-500 font-light"),
       attribute.class("article-subtitle"),
     ],
@@ -853,10 +852,10 @@ fn view_subtitle(title: String, id: Int) -> Element(msg) {
   )
 }
 
-fn view_leading(text: String, id: Int) -> Element(msg) {
+fn view_leading(text: String, slug: String) -> Element(msg) {
   html.p(
     [
-      attribute.id("article-lead-" <> int.to_string(id)),
+      attribute.id("article-lead-" <> slug),
       attribute.class("font-bold pt-8"),
       attribute.class("article-leading"),
     ],

@@ -2,7 +2,6 @@ package web2
 
 import (
 	"encoding/json"
-	"io/fs"
 	"jst_dev/server/articles"
 	"net/http"
 )
@@ -10,27 +9,43 @@ import (
 func (s *httpServer) routes() {
 	s.mux = *http.NewServeMux()
 	// s.mux.HandleFunc("/", s.handlerTodo("catch-all"))
+	s.mux.HandleFunc("GET /api/seed", s.handlerSeed())
 	s.mux.HandleFunc("GET /api/article/", s.handlerArticleList())
 	s.mux.HandleFunc("POST /api/article", s.handlerArticleNew())
 	s.mux.HandleFunc("PUT /api/article", s.handlerArticleUpdate())
 	s.mux.HandleFunc("GET /api/article/{slug}/", s.handlerArticle())
 }
 
+func (s *httpServer) handlerSeed() http.HandlerFunc {
+	l := s.l.WithBreadcrumb("handlers").WithBreadcrumb("seed")
+	l.Debug("ready")
+	return func(w http.ResponseWriter, r *http.Request) {
+		l.Debug("seed handler called")
+		if err := s.articleRepo.Put(articles.TestArticle(), 0); err != nil {
+			l.Error("failed to put test article in repo: %w", err)
+			http.Error(w, "failed to put test article in repo", http.StatusInternalServerError)
+			return
+		}
+		if err := s.articleRepo.Put(articles.NatsAllTheWayDown(), 0); err != nil {
+			l.Error("failed to put nats all the way down article in repo: %w", err)
+			http.Error(w, "failed to put nats all the way down article in repo", http.StatusInternalServerError)
+			return
+		}
+		s.respJson(w, "seeded", http.StatusOK)
+	}
+}
+
 func (s *httpServer) handlerArticleList() http.HandlerFunc {
+	type Resp struct {
+		Articles []articles.ArticleMetadata `json:"articles"`
+	}
+
 	l := s.l.WithBreadcrumb("handlers").WithBreadcrumb("article").WithBreadcrumb("list")
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		indexContent, err := fs.ReadFile(s.embedFs, "article/index.json")
-		if err != nil {
-			l.Error("Failed to read article index", "error", err)
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
-			return
-		}
-
-		w.WriteHeader(http.StatusOK)
-		w.Write(indexContent)
-		return
-
+		articles := s.articleRepo.AllNoContent()
+		l.Debug("articles count: %d", len(articles))
+		s.respJson(w, Resp{Articles: articles}, http.StatusOK)
 	}
 }
 
@@ -46,6 +61,7 @@ func (s *httpServer) handlerArticle() http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
+		l.Debug("article: %s", article.Slug)
 		s.respJson(w, article, http.StatusOK)
 	}
 }
