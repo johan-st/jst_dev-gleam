@@ -16,6 +16,7 @@ const (
 	kv_name = "articles"
 )
 
+// --- ARTICLE ---
 type ArticleRepo struct {
 	ctx      context.Context
 	lock     sync.RWMutex
@@ -33,25 +34,94 @@ type Article struct {
 	Content       []Content `json:"content"`
 }
 
+// --- CONTENT ---
+
 type Content struct {
 	Type    ContentType `json:"type"`
 	Text    string      `json:"text,omitempty"`    // Only for type "Text"
 	Content []Content   `json:"content,omitempty"` // Never for type "Text"
+	Url     string      `json:"url,omitempty"`     // Only for type "Link", "Image"
+	Alt     string      `json:"alt,omitempty"`     // Only for type "Image"
 }
 
 type ContentType string
 
 const (
+	ContentText      ContentType = "text"
+	ContentBlock     ContentType = "block"
 	ContentHeading   ContentType = "heading"
 	ContentSubtitle  ContentType = "subtitle"
 	ContentLeading   ContentType = "leading"
 	ContentParagraph ContentType = "paragraph"
 	ContentLink      ContentType = "link"
-	ContentText      ContentType = "text"
+	ContentImage     ContentType = "image"
 )
+
+
+
+// --- GENERATORS ---
+
+func Text(text string) Content {
+	return Content{
+		Type: ContentText,
+		Text: text,
+	}
+}
+
+func Block(heading string, contents ...Content) Content {
+	return Content{
+		Type:    ContentBlock,
+		Content: contents,
+	}
+}
+
+func Heading(text string) Content {
+	return Content{
+		Type: ContentHeading,
+		Text: text,
+	}
+}
+
+func Subtitle(text string) Content {
+	return Content{
+		Type: ContentSubtitle,
+		Text: text,
+	}
+}
+
+func Leading(text string) Content {
+	return Content{
+		Type: ContentLeading,
+		Text: text,
+	}
+}
+
+func Paragraph(text string) Content {
+	return Content{
+		Type: ContentParagraph,
+		Text: text,
+	}
+}
+
+func Link(url string, text string) Content {
+	return Content{
+		Type: ContentLink,
+		Url:  url,
+		Text: text,
+	}
+}
+
+func Image(url string, alt string) Content {
+	return Content{
+		Type: ContentImage,
+		Url:  url,
+		Alt:  alt,
+	}
+}
 
 // --- REPO ---
 
+// Creates a new ArticleRepo. This includes setting up a kv store and a watcher to update the in-memory map.
 func Repo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (*ArticleRepo, error) {
 	kv, err := setup(ctx, nc)
 	if err != nil {
@@ -71,6 +141,7 @@ func Repo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (*ArticleRepo, 
 	return repo, nil
 }
 
+// Get returns an article by slug.
 func (r *ArticleRepo) Get(slug string) *Article {
 	r.lock.RLock()
 	defer r.lock.RUnlock()
@@ -81,6 +152,7 @@ func (r *ArticleRepo) Get(slug string) *Article {
 	return art
 }
 
+// Put updates an article.
 func (r *ArticleRepo) Put(art Article, rev int) error {
 	r.lock.Lock()
 	defer r.lock.Unlock()
