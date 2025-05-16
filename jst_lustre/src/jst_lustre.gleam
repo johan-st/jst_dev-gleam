@@ -257,7 +257,7 @@ fn effect_navigation(model: Model, route: Route) -> Effect(Msg) {
             }
           }
         }
-        Error(_) -> {
+        Error(Nil) -> {
           echo "no article found for slug: " <> slug
           effect.none()
         }
@@ -911,23 +911,49 @@ fn view_link(target: Route, title: String) -> Element(msg) {
 }
 
 fn view_link_external(url: Uri, title: String) -> Element(msg) {
-  html.a([attribute.href(uri.to_string(url)), attribute.target("_blank")], [
-    html.text(title),
-  ])
+  html.a(
+    [
+      attribute.href(uri.to_string(url)),
+      attribute.class("text-pink-700 hover:underline cursor-pointer"),
+      attribute.target("_blank"),
+    ],
+    [html.text(title)],
+  )
 }
 
 fn view_link_missing(url: Uri, title: String) -> Element(msg) {
-  html.span([attribute.class("text-orange-500")], [
-    html.text("broken link: " <> title),
-  ])
+  html.a(
+    [
+      attribute.href(uri.to_string(url)),
+      attribute.class("hover:underline cursor-pointer"),
+    ],
+    [
+      html.span([attribute.class("text-orange-500")], [
+        html.text("broken link: "),
+      ]),
+      html.text(title),
+    ],
+  )
 }
 
 fn view_block(contents: List(Content)) -> Element(msg) {
   html.div([attribute.class("pt-8")], view_article_content(contents))
 }
 
+fn view_list(items: List(Content)) -> Element(msg) {
+  html.ul(
+    [attribute.class("pt-8 list-disc list-inside")],
+    items
+      |> list.map(fn(item) {
+        html.li([attribute.class("pt-1")], view_article_content([item]))
+      }),
+  )
+}
+
 fn view_unknown(content_type: String) -> Element(msg) {
-  html.span([attribute.class("text-orange-500")], [html.text("<unknown: " <> content_type <> ">")])
+  html.span([attribute.class("text-orange-500")], [
+    html.text("<unknown: " <> content_type <> ">"),
+  ])
 }
 
 // VIEW ARTICLE CONTENT --------------------------------------------------------
@@ -940,6 +966,8 @@ fn view_article_content(contents: List(Content)) -> List(Element(msg)) {
       article.Heading(text) -> view_h2(text)
       article.Paragraph(contents) -> view_paragraph(contents)
       article.Link(url, title) -> {
+        echo "url"
+        echo url
         let route = parse_route(url)
         case route {
           NotFound(_) -> view_link_missing(url, title)
@@ -948,7 +976,7 @@ fn view_article_content(contents: List(Content)) -> List(Element(msg)) {
       }
       article.LinkExternal(url, title) -> view_link_external(url, title)
       article.Image(_, _) -> todo as "view content image"
-      article.List(_) -> todo as "view content list"
+      article.List(items) -> view_list(items)
       article.Unknown(content_type) -> view_unknown(content_type)
     }
   }

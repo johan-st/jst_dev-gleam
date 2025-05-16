@@ -13,7 +13,7 @@ import (
 	"jst_dev/server/blog"
 	"jst_dev/server/jst_log"
 	"jst_dev/server/talk"
-	web "jst_dev/server/web2"
+	web "jst_dev/server/web"
 	"jst_dev/server/who"
 
 	"github.com/nats-io/nats.go"

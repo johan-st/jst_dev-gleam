@@ -16,12 +16,28 @@ const (
 	kv_name = "articles"
 )
 
+type ArticleRepo interface {
+	Get(slug string) (*Article, error)
+	AllNoContent() ([]ArticleMetadata, error)
+	Create(art Article) (uint64, error)
+	Update(art Article) (uint64, error)
+	Context() context.Context
+}
+
+type ArticleRepoWithWatchAll interface {
+	ArticleRepo
+	WatchAll() (jetstream.KeyWatcher, error)
+}
+
 // --- ARTICLE ---
-type ArticleRepo struct {
-	ctx      context.Context
+type articleRepo struct {
+	ctx context.Context
+	kv  jetstream.KeyValue
+}
+type articleRepoInMem struct {
+	repo     ArticleRepo
 	lock     sync.RWMutex
 	articles map[string]*Article
-	kv       jetstream.KeyValue
 }
 
 type ArticleMetadata struct {
@@ -98,19 +114,19 @@ func Paragraph(contents ...Content) Content {
 	}
 }
 
-func Link(url string, contents ...Content) Content {
+func Link(url string, text string) Content {
 	return Content{
-		Type:    ContentLink,
-		Url:     url,
-		Content: contents,
+		Type: ContentLink,
+		Url:  url,
+		Text: text,
 	}
 }
 
-func LinkExternal(url string, contents ...Content) Content {
+func LinkExternal(url string, text string) Content {
 	return Content{
-		Type:    ContentLinkExternal,
-		Url:     url,
-		Content: contents,
+		Type: ContentLinkExternal,
+		Url:  url,
+		Text: text,
 	}
 }
 func Image(url string, alt string) Content {
@@ -130,39 +146,144 @@ func List(contents ...Content) Content {
 
 // --- REPO ---
 
-// Creates a new ArticleRepo. This includes setting up a kv store and a watcher to update the in-memory map.
-func Repo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (*ArticleRepo, error) {
+// Creates a new ArticleRepo. This includes a nats kv store.
+func Repo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (ArticleRepo, error) {
 	kv, err := setup(ctx, nc)
 	if err != nil {
 		return nil, fmt.Errorf("repo setup: %w", err)
 	}
-	repo := &ArticleRepo{
-		ctx:      ctx,
+	return &articleRepo{
+		ctx: ctx,
+		kv:  kv,
+	}, nil
+}
+
+func (r *articleRepo) Get(slug string) (*Article, error) {
+	var (
+		err   error
+		entry jetstream.KeyValueEntry
+		art   *Article = &Article{}
+	)
+	entry, err = r.kv.Get(r.ctx, slug)
+	if err != nil {
+		return nil, fmt.Errorf("get article: %w", err)
+	}
+	err = json.Unmarshal(entry.Value(), art)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshal article: %w", err)
+	}
+	return art, nil
+}
+
+func (r *articleRepo) AllNoContent() ([]ArticleMetadata, error) {
+	var (
+		err       error
+		art       *Article = &Article{}
+		keyLister jetstream.KeyLister
+		entry     jetstream.KeyValueEntry
+		arts      []ArticleMetadata
+	)
+	keyLister, err = r.kv.ListKeys(r.ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list keys: %w", err)
+	}
+	for key := range keyLister.Keys() {
+		fmt.Println(key)
+		entry, err = r.kv.Get(r.ctx, key)
+		if err != nil {
+			return nil, fmt.Errorf("get article: %w", err)
+		}
+		err = json.Unmarshal(entry.Value(), art)
+		if err != nil {
+			return nil, fmt.Errorf("unmarshal article: %w", err)
+		}
+		arts = append(arts, ArticleMetadata{
+			StructVersion: art.StructVersion,
+			Slug:          art.Slug,
+			Rev:           art.Rev,
+			Title:         art.Title,
+			Subtitle:      art.Subtitle,
+			Leading:       art.Leading,
+		})
+	}
+	return arts, nil
+}
+
+func (r *articleRepo) Create(art Article) (uint64, error) {
+	var (
+		err  error
+		data []byte
+		rev  uint64
+	)
+	art.StructVersion = 1
+	art.Rev = 1
+	data, err = json.Marshal(art)
+	if err != nil {
+		return 0, fmt.Errorf("marshal article: %w", err)
+	}
+	rev, err = r.kv.Create(r.ctx, art.Slug, data)
+	if err != nil {
+		return 0, fmt.Errorf("create article: %w", err)
+	}
+	return rev, nil
+}
+
+func (r *articleRepo) Update(art Article) (uint64, error) {
+	var (
+		err  error
+		data []byte
+		rev  uint64
+	)
+	data, err = json.Marshal(art)
+	if err != nil {
+		return 0, fmt.Errorf("marshal article: %w", err)
+	}
+	rev, err = r.kv.Update(r.ctx, art.Slug, data, uint64(art.Rev))
+	if err != nil {
+		return 0, fmt.Errorf("update article: %w", err)
+	}
+	return rev, nil
+}
+
+func (r *articleRepo) Context() context.Context {
+	return r.ctx
+}
+
+func (r *articleRepo) WatchAll() (jetstream.KeyWatcher, error) {
+	return r.kv.WatchAll(r.ctx)
+}
+
+// --- REPO WITH IN MEM CACHE ---
+
+// Wraps an ArticleRepo and adds an in-memory cache.
+func WithInMemCache(repo ArticleRepoWithWatchAll, l *jst_log.Logger) (ArticleRepo, error) {
+
+	repoWrapped := &articleRepoInMem{
+		repo:     repo,
 		articles: make(map[string]*Article),
-		kv:       kv,
 		lock:     sync.RWMutex{},
 	}
 
-	watcher, err := kv.WatchAll(ctx)
+	watcher, err := repo.WatchAll()
 	if err != nil {
 		return nil, fmt.Errorf("watchAll: %w", err)
 	}
-	go repo.updater(ctx, watcher, l.WithBreadcrumb("watcher"))
-	return repo, nil
+	go repoWrapped.updater(repo.Context(), watcher, l.WithBreadcrumb("watcher"))
+	return repoWrapped, nil
 }
 
 // Get returns an article by slug.
-func (r *ArticleRepo) Get(slug string) *Article {
+func (r *articleRepoInMem) Get(slug string) (*Article, error) {
 	r.lock.RLock()
 	defer r.lock.RUnlock()
 	art, ok := r.articles[slug]
 	if !ok {
-		return nil
+		return nil, fmt.Errorf("article with slug %s not found", slug)
 	}
-	return art
+	return art, nil
 }
 
-func (r *ArticleRepo) AllNoContent() []ArticleMetadata {
+func (r *articleRepoInMem) AllNoContent() ([]ArticleMetadata, error) {
 	r.lock.RLock()
 	defer r.lock.RUnlock()
 	articles := make([]ArticleMetadata, 0, len(r.articles))
@@ -176,55 +297,37 @@ func (r *ArticleRepo) AllNoContent() []ArticleMetadata {
 			Leading:       art.Leading,
 		})
 	}
-	return articles
+	return articles, nil
 }
 
-// Put updates an article.
-func (r *ArticleRepo) Put(art Article, rev int) error {
-	r.lock.Lock()
-	defer r.lock.Unlock()
-
-	// Validate the revision number
-	if rev > 0 {
-		// Check if article exists and revision matches
-		existing, exists := r.articles[art.Slug]
-		if !exists {
-			return fmt.Errorf("article with slug %s not found", art.Slug)
-		}
-		if existing.Rev != rev {
-			return fmt.Errorf("revision mismatch: expected %d, got %d", existing.Rev, rev)
-		}
-		// Increment revision for update
-		art.Rev = rev + 1
-	} else {
-		// For new articles, start at revision 1
-		// Check if article already exists
-		if _, exists := r.articles[art.Slug]; exists {
-			return fmt.Errorf("article with slug %s already exists", art.Slug)
-		}
-		art.Rev = 1
-	}
-
-	// Marshal article to JSON
-	data, err := json.Marshal(art)
+func (r *articleRepoInMem) Create(art Article) (uint64, error) {
+	var (
+		err error
+	)
+	rev, err := r.repo.Create(art)
 	if err != nil {
-		return fmt.Errorf("marshal article: %w", err)
+		return 0, fmt.Errorf("create article: %w", err)
 	}
 
-	// Store in JetStream KV
-	_, err = r.kv.Put(r.ctx, art.Slug, data)
-	if err != nil {
-		return fmt.Errorf("store article: %w", err)
-	}
-
-	// Update in-memory map (this will also be updated by the watcher,
-	// but we do it here for immediate consistency)
-	r.articles[art.Slug] = &art
-
-	return nil
+	return rev, nil
 }
 
-func (r *ArticleRepo) updater(ctx context.Context, w jetstream.KeyWatcher, l *jst_log.Logger) {
+func (r *articleRepoInMem) Update(art Article) (uint64, error) {
+	var (
+		err error
+	)
+	rev, err := r.repo.Update(art)
+	if err != nil {
+		return 0, fmt.Errorf("update article: %w", err)
+	}
+	return rev, nil
+}
+
+func (r *articleRepoInMem) Context() context.Context {
+	return r.repo.Context()
+}
+
+func (r *articleRepoInMem) updater(ctx context.Context, w jetstream.KeyWatcher, l *jst_log.Logger) {
 	var (
 		err error
 		art *Article
@@ -254,6 +357,7 @@ func (r *ArticleRepo) updater(ctx context.Context, w jetstream.KeyWatcher, l *js
 				if err != nil {
 					l.Error("decode put: %w", err)
 				}
+				art.Rev = int(update.Revision())
 				r.articles[art.Slug] = art
 			case jetstream.KeyValueDelete:
 				l.Debug("DELETE - %s:%d", update.Key(), update.Revision())

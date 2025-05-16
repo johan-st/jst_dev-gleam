@@ -35,15 +35,6 @@ pub type Article {
   )
 }
 
-// pub type Content {
-//   Heading(List(Content))
-//   Paragraph(List(Content))
-//   Text(String)
-//   Link(String)
-//   Code(String)
-//   Unknown(String)
-// }
-
 pub type Content {
   Text(String)
   Block(List(Content))
@@ -78,6 +69,66 @@ fn content_decoder() -> decode.Decoder(Content) {
     "paragraph" -> {
       use contents <- decode.field("content", decode.list(content_decoder()))
       decode.success(Paragraph(contents))
+    }
+    "block" -> {
+      use contents <- decode.field("content", decode.list(content_decoder()))
+      decode.success(Block(contents))
+    }
+    "text" -> {
+      use text <- decode.field("text", decode.string)
+      decode.success(Text(text))
+    }
+    "link" -> {
+      let assert Ok(fail_uri) = uri.parse("/")
+      use url <- decode.field("url", decode.string)
+      use text <- decode.field("text", decode.string)
+      case url, text {
+        "", _ -> {
+          decode.failure(Link(fail_uri, text), "empty link")
+        }
+        _, "" -> {
+          decode.failure(Link(fail_uri, text), "empty link text")
+        }
+        _, _ -> {
+          case uri.parse(url) {
+            Ok(u) -> {
+              decode.success(Link(u, text))
+            }
+            Error(e) -> {
+              echo e
+              decode.failure(Link(fail_uri, text), "invalid link")
+            }
+          }
+        }
+      }
+    }
+    "link_external" -> {
+      let assert Ok(fail_uri) = uri.parse("/")
+      use url <- decode.field("url", decode.string)
+      use text <- decode.field("text", decode.string)
+      case url, text {
+        "", _ -> {
+          decode.failure(LinkExternal(fail_uri, text), "empty link")
+        }
+        _, "" -> {
+          decode.failure(LinkExternal(fail_uri, text), "empty link text")
+        }
+        _, _ -> {
+          case uri.parse(url) {
+            Ok(u) -> {
+              decode.success(LinkExternal(u, text))
+            }
+            Error(e) -> {
+              echo e
+              decode.failure(LinkExternal(fail_uri, text), "invalid link")
+            }
+          }
+        }
+      }
+    }
+    "list" -> {
+      use contents <- decode.field("content", decode.list(content_decoder()))
+      decode.success(List(contents))
     }
     _ -> {
       decode.success(Unknown(content_type))

@@ -1,7 +1,8 @@
-package web2
+package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"jst_dev/server/articles"
 	"net/http"
 )
@@ -21,16 +22,22 @@ func (s *httpServer) handlerSeed() http.HandlerFunc {
 	l.Debug("ready")
 	return func(w http.ResponseWriter, r *http.Request) {
 		l.Debug("seed handler called")
-		if err := s.articleRepo.Put(articles.TestArticle(), 0); err != nil {
-			l.Error("failed to put test article in repo: %w", err)
+
+		art := articles.TestArticle()
+		_, err := s.articleRepo.Create(art)
+		if err != nil {
+			l.Error("failed to put test article in repo: %s", err.Error())
 			http.Error(w, "failed to put test article in repo", http.StatusInternalServerError)
 			return
 		}
-		if err := s.articleRepo.Put(articles.NatsAllTheWayDown(), 0); err != nil {
-			l.Error("failed to put nats all the way down article in repo: %w", err)
+		art = articles.NatsAllTheWayDown()
+		_, err = s.articleRepo.Create(art)
+		if err != nil {
+			l.Error("failed to put nats all the way down article in repo: %s", err.Error())
 			http.Error(w, "failed to put nats all the way down article in repo", http.StatusInternalServerError)
 			return
 		}
+
 		s.respJson(w, "seeded", http.StatusOK)
 	}
 }
@@ -43,7 +50,12 @@ func (s *httpServer) handlerArticleList() http.HandlerFunc {
 	l := s.l.WithBreadcrumb("handlers").WithBreadcrumb("article").WithBreadcrumb("list")
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		articles := s.articleRepo.AllNoContent()
+		articles, err := s.articleRepo.AllNoContent()
+		if err != nil {
+			l.Error("failed to get all articles: %s", err.Error())
+			http.Error(w, "failed to get all articles", http.StatusInternalServerError)
+			return
+		}
 		l.Debug("articles count: %d", len(articles))
 		s.respJson(w, Resp{Articles: articles}, http.StatusOK)
 	}
@@ -55,13 +67,18 @@ func (s *httpServer) handlerArticle() http.HandlerFunc {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		slug := r.PathValue("slug")
-		article := s.articleRepo.Get(slug)
+		article, err := s.articleRepo.Get(slug)
+		if err != nil {
+			l.Error("failed to get article: %s", err.Error())
+			http.Error(w, "failed to get article", http.StatusInternalServerError)
+			return
+		}
 		if article == nil {
 			l.Info("not found, article \"%s\"", slug)
 			http.NotFound(w, r)
 			return
 		}
-		l.Debug("article: %s", article.Slug)
+		l.Debug("article: %s (rev: %d)", article.Slug, article.Rev)
 		s.respJson(w, article, http.StatusOK)
 	}
 }
@@ -85,18 +102,20 @@ func (s *httpServer) handlerArticleNew() http.HandlerFunc {
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
-		err := s.articleRepo.Put(articles.Article{
+		rev, err := s.articleRepo.Create(articles.Article{
 			StructVersion: 1,
+			Rev:           1,
 			Slug:          req.Slug,
 			Title:         req.Title,
 			Subtitle:      req.Subtitle,
 			Leading:       req.Leading,
 			Content:       req.Content,
-		}, 0)
+		})
 		if err != nil {
 			l.Error("failed to put new article in repo: %w", err)
 			http.Error(w, "failed to put new article in repo", http.StatusInternalServerError)
 		}
+		s.respJson(w, fmt.Sprintf("%s (rev: %d)", req.Slug, rev), http.StatusOK)
 	}
 }
 func (s *httpServer) handlerArticleUpdate() http.HandlerFunc {
@@ -119,7 +138,7 @@ func (s *httpServer) handlerArticleUpdate() http.HandlerFunc {
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
-		err := s.articleRepo.Put(articles.Article{
+		rev, err := s.articleRepo.Update(articles.Article{
 			StructVersion: 1,
 			Rev:           req.Rev,
 			Slug:          req.Slug,
@@ -127,11 +146,12 @@ func (s *httpServer) handlerArticleUpdate() http.HandlerFunc {
 			Subtitle:      req.Subtitle,
 			Leading:       req.Leading,
 			Content:       req.Content,
-		}, req.Rev)
+		})
 		if err != nil {
-			l.Error("failed to put new article in repo: %w", err)
-			http.Error(w, "failed to put new article in repo", http.StatusInternalServerError)
+			l.Error("failed to update article in repo: %w", err)
+			http.Error(w, fmt.Sprintf("failed to update article in repo: %s", err.Error()), http.StatusInternalServerError)
 		}
+		s.respJson(w, fmt.Sprintf("%s (rev: %d)", req.Slug, rev), http.StatusOK)
 	}
 }
 

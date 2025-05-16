@@ -2,230 +2,72 @@ package web
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"strings"
-
+	"embed"
+	"io/fs"
+	"jst_dev/server/articles"
 	"jst_dev/server/jst_log"
-	"jst_dev/server/web/api"
+	"net"
+	"net/http"
+	"sync"
+	"time"
 
 	"github.com/nats-io/nats.go"
-
-	"github.com/nats-io/nats.go/micro"
 )
 
-type Web struct {
-	l              *jst_log.Logger
-	ctx            context.Context
-	nc             *nats.Conn
-	routesKv       nats.KeyValue
-	assetsObjStore nats.ObjectStore
-	assetsMetaKv   nats.KeyValue
+type httpServer struct {
+	l           jst_log.Logger
+	ctx         context.Context
+	articleRepo articles.ArticleRepo
+	mux         http.ServeMux
+	embedFs     fs.FS
 }
 
-func New(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (*Web, error) {
-	if ctx == nil {
-		return nil, fmt.Errorf("context is nil")
-	}
-	if nc == nil {
-		return nil, fmt.Errorf("nats conn is nil")
-	}
-	if l == nil {
-		return nil, fmt.Errorf("logger is nil")
-	}
+//go:embed static
+var embedded embed.FS
 
-	return &Web{
-		l:              l,
-		ctx:            ctx,
-		nc:             nc,
-		routesKv:       nil,
-		assetsObjStore: nil,
-		assetsMetaKv:   nil,
-	}, nil
-}
-
-func (w *Web) Start(ctx context.Context) error {
-	if ctx == nil {
-		return fmt.Errorf("context is nil")
-	}
-
-	// grab jetstream
-	js, err := w.nc.JetStream()
+func New(ctx context.Context, nc *nats.Conn, l jst_log.Logger) *httpServer {
+	fs, err := fs.Sub(embedded, "static")
 	if err != nil {
-		return fmt.Errorf("get jetstream: %w", err)
+		l.Error("Failed to load static folder")
+		return nil
 	}
-
-	// -- ROUTES --
-
-	routesMetadata := map[string]string{}
-	routesMetadata["location"] = "unknown"
-	routesMetadata["environment"] = "development"
-	routesSvc, err := micro.AddService(w.nc, micro.Config{
-		Name:        "web_routes",
-		Version:     "1.0.0",
-		Description: "routes handler",
-		Metadata:    routesMetadata,
-	})
+	// artRepo, err := articles.RepoWithInMemCache(ctx, nc, l.WithBreadcrumb("articleRepo"))
+	artRepo, err := articles.Repo(ctx, nc, l.WithBreadcrumb("articleRepo"))
 	if err != nil {
-		return fmt.Errorf("add service: %w", err)
+		l.Error("Failed to create article repo: %s", err)
+		return nil
 	}
+	s := &httpServer{ctx: ctx, l: l, embedFs: fs, articleRepo: artRepo}
+	s.routes()
 
-	kvPagesConfig := nats.KeyValueConfig{
-		Bucket:       "web_routes",
-		Description:  "web pages by path. e.g. about -> /about, about.me -> /about/me",
-		Storage:      nats.FileStorage,
-		MaxValueSize: 1024 * 1024 * 10, // 10MB
-		History:      64,
-	}
-	routesKv, err := js.CreateKeyValue(&kvPagesConfig)
-	if err != nil {
-		w.l.Error(fmt.Sprintf("Create pages kv store %s:%s", kvPagesConfig.Bucket, err.Error()))
-		return err
-	}
-	w.routesKv = routesKv
-
-	routesSvcGroup := routesSvc.AddGroup(api.Subj.RouteGroup, micro.WithGroupQueueGroup(api.Subj.RouteGroup))
-	if err := routesSvcGroup.AddEndpoint(api.Subj.RouteInfo, w.handleRoutesInfo(), micro.WithEndpointSubject(api.Subj.RouteInfo)); err != nil {
-		return fmt.Errorf("add routes endpoint (info): %w", err)
-	}
-	if err := routesSvcGroup.AddEndpoint(api.Subj.RouteRegister, w.handleRoutesRegister(), micro.WithEndpointSubject(api.Subj.RouteRegister)); err != nil {
-		return fmt.Errorf("add routes endpoint (register): %w", err)
-	}
-	if err := routesSvcGroup.AddEndpoint(api.Subj.RouteRemove, w.handleRoutesRemove(), micro.WithEndpointSubject(api.Subj.RouteRemove)); err != nil {
-		return fmt.Errorf("add routes endpont (remove): %w", err)
-	}
-
-	// -- ASSETS --
-
-	assetsMetadata := map[string]string{}
-	assetsMetadata["location"] = "unknown"
-	assetsMetadata["environment"] = "development"
-	assetsSvc, err := micro.AddService(w.nc, micro.Config{
-		Name:        "web_assets",
-		Version:     "1.0.0",
-		Description: "assets handler",
-		Metadata:    assetsMetadata,
-	})
-	if err != nil {
-		return fmt.Errorf("add service: %w", err)
-	}
-
-	assetsOsConf := nats.ObjectStoreConfig{
-		Bucket:      "web_assets",
-		Description: "web assets by hash", // TODO: metadata?
-		Storage:     nats.FileStorage,
-		MaxBytes:    1024 * 1024 * 1024 * 10, // 10GB
-		Compression: true,
-	}
-	assetsObjStore, err := js.CreateObjectStore(&assetsOsConf)
-	if err != nil {
-		w.l.Error(fmt.Sprintf("Create assets kv store %s:%s", assetsOsConf.Bucket, err.Error()))
-		return err
-	}
-	w.assetsObjStore = assetsObjStore
-
-	assetsSvcGroup := assetsSvc.AddGroup(api.Subj.AssetGroup, micro.WithGroupQueueGroup(api.Subj.AssetGroup))
-	if err := assetsSvcGroup.AddEndpoint(api.Subj.AssetInfo, w.handleAssetsList(), micro.WithEndpointSubject(api.Subj.AssetInfo)); err != nil {
-		return fmt.Errorf("add assets endpont (list): %w", err)
-	}
-	if err := assetsSvcGroup.AddEndpoint(api.Subj.AssetFind, w.handleTodo("find", "Not Implemented"), micro.WithEndpointSubject(api.Subj.AssetFind)); err != nil {
-		return fmt.Errorf("add assets endpont (find): %w", err)
-	}
-	if err := assetsSvcGroup.AddEndpoint(api.Subj.AssetAdd, w.handleTodo("add", "Not Implemented"), micro.WithEndpointSubject(api.Subj.AssetAdd)); err != nil {
-		return fmt.Errorf("add assets endpont (put): %w", err)
-	}
-	if err := assetsSvcGroup.AddEndpoint(api.Subj.AssetDelete, w.handleTodo("delete", "Not Implemented"), micro.WithEndpointSubject(api.Subj.AssetDelete)); err != nil {
-		return fmt.Errorf("add assets endpont (delete): %w", err)
-	}
-
-	// -- SERVER --
-	srv := NewServer(w.l.WithBreadcrumb("http"), w.routesKv, w.assetsObjStore)
-	go srv.Start(8080)
-	return nil
+	return s
 }
 
-func (w *Web) handleTodo(name, msg string) micro.HandlerFunc {
-	l := w.l.WithBreadcrumb(name)
-	if msg == "" {
-		msg = fmt.Sprintf("todo: implement %s", name)
-	}
-	return func(req micro.Request) {
-		l.Debug("called with %s", req.Data())
-		req.Respond([]byte(msg))
-	}
+func (s *httpServer) Run(cleanShutdown *sync.WaitGroup) {
+	cleanShutdown.Add(1)
 
-}
-
-func (w *Web) handleAssetsList() micro.HandlerFunc {
-	l := w.l.WithBreadcrumb("assets.list")
-	return func(req micro.Request) {
-		l.Debug("called with %s", req.Data())
-		info, err := w.assetsObjStore.List()
-		if err != nil {
-			w.l.Error(fmt.Sprintf("List:%e", err))
-			req.Respond([]byte(err.Error()))
-			return
-		}
-		infoBytes := []byte{}
-		for _, info := range info {
-			infoBytes = append(infoBytes, []byte(fmt.Sprintf("%s: %d\n", info.Name, info.Size))...)
-			l.Debug("asset: %s\n%+v", info.Name, info)
-		}
-		req.Respond(infoBytes)
+	httpServer := &http.Server{
+		Addr:    net.JoinHostPort("", "8080"),
+		Handler: &s.mux,
 	}
-}
-
-func (w *Web) handleRoutesInfo() micro.HandlerFunc {
-	l := w.l.WithBreadcrumb("status")
-	return func(req micro.Request) {
-		keysLister, err := w.routesKv.ListKeys()
-		if err != nil {
-			l.Error(fmt.Sprintf("ListKeys:%e", err))
-			req.Respond([]byte(err.Error()))
-			return
+	go func() {
+		s.l.Info("listening on %s", httpServer.Addr)
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			s.l.Error("error listening and serving: %s", err)
 		}
-		keys := []string{}
-		for key := range keysLister.Keys() {
-			keys = append(keys, key)
+	}()
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-s.ctx.Done()
+		shutdownCtx := context.Background()
+		shutdownCtx, cancel := context.WithTimeout(shutdownCtx, 10*time.Second)
+		defer cancel()
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			s.l.Error("error shutting down http server: %s\n", err)
 		}
-		keysBytes := []byte{}
-		for _, key := range keys {
-			keysBytes = append(keysBytes, []byte(key+"\n")...)
-		}
-		req.Respond(keysBytes)
-	}
-}
-
-func (w *Web) handleRoutesRegister() micro.HandlerFunc {
-	return func(req micro.Request) {
-		w.l.Debug(string(req.Data()))
-		var page api.RouteRegReq
-		err := json.Unmarshal(req.Data(), &page)
-		if err != nil {
-			w.l.Warn(fmt.Sprintf("Unmarshaling page: %s", err.Error()))
-			req.Respond([]byte(fmt.Sprintf("Unmarshaling page: %s", err.Error())))
-			return
-		}
-		path := page.Path
-		if !strings.HasPrefix(path, "/") {
-			path = "/" + path
-		}
-		rev, err := w.routesKv.Put(path, []byte(page.Content))
-		if err != nil {
-			req.Error("PUT_ERROR", "Registration Failed", []byte(fmt.Sprintf("failed to register route: %s", err.Error())))
-		}
-		req.Respond([]byte(fmt.Sprintf("OK, current revision is %d", rev)))
-	}
-}
-
-func (w *Web) handleRoutesRemove() micro.HandlerFunc {
-	return func(req micro.Request) {
-		w.l.Debug(string(req.Data()))
-		path := string(req.Data())
-		err := w.routesKv.Delete(path)
-		if err != nil {
-			req.Error("DELETE_FAILED", "failed to delete", []byte(fmt.Sprintf("route '%s'  could not be deleted: %s", path, err.Error())))
-		}
-		req.Respond([]byte("OK"))
-	}
+	}()
+	wg.Wait()
+	cleanShutdown.Done()
 }
