@@ -4,6 +4,7 @@ import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/uri
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import utils/http
@@ -44,42 +45,15 @@ pub type Article {
 // }
 
 pub type Content {
+  Text(String)
   Block(List(Content))
   Heading(String)
-  Paragraph(String)
+  Paragraph(List(Content))
+  Link(uri.Uri, String)
+  LinkExternal(uri.Uri, String)
+  Image(uri.Uri, String)
+  List(List(Content))
   Unknown(String)
-}
-
-// VIEW ------------------------------------------------------------------------
-
-pub fn view_article_content(
-  view_h2: fn(String) -> Element(msg),
-  view_h3: fn(String) -> Element(msg),
-  view_h4: fn(String) -> Element(msg),
-  view_paragraph: fn(String) -> Element(msg),
-  view_unknown: fn(String) -> Element(msg),
-  contents: List(Content),
-) -> List(Element(msg)) {
-  let view_block = fn(contents: List(Content), current_level: Int) -> List(
-    Element(msg),
-  ) {
-    contents
-    |> list.map(fn(content) {
-      let view_heading = case current_level {
-        0 -> view_h2
-        1 -> view_h3
-        2 -> view_h4
-        _ -> view_h4
-      }
-      case content {
-        Heading(text) -> view_heading(text)
-        Paragraph(text) -> view_paragraph(text)
-        Unknown(text) -> view_unknown(text)
-        Block(_) -> view_unknown("Block")
-      }
-    })
-  }
-  view_block(contents, 0)
 }
 
 // Fetch ------------------------------------------------------------------------
@@ -102,8 +76,8 @@ fn content_decoder() -> decode.Decoder(Content) {
       decode.success(Heading(text))
     }
     "paragraph" -> {
-      use text <- decode.field("text", decode.string)
-      decode.success(Paragraph(text))
+      use contents <- decode.field("content", decode.list(content_decoder()))
+      decode.success(Paragraph(contents))
     }
     _ -> {
       decode.success(Unknown(content_type))
@@ -199,7 +173,7 @@ pub fn content_encoder(content: Content) -> json.Json {
     Block(contents) -> {
       json.object([
         #("type", json.string("block")),
-        #("contents", json.array(contents, of: content_encoder)),
+        #("content", json.array(contents, of: content_encoder)),
       ])
     }
     Heading(text) -> {
@@ -208,10 +182,40 @@ pub fn content_encoder(content: Content) -> json.Json {
         #("text", json.string(text)),
       ])
     }
-    Paragraph(text) -> {
+    Paragraph(contents) -> {
       json.object([
         #("type", json.string("paragraph")),
-        #("text", json.string(text)),
+        #("content", json.array(contents, of: content_encoder)),
+      ])
+    }
+    Text(text) -> {
+      json.object([#("type", json.string("text")), #("text", json.string(text))])
+    }
+    Link(url, title) -> {
+      json.object([
+        #("type", json.string("link")),
+        #("url", json.string(uri.to_string(url))),
+        #("title", json.string(title)),
+      ])
+    }
+    LinkExternal(url, title) -> {
+      json.object([
+        #("type", json.string("link_external")),
+        #("url", json.string(uri.to_string(url))),
+        #("title", json.string(title)),
+      ])
+    }
+    Image(url, alt) -> {
+      json.object([
+        #("type", json.string("image")),
+        #("url", json.string(uri.to_string(url))),
+        #("alt", json.string(alt)),
+      ])
+    }
+    List(contents) -> {
+      json.object([
+        #("type", json.string("list")),
+        #("content", json.array(contents, of: content_encoder)),
       ])
     }
     Unknown(text) -> {

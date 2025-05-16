@@ -1,6 +1,6 @@
 // In test/yourapp_test.gleam
 import article/article.{
-  ArticleFull, ArticleSummary, ArticleWithError, Heading, Paragraph,
+  ArticleFull, ArticleSummary, ArticleWithError, Heading, Paragraph, Text,
 }
 import gleam/dynamic
 import gleam/dynamic/decode
@@ -26,7 +26,7 @@ pub fn article_encoder_and_decoder_test() {
       leading: "leading",
       title: "test",
       subtitle: "subtitle",
-      content: [Heading("test"), Paragraph("test")],
+      content: [Heading("test"), Paragraph([Text("test")])],
     )
   let a_sum =
     ArticleSummary(
@@ -77,7 +77,7 @@ pub fn model_encoder_and_decoder_test() {
         leading: "leading",
         title: "test",
         subtitle: "subtitle",
-        content: [Heading("test"), Paragraph("test")],
+        content: [Heading("test"), Paragraph([Text("test")])],
       ),
       ArticleSummary(
         slug: "test2",

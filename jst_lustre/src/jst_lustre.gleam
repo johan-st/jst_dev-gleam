@@ -1,18 +1,14 @@
 // IMPORTS ---------------------------------------------------------------------
 
 import article/article.{
-  type Article, ArticleFull, ArticleSummary, ArticleWithError,
+  type Article, type Content, ArticleFull, ArticleSummary, ArticleWithError,
 }
 import chat/chat
 import gleam/dict.{type Dict}
-import gleam/dynamic/decode.{type Decoder, type Dynamic}
 import gleam/int
-import gleam/io
-import gleam/javascript/array
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/result
 import gleam/string
 import gleam/uri.{type Uri}
 import lustre
@@ -680,15 +676,19 @@ fn view_index() -> List(Element(msg)) {
         "NATS all the way down ->",
       ),
     ]),
-    view_paragraph(
-      "It to is a work in progress and I mostly keep it here for my own reference.",
-    ),
-    view_paragraph(
-      "I'm also a software developer and a writer. I'm also a father and a 
-      husband. I'm also a software developer and a writer. I'm also a father 
-      and a husband. I'm also a software developer and a writer. I'm also a 
-      father and a husband. I'm also a software developer and a writer.",
-    ),
+    view_paragraph([
+      article.Text(
+        "It to is a work in progress and I mostly keep it here for my own reference.",
+      ),
+    ]),
+    view_paragraph([
+      article.Text(
+        "I'm also a software developer and a writer. I'm also a father and a 
+        husband. I'm also a software developer and a writer. I'm also a father 
+        and a husband. I'm also a software developer and a writer. I'm also a 
+        father and a husband. I'm also a software developer and a writer.",
+      ),
+    ]),
   ]
 }
 
@@ -720,7 +720,7 @@ fn view_article_listing(articles: Dict(String, Article)) -> List(Element(Msg)) {
                   [html.text(title)],
                 ),
                 view_subtitle(subtitle, slug),
-                view_paragraph(leading),
+                view_paragraph([article.Text(leading)]),
               ],
             ),
           ])
@@ -772,22 +772,15 @@ fn view_article(article: Article) -> List(Element(msg)) {
       view_title(title, id),
       view_subtitle(subtitle, id),
       view_leading(leading, id),
-      view_paragraph("loading content.."),
+      view_paragraph([article.Text("loading content..")]),
     ]
     ArticleFull(id, _revision, title, leading, subtitle, content) -> [
       view_title(title, id),
       view_subtitle(subtitle, id),
       view_leading(leading, id),
-      ..article.view_article_content(
-        view_h2,
-        view_h2,
-        view_h2,
-        view_paragraph,
-        view_error,
-        content,
-      )
+      ..view_article_content(content)
     ]
-    ArticleWithError(id, revision, title, leading, subtitle, error) -> [
+    ArticleWithError(id, _revision, title, leading, subtitle, error) -> [
       view_title(title, id),
       view_subtitle(subtitle, id),
       view_leading(leading, id),
@@ -804,27 +797,33 @@ fn view_article(article: Article) -> List(Element(msg)) {
 fn view_about() -> List(Element(msg)) {
   [
     view_title("About", "about"),
-    view_paragraph(
-      "I'm a software developer and a writer. I'm also a father and a husband. 
+    view_paragraph([
+      article.Text(
+        "I'm a software developer and a writer. I'm also a father and a husband. 
       I'm also a software developer and a writer. I'm also a father and a 
       husband. I'm also a software developer and a writer. I'm also a father 
       and a husband. I'm also a software developer and a writer. I'm also a 
       father and a husband.",
-    ),
-    view_paragraph(
-      "If you enjoy these glimpses into my mind, feel free to come back
+      ),
+    ]),
+    view_paragraph([
+      article.Text(
+        "If you enjoy these glimpses into my mind, feel free to come back
        semi-regularly. But not too regularly, you creep.",
-    ),
+      ),
+    ]),
   ]
 }
 
 fn view_not_found() -> List(Element(msg)) {
   [
     view_title("Not found", "not-found"),
-    view_paragraph(
-      "You glimpse into the void and see -- nothing?
+    view_paragraph([
+      article.Text(
+        "You glimpse into the void and see -- nothing?
        Well that was somewhat expected.",
-    ),
+      ),
+    ]),
   ]
 }
 
@@ -893,8 +892,8 @@ fn view_h4(title: String) -> Element(msg) {
   )
 }
 
-fn view_paragraph(text: String) -> Element(msg) {
-  html.p([attribute.class("pt-8")], [html.text(text)])
+fn view_paragraph(contents: List(Content)) -> Element(msg) {
+  html.p([attribute.class("pt-8")], view_article_content(contents))
 }
 
 fn view_error(error_string: String) -> Element(msg) {
@@ -909,4 +908,49 @@ fn view_link(target: Route, title: String) -> Element(msg) {
     ],
     [html.text(title)],
   )
+}
+
+fn view_link_external(url: Uri, title: String) -> Element(msg) {
+  html.a([attribute.href(uri.to_string(url)), attribute.target("_blank")], [
+    html.text(title),
+  ])
+}
+
+fn view_link_missing(url: Uri, title: String) -> Element(msg) {
+  html.span([attribute.class("text-orange-500")], [
+    html.text("broken link: " <> title),
+  ])
+}
+
+fn view_block(contents: List(Content)) -> Element(msg) {
+  html.div([attribute.class("pt-8")], view_article_content(contents))
+}
+
+fn view_unknown(content_type: String) -> Element(msg) {
+  html.span([attribute.class("text-orange-500")], [html.text("<unknown: " <> content_type <> ">")])
+}
+
+// VIEW ARTICLE CONTENT --------------------------------------------------------
+
+fn view_article_content(contents: List(Content)) -> List(Element(msg)) {
+  let view_content = fn(content: Content) -> Element(msg) {
+    case content {
+      article.Text(text) -> html.text(text)
+      article.Block(contents) -> view_block(contents)
+      article.Heading(text) -> view_h2(text)
+      article.Paragraph(contents) -> view_paragraph(contents)
+      article.Link(url, title) -> {
+        let route = parse_route(url)
+        case route {
+          NotFound(_) -> view_link_missing(url, title)
+          _ -> view_link(route, title)
+        }
+      }
+      article.LinkExternal(url, title) -> view_link_external(url, title)
+      article.Image(_, _) -> todo as "view content image"
+      article.List(_) -> todo as "view content list"
+      article.Unknown(content_type) -> view_unknown(content_type)
+    }
+  }
+  list.map(contents, view_content)
 }
