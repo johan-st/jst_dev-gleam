@@ -13,6 +13,7 @@ import gleam/string
 import gleam/uri.{type Uri}
 import lustre
 import lustre/attribute.{type Attribute}
+import lustre/attribute as attr
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
@@ -36,8 +37,8 @@ pub fn main() {
 
 type Model {
   Model(
-    articles: Dict(String, Article),
     route: Route,
+    articles: Dict(String, Article),
     user_messages: List(UserMessage),
     chat: chat.Model,
   )
@@ -53,6 +54,7 @@ type Route {
   Index
   Articles
   ArticleBySlug(slug: String)
+  ArticleBySlugEdit(slug: String)
   About
   /// It's good practice to store whatever `Uri` we failed to match in case we
   /// want to log it or hint to the user that maybe they made a typo.
@@ -64,6 +66,7 @@ fn parse_route(uri: Uri) -> Route {
     [] | [""] -> Index
     ["articles"] -> Articles
     ["article", slug] -> ArticleBySlug(slug)
+    ["article", slug, "edit"] -> ArticleBySlugEdit(slug)
     ["about"] -> About
     _ -> NotFound(uri:)
   }
@@ -75,12 +78,13 @@ fn route_url(route: Route) -> String {
     About -> "/about"
     Articles -> "/articles"
     ArticleBySlug(slug) -> "/article/" <> slug
+    ArticleBySlugEdit(slug) -> "/article/" <> slug <> "/edit"
     NotFound(_) -> "/404"
   }
 }
 
 fn href(route: Route) -> Attribute(msg) {
-  attribute.href(route_url(route))
+  attr.href(route_url(route))
 }
 
 fn init(_) -> #(Model, Effect(Msg)) {
@@ -140,7 +144,6 @@ type Msg {
   // ARTICLES
   GotArticle(slug: String, result: Result(Article, HttpError))
   GotArticlesMetadata(result: Result(List(Article), HttpError))
-  // USER ACTIONS
   // CHAT
   ChatMsg(msg: chat.Msg)
 }
@@ -424,18 +427,18 @@ fn user_message_id_next(user_messages: List(UserMessage)) -> Int {
 fn view(model: Model) -> Element(Msg) {
   html.div(
     [
-      attribute.class("text-zinc-400 h-full w-full text-lg font-thin mx-auto"),
-      attribute.class(
+      attr.class("text-zinc-400 h-full w-full text-lg font-thin mx-auto "),
+      attr.class(
         "focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2 focus:ring-offset-orange-50",
       ),
     ],
     [
       view_header(model),
       html.div(
-        [attribute.class("fixed top-18 left-0 right-0")],
+        [attr.class("fixed top-18 left-0 right-0")],
         view_user_messages(model.user_messages),
       ),
-      html.main([attribute.class("px-10 py-4 max-w-screen-md mx-auto")], {
+      html.main([attr.class("px-10 py-4 max-w-screen-md mx-auto")], {
         // Just like we would show different HTML based on some other state in the
         // model, we can also pattern match on our Route value to show different
         // views based on the current page!
@@ -465,6 +468,12 @@ fn view(model: Model) -> Element(Msg) {
               }
             }
           }
+          ArticleBySlugEdit(slug) -> {
+            case dict.get(model.articles, slug) {
+              Ok(article) -> view_article_edit(article)
+              Error(_) -> view_not_found()
+            }
+          }
           About -> view_about()
           NotFound(_) -> view_not_found()
         }
@@ -477,17 +486,17 @@ fn view(model: Model) -> Element(Msg) {
 // VIEW HEADER ----------------------------------------------------------------påökjölmnnm,öoigbo9ybnpuhbp.,kb iuu
 fn view_header(model: Model) -> Element(Msg) {
   html.nav(
-    [attribute.class("py-2 border-b bg-zinc-800 border-pink-700 font-mono ")],
+    [attr.class("py-2 border-b bg-zinc-800 border-pink-700 font-mono ")],
     [
       html.div(
         [
-          attribute.class(
+          attr.class(
             "flex justify-between px-10 items-center max-w-screen-md mx-auto",
           ),
         ],
         [
           html.div([], [
-            html.a([attribute.class("font-light"), href(Index)], [
+            html.a([attr.class("font-light"), href(Index)], [
               html.text("jst.dev"),
             ]),
           ]),
@@ -500,7 +509,7 @@ fn view_header(model: Model) -> Element(Msg) {
               }
             }),
           ]),
-          html.ul([attribute.class("flex space-x-8 pr-2")], [
+          html.ul([attr.class("flex space-x-8 pr-2")], [
             view_header_link(
               current: model.route,
               to: Articles,
@@ -526,7 +535,7 @@ fn view_header_link(
 
   html.li(
     [
-      attribute.classes([
+      attr.classes([
         #("border-transparent border-b-2 hover:border-pink-700", True),
         #("text-pink-700", is_active),
       ]),
@@ -549,24 +558,22 @@ fn view_user_message(msg: UserMessage) -> Element(Msg) {
     UserError(id, msg_text) -> {
       html.div(
         [
-          attribute.class(
-            "rounded-md bg-red-50 p-4 absolute top-0 left-0 right-0",
-          ),
-          attribute.id("user-message-" <> int.to_string(id)),
+          attr.class("rounded-md bg-red-50 p-4 absolute top-0 left-0 right-0"),
+          attr.id("user-message-" <> int.to_string(id)),
         ],
         [
-          html.div([attribute.class("flex")], [
-            html.div([attribute.class("shrink-0")], [html.text("ERROR")]),
-            html.div([attribute.class("ml-3")], [
-              html.p([attribute.class("text-sm font-medium text-red-800")], [
+          html.div([attr.class("flex")], [
+            html.div([attr.class("shrink-0")], [html.text("ERROR")]),
+            html.div([attr.class("ml-3")], [
+              html.p([attr.class("text-sm font-medium text-red-800")], [
                 html.text(msg_text),
               ]),
             ]),
-            html.div([attribute.class("ml-auto pl-3")], [
-              html.div([attribute.class("-mx-1.5 -my-1.5")], [
+            html.div([attr.class("ml-auto pl-3")], [
+              html.div([attr.class("-mx-1.5 -my-1.5")], [
                 html.button(
                   [
-                    attribute.class(
+                    attr.class(
                       "inline-flex rounded-md bg-red-50 p-1.5 text-red-500 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2 focus:ring-offset-orange-50",
                     ),
                     event.on_click(UserMessageDismissed(msg)),
@@ -583,24 +590,22 @@ fn view_user_message(msg: UserMessage) -> Element(Msg) {
     UserWarning(id, msg_text) -> {
       html.div(
         [
-          attribute.class(
-            "rounded-md bg-green-50 p-4 relative top-0 left-0 right-0",
-          ),
-          attribute.id("user-message-" <> int.to_string(id)),
+          attr.class("rounded-md bg-green-50 p-4 relative top-0 left-0 right-0"),
+          attr.id("user-message-" <> int.to_string(id)),
         ],
         [
-          html.div([attribute.class("flex")], [
-            html.div([attribute.class("shrink-0")], [html.text("WARNING")]),
-            html.div([attribute.class("ml-3")], [
-              html.p([attribute.class("text-sm font-medium text-green-800")], [
+          html.div([attr.class("flex")], [
+            html.div([attr.class("shrink-0")], [html.text("WARNING")]),
+            html.div([attr.class("ml-3")], [
+              html.p([attr.class("text-sm font-medium text-green-800")], [
                 html.text(msg_text),
               ]),
             ]),
-            html.div([attribute.class("ml-auto pl-3")], [
-              html.div([attribute.class("-mx-1.5 -my-1.5")], [
+            html.div([attr.class("ml-auto pl-3")], [
+              html.div([attr.class("-mx-1.5 -my-1.5")], [
                 html.button(
                   [
-                    attribute.class(
+                    attr.class(
                       "inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50",
                     ),
                     event.on_click(UserMessageDismissed(msg)),
@@ -617,22 +622,22 @@ fn view_user_message(msg: UserMessage) -> Element(Msg) {
     UserInfo(id, msg_text) -> {
       html.div(
         [
-          attribute.class("border-l-4 border-yellow-400 bg-yellow-50 p-4"),
-          attribute.id("user-message-" <> int.to_string(id)),
+          attr.class("border-l-4 border-yellow-400 bg-yellow-50 p-4"),
+          attr.id("user-message-" <> int.to_string(id)),
         ],
         [
-          html.div([attribute.class("flex")], [
-            html.div([attribute.class("shrink-0")], [html.text("INFO")]),
-            html.div([attribute.class("ml-3")], [
-              html.p([attribute.class("font-medium text-yellow-800")], [
+          html.div([attr.class("flex")], [
+            html.div([attr.class("shrink-0")], [html.text("INFO")]),
+            html.div([attr.class("ml-3")], [
+              html.p([attr.class("font-medium text-yellow-800")], [
                 html.text(msg_text),
               ]),
             ]),
-            html.div([attribute.class("ml-auto pl-3")], [
-              html.div([attribute.class("-mx-1.5 -my-1.5")], [
+            html.div([attr.class("ml-auto pl-3")], [
+              html.div([attr.class("-mx-1.5 -my-1.5")], [
                 html.button(
                   [
-                    attribute.class(
+                    attr.class(
                       "inline-flex rounded-md bg-yellow-50 p-1.5 text-yellow-500 hover:bg-yellow-100 focus:outline-none focus:ring-2 focus:ring-yellow-600 focus:ring-offset-2 focus:ring-offset-yellow-50",
                     ),
                     event.on_click(UserMessageDismissed(msg)),
@@ -664,7 +669,7 @@ fn view_index() -> List(Element(msg)) {
       also share some of my thoughts and learnings here.",
       "welcome",
     ),
-    html.p([attribute.class("mt-14")], [
+    html.p([attr.class("mt-14")], [
       html.text(
         "This site and it's underlying IT-infrastructure is the primary 
         place for me to experiment with technologies and topologies. I 
@@ -701,24 +706,27 @@ fn view_article_listing(articles: Dict(String, Article)) -> List(Element(Msg)) {
       case article {
         ArticleFull(slug, _, title, leading, subtitle, _)
         | ArticleSummary(slug, _, title, leading, subtitle) -> {
-          html.article([attribute.class("mt-14")], [
+          html.article([attr.class("mt-14 hover:bg-blur-sm")], [
             html.a(
               [
-                attribute.class(
+                attr.class(
                   "group block  border-l border-zinc-700  pl-4  hover:border-pink-700 transition-colors duration-25",
                 ),
                 href(ArticleBySlug(slug)),
                 event.on_mouse_enter(ArticleHovered(article)),
               ],
               [
-                html.h3(
-                  [
-                    attribute.id("article-title-" <> slug),
-                    attribute.class("article-title"),
-                    attribute.class("text-xl text-pink-700 font-light"),
-                  ],
-                  [html.text(title)],
-                ),
+                html.div([attr.class("flex justify-between gap-4")], [
+                  html.h3(
+                    [
+                      attr.id("article-title-" <> slug),
+                      attr.class("article-title"),
+                      attr.class("text-xl text-pink-700 font-light"),
+                    ],
+                    [html.text(title)],
+                  ),
+                  view_edit_link(article),
+                ]),
                 view_subtitle(subtitle, slug),
                 view_paragraph([article.Text(leading)]),
               ],
@@ -727,27 +735,22 @@ fn view_article_listing(articles: Dict(String, Article)) -> List(Element(Msg)) {
         }
         ArticleWithError(slug, _revision, title, _leading, _subtitle, error) -> {
           html.article(
-            [
-              attribute.class("mt-14 group group-hover"),
-              attribute.class("animate-break"),
-            ],
+            [attr.class("mt-14 group group-hover"), attr.class("animate-break")],
             [
               html.a(
                 [
                   href(ArticleBySlug(slug)),
-                  attribute.class(
+                  attr.class(
                     "group block  border-l border-zinc-700 pl-4 hover:border-zinc-500 transition-colors duration-25",
                   ),
                 ],
                 [
                   html.h3(
                     [
-                      attribute.id("article-title-" <> slug),
-                      attribute.class("article-title"),
-                      attribute.class("text-xl font-light w-max-content"),
-                      attribute.class(
-                        "animate-break--mirror hover:animate-break",
-                      ),
+                      attr.id("article-title-" <> slug),
+                      attr.class("article-title"),
+                      attr.class("text-xl font-light w-max-content"),
+                      attr.class("animate-break--mirror hover:animate-break"),
                     ],
                     [html.text(title)],
                   ),
@@ -766,31 +769,58 @@ fn view_article_listing(articles: Dict(String, Article)) -> List(Element(Msg)) {
   [view_title("Articles", "articles"), ..articles]
 }
 
-fn view_article(article: Article) -> List(Element(msg)) {
+fn view_article_edit(article: Article) -> List(Element(msg)) {
   let content = case article {
-    ArticleSummary(id, _revision, title, leading, subtitle) -> [
-      view_title(title, id),
-      view_subtitle(subtitle, id),
-      view_leading(leading, id),
+    ArticleSummary(slug, _revision, title, leading, subtitle) -> [
+      view_title(title, slug),
+      view_subtitle(subtitle, slug),
+      view_leading(leading, slug),
       view_paragraph([article.Text("loading content..")]),
     ]
-    ArticleFull(id, _revision, title, leading, subtitle, content) -> [
-      view_title(title, id),
-      view_subtitle(subtitle, id),
-      view_leading(leading, id),
+    ArticleFull(slug, _revision, title, leading, subtitle, content) -> [
+      view_title(title, slug),
+      view_subtitle(subtitle, slug),
+      view_leading(leading, slug),
       ..view_article_content(content)
     ]
-    ArticleWithError(id, _revision, title, leading, subtitle, error) -> [
-      view_title(title, id),
-      view_subtitle(subtitle, id),
-      view_leading(leading, id),
+    ArticleWithError(slug, _revision, title, leading, subtitle, error) -> [
+      view_title(title, slug),
+      view_subtitle(subtitle, slug),
+      view_leading(leading, slug),
+      view_error(error),
+    ]
+  }
+  [
+    html.article([attr.class("with-transition")], content),
+    html.p([attr.class("mt-14")], [view_link(Articles, "<- Go back?")]),
+  ]
+}
+
+fn view_article(article: Article) -> List(Element(msg)) {
+  let content = case article {
+    ArticleSummary(slug, _revision, title, leading, subtitle) -> [
+      view_title(title, slug),
+      view_subtitle(subtitle, slug),
+      view_leading(leading, slug),
+      view_paragraph([article.Text("loading content..")]),
+    ]
+    ArticleFull(slug, _revision, title, leading, subtitle, content) -> [
+      view_title(title, slug),
+      view_subtitle(subtitle, slug),
+      view_leading(leading, slug),
+      ..view_article_content(content)
+    ]
+    ArticleWithError(slug, _revision, title, leading, subtitle, error) -> [
+      view_title(title, slug),
+      view_subtitle(subtitle, slug),
+      view_leading(leading, slug),
       view_error(error),
     ]
   }
 
   [
-    html.article([attribute.class("with-transition")], content),
-    html.p([attribute.class("mt-14")], [view_link(Articles, "<- Go back?")]),
+    html.article([attr.class("with-transition")], content),
+    html.p([attr.class("mt-14")], [view_link(Articles, "<- Go back?")]),
   ]
 }
 
@@ -829,12 +859,24 @@ fn view_not_found() -> List(Element(msg)) {
 
 // VIEW HELPERS ----------------------------------------------------------------
 
+fn view_edit_link(article: Article) -> Element(Msg) {
+  html.a(
+    [
+      attr.class(
+        "text-gray-500 border-e pe-4 text-underline pt-2 hover:text-teal-300 hover:border-teal-300 border-t border-gray-500",
+      ),
+      href(ArticleBySlugEdit(article.slug)),
+    ],
+    [html.text("edit")],
+  )
+}
+
 fn view_title(title: String, slug: String) -> Element(msg) {
   html.h1(
     [
-      attribute.id("article-title-" <> slug),
-      attribute.class("text-3xl pt-8 text-pink-700 font-light"),
-      attribute.class("article-title"),
+      attr.id("article-title-" <> slug),
+      attr.class("text-3xl pt-8 text-pink-700 font-light"),
+      attr.class("article-title"),
     ],
     [html.text(title)],
   )
@@ -843,9 +885,9 @@ fn view_title(title: String, slug: String) -> Element(msg) {
 fn view_subtitle(title: String, slug: String) -> Element(msg) {
   html.div(
     [
-      attribute.id("article-subtitle-" <> slug),
-      attribute.class("text-md text-zinc-500 font-light"),
-      attribute.class("article-subtitle"),
+      attr.id("article-subtitle-" <> slug),
+      attr.class("text-md text-zinc-500 font-light"),
+      attr.class("article-subtitle"),
     ],
     [html.text(title)],
   )
@@ -854,9 +896,9 @@ fn view_subtitle(title: String, slug: String) -> Element(msg) {
 fn view_leading(text: String, slug: String) -> Element(msg) {
   html.p(
     [
-      attribute.id("article-lead-" <> slug),
-      attribute.class("font-bold pt-8"),
-      attribute.class("article-leading"),
+      attr.id("article-lead-" <> slug),
+      attr.class("font-bold pt-8"),
+      attr.class("article-leading"),
     ],
     [html.text(text)],
   )
@@ -865,8 +907,8 @@ fn view_leading(text: String, slug: String) -> Element(msg) {
 fn view_h2(title: String) -> Element(msg) {
   html.h2(
     [
-      attribute.class("text-2xl text-pink-600 font-light pt-16"),
-      attribute.class("article-h2"),
+      attr.class("text-2xl text-pink-600 font-light pt-16"),
+      attr.class("article-h2"),
     ],
     [html.text(title)],
   )
@@ -874,38 +916,29 @@ fn view_h2(title: String) -> Element(msg) {
 
 fn view_h3(title: String) -> Element(msg) {
   html.h3(
-    [
-      attribute.class("text-xl text-pink-600 font-light"),
-      attribute.class("article-h3"),
-    ],
+    [attr.class("text-xl text-pink-600 font-light"), attr.class("article-h3")],
     [html.text(title)],
   )
 }
 
 fn view_h4(title: String) -> Element(msg) {
   html.h4(
-    [
-      attribute.class("text-lg text-pink-600 font-light"),
-      attribute.class("article-h4"),
-    ],
+    [attr.class("text-lg text-pink-600 font-light"), attr.class("article-h4")],
     [html.text(title)],
   )
 }
 
 fn view_paragraph(contents: List(Content)) -> Element(msg) {
-  html.p([attribute.class("pt-8")], view_article_content(contents))
+  html.p([attr.class("pt-8")], view_article_content(contents))
 }
 
 fn view_error(error_string: String) -> Element(msg) {
-  html.p([attribute.class("pt-8 text-orange-500")], [html.text(error_string)])
+  html.p([attr.class("pt-8 text-orange-500")], [html.text(error_string)])
 }
 
 fn view_link(target: Route, title: String) -> Element(msg) {
   html.a(
-    [
-      href(target),
-      attribute.class("text-pink-700 hover:underline cursor-pointer"),
-    ],
+    [href(target), attr.class("text-pink-700 hover:underline cursor-pointer")],
     [html.text(title)],
   )
 }
@@ -913,9 +946,9 @@ fn view_link(target: Route, title: String) -> Element(msg) {
 fn view_link_external(url: Uri, title: String) -> Element(msg) {
   html.a(
     [
-      attribute.href(uri.to_string(url)),
-      attribute.class("text-pink-700 hover:underline cursor-pointer"),
-      attribute.target("_blank"),
+      attr.href(uri.to_string(url)),
+      attr.class("text-pink-700 hover:underline cursor-pointer"),
+      attr.target("_blank"),
     ],
     [html.text(title)],
   )
@@ -924,34 +957,32 @@ fn view_link_external(url: Uri, title: String) -> Element(msg) {
 fn view_link_missing(url: Uri, title: String) -> Element(msg) {
   html.a(
     [
-      attribute.href(uri.to_string(url)),
-      attribute.class("hover:underline cursor-pointer"),
+      attr.href(uri.to_string(url)),
+      attr.class("hover:underline cursor-pointer"),
     ],
     [
-      html.span([attribute.class("text-orange-500")], [
-        html.text("broken link: "),
-      ]),
+      html.span([attr.class("text-orange-500")], [html.text("broken link: ")]),
       html.text(title),
     ],
   )
 }
 
 fn view_block(contents: List(Content)) -> Element(msg) {
-  html.div([attribute.class("pt-8")], view_article_content(contents))
+  html.div([attr.class("pt-8")], view_article_content(contents))
 }
 
 fn view_list(items: List(Content)) -> Element(msg) {
   html.ul(
-    [attribute.class("pt-8 list-disc list-inside")],
+    [attr.class("pt-8 list-disc list-inside")],
     items
       |> list.map(fn(item) {
-        html.li([attribute.class("pt-1")], view_article_content([item]))
+        html.li([attr.class("pt-1")], view_article_content([item]))
       }),
   )
 }
 
 fn view_unknown(content_type: String) -> Element(msg) {
-  html.span([attribute.class("text-orange-500")], [
+  html.span([attr.class("text-orange-500")], [
     html.text("<unknown: " <> content_type <> ">"),
   ])
 }
