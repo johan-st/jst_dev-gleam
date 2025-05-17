@@ -27,8 +27,8 @@ pub fn http_error(error: http.HttpError) -> String {
     http.OtherError(code, body) -> {
       "other error: " <> int.to_string(code) <> " " <> body
     }
-    _ -> {
-      "unhandled error"
+    http.NetworkError -> {
+      "network error"
     }
   }
 }

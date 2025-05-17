@@ -38,10 +38,18 @@ pub fn main() {
 type Model {
   Model(
     route: Route,
-    articles: Dict(String, Article),
-    user_messages: List(UserMessage),
+    articles: RemoteData(Dict(String, Article), HttpError),
+    articles_drafts: Dict(String, Article),
+    // user_messages: List(UserMessage),
     chat: chat.Model,
   )
+}
+
+type RemoteData(a, err) {
+  NotInitialized
+  Pending
+  Loaded(a)
+  Errored(err)
 }
 
 type UserMessage {
@@ -88,7 +96,6 @@ fn href(route: Route) -> Attribute(msg) {
 }
 
 fn init(_) -> #(Model, Effect(Msg)) {
-  echo "init"
   // The server for a typical SPA will often serve the application to *any*
   // HTTP request, and let the app itself determine what to show. Modem stores
   // the first URL so we can parse it for the app's initial route.
@@ -96,14 +103,15 @@ fn init(_) -> #(Model, Effect(Msg)) {
     Ok(uri) -> parse_route(uri)
     Error(_) -> Index
   }
-
-  let articles_empty =
-    []
-    |> dict.from_list
-
   let #(chat_model, chat_effect) = chat.init()
   let model =
-    Model(route:, articles: articles_empty, user_messages: [], chat: chat_model)
+    Model(
+      route:,
+      articles: Pending,
+      articles_drafts: dict.new(),
+      // user_messages: [],
+      chat: chat_model,
+    )
   let effect_modem =
     modem.init(fn(uri) {
       uri
@@ -116,7 +124,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
       effect_modem,
       effect_navigation(model, route),
       effect.map(chat_effect, ChatMsg),
-      article.get_metadata_all(GotArticlesMetadata),
+      article.get_metadata_all(ArticleMetaGot),
       persist.localstorage_get(
         persist.model_localstorage_key,
         persist.decoder(),
@@ -135,15 +143,19 @@ fn init(_) -> #(Model, Effect(Msg)) {
 // UPDATE ----------------------------------------------------------------------
 
 type Msg {
-  // User
+  // NAVIGATION
   UserNavigatedTo(route: Route)
-  ArticleHovered(article: Article)
-  UserMessageDismissed(msg: UserMessage)
+  // MESSAGES
+  // UserMessageDismissed(msg: UserMessage)
   // LOCALSTORAGE
   PersistGotModel(opt: Option(PersistentModel))
   // ARTICLES
-  GotArticle(slug: String, result: Result(Article, HttpError))
-  GotArticlesMetadata(result: Result(List(Article), HttpError))
+  ArticleHovered(article: Article)
+  ArticleGot(slug: String, result: Result(Article, HttpError))
+  ArticleMetaGot(result: Result(List(Article), HttpError))
+  // ARTICLE EDIT
+  ArticleEditCancelled(article: Article)
+  ArticleEditSaved(article: Article)
   // CHAT
   ChatMsg(msg: chat.Msg)
 }
@@ -153,8 +165,12 @@ fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   let persistent_model = fn(model: Model) -> PersistentModel {
     PersistentModelV1(
       version: 1,
-      articles: model.articles
-        |> dict.to_list
+      articles: case model.articles {
+        NotInitialized -> []
+        Pending -> []
+        Loaded(articles) -> articles |> dict.to_list
+        Errored(_) -> []
+      }
         |> list.map(fn(tuple) {
           let #(_id, article) = tuple
           article
@@ -162,13 +178,13 @@ fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     )
   }
   case msg {
-    GotArticlesMetadata(_) -> {
+    ArticleMetaGot(_) -> {
       persist.localstorage_set(
         persist.model_localstorage_key,
         persist.encode(persistent_model(new_model)),
       )
     }
-    GotArticle(_, _) -> {
+    ArticleGot(_, _) -> {
       persist.localstorage_set(
         persist.model_localstorage_key,
         persist.encode(persistent_model(new_model)),
@@ -181,17 +197,37 @@ fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
-    // USER
+    // NAVIGATION
     UserNavigatedTo(route:) -> {
-      #(Model(..model, route:), effect_navigation(model, route))
+      case route {
+        ArticleBySlugEdit(slug) -> {
+          let article = dict.get(model.articles_drafts, slug)
+          case article {
+            Ok(_) -> {
+              #(Model(..model, route:), effect_navigation(model, route))
+            }
+            Error(_) -> {
+              let articles_drafts =
+                dict.insert(
+                  model.articles_drafts,
+                  slug,
+                  ArticleSummary(slug, 0, "", "", ""),
+                )
+              #(Model(..model, route:, articles_drafts:), effect.none())
+            }
+          }
+        }
+        _ -> {
+          #(Model(..model, route:), effect_navigation(model, route))
+        }
+      }
     }
     // Browser Persistance
     PersistGotModel(opt:) -> {
-      echo msg
       case opt {
         Some(PersistentModelV1(_, articles)) -> {
           #(
-            Model(..model, articles: article.list_to_dict(articles)),
+            Model(..model, articles: articles |> article.list_to_dict |> Loaded),
             effect.none(),
           )
         }
@@ -203,14 +239,36 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         }
       }
     }
-    GotArticlesMetadata(result:) -> {
+    ArticleMetaGot(result:) -> {
       update_got_articles_metadata(model, result)
     }
-    GotArticle(slug, result) -> {
+    ArticleGot(slug, result) -> {
       case result {
         Ok(article) -> {
-          let articles = dict.insert(model.articles, article.slug, article)
-          #(Model(..model, articles:), effect.none())
+          case model.articles {
+            Loaded(articles) -> {
+              #(
+                Model(
+                  ..model,
+                  articles: Loaded(dict.insert(articles, article.slug, article)),
+                ),
+                effect.none(),
+              )
+            }
+            _ -> {
+              #(
+                Model(
+                  ..model,
+                  articles: Loaded(dict.insert(
+                    dict.new(),
+                    article.slug,
+                    article,
+                  )),
+                ),
+                effect.none(),
+              )
+            }
+          }
         }
         Error(err) -> update_got_article_error(model, err, slug)
       }
@@ -220,7 +278,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         ArticleSummary(slug, _, _, _, _) -> {
           #(
             model,
-            article.get_article(fn(result) { GotArticle(slug, result) }, slug),
+            article.get_article(fn(result) { ArticleGot(slug, result) }, slug),
           )
         }
         ArticleFull(_, _, _, _, _, _) -> {
@@ -231,10 +289,38 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         }
       }
     }
-    UserMessageDismissed(msg) -> {
-      let user_messages = list.filter(model.user_messages, fn(m) { m != msg })
-      #(Model(..model, user_messages:), effect.none())
+    // ARTICLE EDIT
+    ArticleEditCancelled(article:) -> {
+      echo "article edit cancelled"
+      #(
+        Model(
+          ..model,
+          articles_drafts: dict.delete(model.articles_drafts, article.slug),
+        ),
+        effect.none(),
+      )
     }
+    ArticleEditSaved(article:) -> {
+      echo "article edit saved"
+      let articles = case model.articles {
+        Loaded(articles) -> articles
+        _ -> dict.new()
+      }
+      #(
+        Model(
+          ..model,
+          articles_drafts: dict.delete(model.articles_drafts, article.slug),
+          articles: Loaded(dict.insert(articles, article.slug, article)),
+        ),
+        effect.none(),
+      )
+    }
+    // MESSAGES
+    // UserMessageDismissed(msg) -> {
+    //   let user_messages = list.filter(model.user_messages, fn(m) { m != msg })
+    //   #(Model(..model, user_messages:), effect.none())
+    // }
+    // CHAT
     ChatMsg(msg:) -> {
       let #(chat_model, chat_effect) = chat.update(msg, model.chat)
       #(Model(..model, chat: chat_model), effect.map(chat_effect, ChatMsg))
@@ -245,18 +331,22 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 fn effect_navigation(model: Model, route: Route) -> Effect(Msg) {
   case route {
     ArticleBySlug(slug) -> {
-      let article = dict.get(model.articles, slug)
+      let articles = case model.articles {
+        Loaded(articles) -> articles
+        _ -> dict.new()
+      }
+      let article = dict.get(articles, slug)
       case article {
         Ok(article) -> {
           case article {
             ArticleSummary(slug, _, _, _, _) -> {
-              article.get_article(fn(result) { GotArticle(slug, result) }, slug)
+              article.get_article(fn(result) { ArticleGot(slug, result) }, slug)
             }
             ArticleFull(_, _, _, _, _, _) -> {
               effect.none()
             }
             ArticleWithError(_, _, _, _, _, _) -> {
-              article.get_article(fn(result) { GotArticle(slug, result) }, slug)
+              article.get_article(fn(result) { ArticleGot(slug, result) }, slug)
             }
           }
         }
@@ -305,28 +395,32 @@ fn update_got_articles_metadata(
   model: Model,
   result: Result(List(Article), HttpError),
 ) {
-  case result {
+  case echo result {
     Ok(articles) -> {
       let articles = article.list_to_dict(articles)
       let effect = case model.route {
         ArticleBySlug(_) -> {
           echo "loading article content"
-          effect_navigation(Model(..model, articles:), model.route)
+          effect_navigation(
+            Model(..model, articles: Loaded(articles)),
+            model.route,
+          )
         }
         _ -> {
           echo "no effect for route: " <> route_url(model.route)
           effect.none()
         }
       }
-      #(Model(..model, articles:), effect)
+      #(Model(..model, articles: Loaded(articles)), effect)
     }
     Error(err) -> {
       let error_string = error_string.http_error(err)
-      let user_messages =
-        list.append(model.user_messages, [
-          UserError(user_message_id_next(model.user_messages), error_string),
-        ])
-      #(Model(..model, user_messages:), effect.none())
+      // let user_messages =
+      //   list.append(model.user_messages, [
+      //     UserError(user_message_id_next(model.user_messages), error_string),
+      //   ])
+      // #(Model(..model, user_messages:, articles: Errored(err)), effect.none())
+      #(Model(..model, articles: Errored(err)), effect.none())
     }
   }
 }
@@ -341,23 +435,29 @@ fn update_got_article_error(
     <> slug
     <> "): "
     <> error_string.http_error(err)
+  let articles = case model.articles {
+    Loaded(articles) -> articles
+    _ -> dict.new()
+  }
   case err {
     http.JsonError(json.UnexpectedByte(_)) -> {
-      case dict.get(model.articles, slug) {
+      case dict.get(articles, slug) {
         Ok(article) -> {
-          let article =
-            ArticleWithError(
-              slug,
-              article.revision,
-              article.title,
-              article.leading,
-              article.subtitle,
-              error_string,
+          let art =
+            articles_update(
+              [
+                ArticleWithError(
+                  slug,
+                  article.revision,
+                  article.title,
+                  article.leading,
+                  article.subtitle,
+                  error_string,
+                ),
+              ],
+              articles,
             )
-          #(
-            Model(..model, articles: articles_update([article], model.articles)),
-            effect.none(),
-          )
+          #(Model(..model, articles: Loaded(art)), effect.none())
         }
         Error(_) -> {
           echo error_string.http_error(err)
@@ -365,8 +465,9 @@ fn update_got_article_error(
         }
       }
     }
+
     http.NotFound -> {
-      case dict.get(model.articles, slug) {
+      case dict.get(articles, slug) {
         Ok(article) -> {
           let article =
             ArticleWithError(
@@ -377,10 +478,7 @@ fn update_got_article_error(
               article.subtitle,
               error_string,
             )
-          #(
-            Model(..model, articles: articles_update([article], model.articles)),
-            effect.none(),
-          )
+          #(Model(..model, articles: Errored(err)), effect.none())
         }
         Error(_) -> {
           echo "not found: " <> error_string.http_error(err)
@@ -390,17 +488,18 @@ fn update_got_article_error(
     }
     _ -> {
       echo err
-      let user_messages =
-        list.append(model.user_messages, [
-          UserError(
-            user_message_id_next(model.user_messages),
-            "UNHANDLED ERROR while loading article (slug:"
-              <> slug
-              <> "): "
-              <> error_string,
-          ),
-        ])
-      #(Model(..model, user_messages:), effect.none())
+      // let user_messages =
+      //   list.append(model.user_messages, [
+      //     UserError(
+      //       user_message_id_next(model.user_messages),
+      //       "UNHANDLED ERROR while loading article (slug:"
+      //         <> slug
+      //         <> "): "
+      //         <> error_string,
+      //     ),
+      //   ])
+      // #(Model(..model, user_messages:), effect.none())
+      #(Model(..model, articles: Errored(err)), effect.none())
     }
   }
 }
@@ -434,10 +533,10 @@ fn view(model: Model) -> Element(Msg) {
     ],
     [
       view_header(model),
-      html.div(
-        [attr.class("fixed top-18 left-0 right-0")],
-        view_user_messages(model.user_messages),
-      ),
+      // html.div(
+      //   [attr.class("fixed top-18 left-0 right-0")],
+      //   view_user_messages(model.user_messages),
+      // ),
       html.main([attr.class("px-10 py-4 max-w-screen-md mx-auto")], {
         // Just like we would show different HTML based on some other state in the
         // model, we can also pattern match on our Route value to show different
@@ -445,33 +544,90 @@ fn view(model: Model) -> Element(Msg) {
         case model.route {
           Index -> view_index()
           Articles -> {
-            case dict.is_empty(model.articles) {
-              True ->
-                view_article_listing(
-                  dict.from_list([#("loading", article.loading_article())]),
-                )
-              False -> view_article_listing(model.articles)
+            case model.articles {
+              Loaded(articles) -> {
+                case dict.is_empty(articles) {
+                  True -> [view_error("got no articles from server")]
+                  False -> view_article_listing(articles)
+                }
+              }
+              Errored(err) -> [
+                view_h2(error_string.http_error(err)),
+                view_paragraph([
+                  article.Text(
+                    "We encountered an error while loading the articles. Try reloading the page..",
+                  ),
+                ]),
+              ]
+              Pending -> [
+                view_h2("loading..."),
+                view_paragraph([
+                  article.Text(
+                    "We are loading the articles.. Give us a moment.",
+                  ),
+                ]),
+              ]
+              NotInitialized -> [
+                view_h2("A bug.."),
+                view_paragraph([
+                  article.Text("no atempt to load articles made. This is a bug"),
+                ]),
+              ]
             }
           }
           ArticleBySlug(slug) -> {
-            case dict.is_empty(model.articles) {
-              True -> {
-                echo "no articles loaded"
-                view_article(article.loading_article())
-              }
-              False -> {
-                let article = dict.get(model.articles, slug)
+            case model.articles {
+              Loaded(articles) -> {
+                let article = dict.get(articles, slug)
                 case article {
                   Ok(article) -> view_article(article)
                   Error(_) -> view_not_found()
                 }
               }
+              Errored(err) -> [
+                view_h2(error_string.http_error(err)),
+                view_paragraph([
+                  article.Text(
+                    "We encountered an error while loading the articles and that includes this one. Try reloading the page..",
+                  ),
+                ]),
+              ]
+              Pending -> [
+                view_h2("loading..."),
+                view_paragraph([
+                  article.Text(
+                    "We are loading the articles.. Give us a moment.",
+                  ),
+                ]),
+              ]
+              NotInitialized -> [
+                view_h2("A bug.."),
+                view_paragraph([
+                  article.Text("no atempt to load articles made. This is a bug"),
+                ]),
+              ]
             }
           }
           ArticleBySlugEdit(slug) -> {
-            case dict.get(model.articles, slug) {
-              Ok(article) -> view_article_edit(article)
-              Error(_) -> view_not_found()
+            case model.articles {
+              Loaded(articles) -> {
+                case dict.is_empty(articles) {
+                  True -> {
+                    echo "article by slug: no articles loaded"
+                    view_article(article.loading_article())
+                  }
+                  False -> {
+                    let article = dict.get(articles, slug)
+                    case article {
+                      Ok(article) -> view_article_edit(article)
+                      Error(_) -> view_not_found()
+                    }
+                  }
+                }
+              }
+              Errored(err) -> [view_error(error_string.http_error(err))]
+              Pending -> [view_error("loading...")]
+              NotInitialized -> [view_error("no atempt to load articles made")]
             }
           }
           About -> view_about()
@@ -500,15 +656,15 @@ fn view_header(model: Model) -> Element(Msg) {
               html.text("jst.dev"),
             ]),
           ]),
-          html.div([], [
-            html.text(case model.user_messages {
-              [] -> ""
-              _ -> {
-                let num = list.length(model.user_messages)
-                "got " <> int.to_string(num) <> " messages"
-              }
-            }),
-          ]),
+          // html.div([], [
+          //   html.text(case model.user_messages {
+          //     [] -> ""
+          //     _ -> {
+          //       let num = list.length(model.user_messages)
+          //       "got " <> int.to_string(num) <> " messages"
+          //     }
+          //   }),
+          // ]),
           html.ul([attr.class("flex space-x-8 pr-2")], [
             view_header_link(
               current: model.route,
@@ -546,112 +702,112 @@ fn view_header_link(
 
 // VIEW MESSAGES ---------------------------------------------------------------
 
-fn view_user_messages(msgs) {
-  case msgs {
-    [] -> []
-    [msg, ..msgs] -> [view_user_message(msg), ..view_user_messages(msgs)]
-  }
-}
+// fn view_user_messages(msgs) {
+//   case msgs {
+//     [] -> []
+//     [msg, ..msgs] -> [view_user_message(msg), ..view_user_messages(msgs)]
+//   }
+// }
 
-fn view_user_message(msg: UserMessage) -> Element(Msg) {
-  case msg {
-    UserError(id, msg_text) -> {
-      html.div(
-        [
-          attr.class("rounded-md bg-red-50 p-4 absolute top-0 left-0 right-0"),
-          attr.id("user-message-" <> int.to_string(id)),
-        ],
-        [
-          html.div([attr.class("flex")], [
-            html.div([attr.class("shrink-0")], [html.text("ERROR")]),
-            html.div([attr.class("ml-3")], [
-              html.p([attr.class("text-sm font-medium text-red-800")], [
-                html.text(msg_text),
-              ]),
-            ]),
-            html.div([attr.class("ml-auto pl-3")], [
-              html.div([attr.class("-mx-1.5 -my-1.5")], [
-                html.button(
-                  [
-                    attr.class(
-                      "inline-flex rounded-md bg-red-50 p-1.5 text-red-500 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2 focus:ring-offset-orange-50",
-                    ),
-                    event.on_click(UserMessageDismissed(msg)),
-                  ],
-                  [html.text("Dismiss")],
-                ),
-              ]),
-            ]),
-          ]),
-        ],
-      )
-    }
+// fn view_user_message(msg: UserMessage) -> Element(Msg) {
+//   case msg {
+//     UserError(id, msg_text) -> {
+//       html.div(
+//         [
+//           attr.class("rounded-md bg-red-50 p-4 absolute top-0 left-0 right-0"),
+//           attr.id("user-message-" <> int.to_string(id)),
+//         ],
+//         [
+//           html.div([attr.class("flex")], [
+//             html.div([attr.class("shrink-0")], [html.text("ERROR")]),
+//             html.div([attr.class("ml-3")], [
+//               html.p([attr.class("text-sm font-medium text-red-800")], [
+//                 html.text(msg_text),
+//               ]),
+//             ]),
+//             html.div([attr.class("ml-auto pl-3")], [
+//               html.div([attr.class("-mx-1.5 -my-1.5")], [
+//                 html.button(
+//                   [
+//                     attr.class(
+//                       "inline-flex rounded-md bg-red-50 p-1.5 text-red-500 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2 focus:ring-offset-orange-50",
+//                     ),
+//                     event.on_click(UserMessageDismissed(msg)),
+//                   ],
+//                   [html.text("Dismiss")],
+//                 ),
+//               ]),
+//             ]),
+//           ]),
+//         ],
+//       )
+//     }
 
-    UserWarning(id, msg_text) -> {
-      html.div(
-        [
-          attr.class("rounded-md bg-green-50 p-4 relative top-0 left-0 right-0"),
-          attr.id("user-message-" <> int.to_string(id)),
-        ],
-        [
-          html.div([attr.class("flex")], [
-            html.div([attr.class("shrink-0")], [html.text("WARNING")]),
-            html.div([attr.class("ml-3")], [
-              html.p([attr.class("text-sm font-medium text-green-800")], [
-                html.text(msg_text),
-              ]),
-            ]),
-            html.div([attr.class("ml-auto pl-3")], [
-              html.div([attr.class("-mx-1.5 -my-1.5")], [
-                html.button(
-                  [
-                    attr.class(
-                      "inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50",
-                    ),
-                    event.on_click(UserMessageDismissed(msg)),
-                  ],
-                  [html.text("Dismiss")],
-                ),
-              ]),
-            ]),
-          ]),
-        ],
-      )
-    }
+//     UserWarning(id, msg_text) -> {
+//       html.div(
+//         [
+//           attr.class("rounded-md bg-green-50 p-4 relative top-0 left-0 right-0"),
+//           attr.id("user-message-" <> int.to_string(id)),
+//         ],
+//         [
+//           html.div([attr.class("flex")], [
+//             html.div([attr.class("shrink-0")], [html.text("WARNING")]),
+//             html.div([attr.class("ml-3")], [
+//               html.p([attr.class("text-sm font-medium text-green-800")], [
+//                 html.text(msg_text),
+//               ]),
+//             ]),
+//             html.div([attr.class("ml-auto pl-3")], [
+//               html.div([attr.class("-mx-1.5 -my-1.5")], [
+//                 html.button(
+//                   [
+//                     attr.class(
+//                       "inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50",
+//                     ),
+//                     event.on_click(UserMessageDismissed(msg)),
+//                   ],
+//                   [html.text("Dismiss")],
+//                 ),
+//               ]),
+//             ]),
+//           ]),
+//         ],
+//       )
+//     }
 
-    UserInfo(id, msg_text) -> {
-      html.div(
-        [
-          attr.class("border-l-4 border-yellow-400 bg-yellow-50 p-4"),
-          attr.id("user-message-" <> int.to_string(id)),
-        ],
-        [
-          html.div([attr.class("flex")], [
-            html.div([attr.class("shrink-0")], [html.text("INFO")]),
-            html.div([attr.class("ml-3")], [
-              html.p([attr.class("font-medium text-yellow-800")], [
-                html.text(msg_text),
-              ]),
-            ]),
-            html.div([attr.class("ml-auto pl-3")], [
-              html.div([attr.class("-mx-1.5 -my-1.5")], [
-                html.button(
-                  [
-                    attr.class(
-                      "inline-flex rounded-md bg-yellow-50 p-1.5 text-yellow-500 hover:bg-yellow-100 focus:outline-none focus:ring-2 focus:ring-yellow-600 focus:ring-offset-2 focus:ring-offset-yellow-50",
-                    ),
-                    event.on_click(UserMessageDismissed(msg)),
-                  ],
-                  [html.text("Dismiss")],
-                ),
-              ]),
-            ]),
-          ]),
-        ],
-      )
-    }
-  }
-}
+//     UserInfo(id, msg_text) -> {
+//       html.div(
+//         [
+//           attr.class("border-l-4 border-yellow-400 bg-yellow-50 p-4"),
+//           attr.id("user-message-" <> int.to_string(id)),
+//         ],
+//         [
+//           html.div([attr.class("flex")], [
+//             html.div([attr.class("shrink-0")], [html.text("INFO")]),
+//             html.div([attr.class("ml-3")], [
+//               html.p([attr.class("font-medium text-yellow-800")], [
+//                 html.text(msg_text),
+//               ]),
+//             ]),
+//             html.div([attr.class("ml-auto pl-3")], [
+//               html.div([attr.class("-mx-1.5 -my-1.5")], [
+//                 html.button(
+//                   [
+//                     attr.class(
+//                       "inline-flex rounded-md bg-yellow-50 p-1.5 text-yellow-500 hover:bg-yellow-100 focus:outline-none focus:ring-2 focus:ring-yellow-600 focus:ring-offset-2 focus:ring-offset-yellow-50",
+//                     ),
+//                     event.on_click(UserMessageDismissed(msg)),
+//                   ],
+//                   [html.text("Dismiss")],
+//                 ),
+//               ]),
+//             ]),
+//           ]),
+//         ],
+//       )
+//     }
+//   }
+// }
 
 // VIEW PAGES ------------------------------------------------------------------
 
