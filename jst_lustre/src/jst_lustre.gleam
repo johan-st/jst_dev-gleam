@@ -5,7 +5,6 @@ import article/article.{
 }
 import chat/chat
 import gleam/dict.{type Dict}
-import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -52,11 +51,11 @@ type RemoteData(a, err) {
   Errored(err)
 }
 
-type UserMessage {
-  UserError(id: Int, text: String)
-  UserWarning(id: Int, text: String)
-  UserInfo(id: Int, text: String)
-}
+// type UserMessage {
+//   UserError(id: Int, text: String)
+//   UserWarning(id: Int, text: String)
+//   UserInfo(id: Int, text: String)
+// }
 
 type Route {
   Index
@@ -160,40 +159,40 @@ type Msg {
   ChatMsg(msg: chat.Msg)
 }
 
-fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
-  let #(new_model, effect) = update(model, msg)
-  let persistent_model = fn(model: Model) -> PersistentModel {
-    PersistentModelV1(
-      version: 1,
-      articles: case model.articles {
-        NotInitialized -> []
-        Pending -> []
-        Loaded(articles) -> articles |> dict.to_list
-        Errored(_) -> []
-      }
-        |> list.map(fn(tuple) {
-          let #(_id, article) = tuple
-          article
-        }),
-    )
-  }
-  case msg {
-    ArticleMetaGot(_) -> {
-      persist.localstorage_set(
-        persist.model_localstorage_key,
-        persist.encode(persistent_model(new_model)),
-      )
-    }
-    ArticleGot(_, _) -> {
-      persist.localstorage_set(
-        persist.model_localstorage_key,
-        persist.encode(persistent_model(new_model)),
-      )
-    }
-    _ -> Nil
-  }
-  #(new_model, effect)
-}
+// fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
+//   let #(new_model, effect) = update(model, msg)
+//   let persistent_model = fn(model: Model) -> PersistentModel {
+//     PersistentModelV1(
+//       version: 1,
+//       articles: case model.articles {
+//         NotInitialized -> []
+//         Pending -> []
+//         Loaded(articles) -> articles |> dict.to_list
+//         Errored(_) -> []
+//       }
+//         |> list.map(fn(tuple) {
+//           let #(_id, article) = tuple
+//           article
+//         }),
+//     )
+//   }
+//   case msg {
+//     ArticleMetaGot(_) -> {
+//       persist.localstorage_set(
+//         persist.model_localstorage_key,
+//         persist.encode(persistent_model(new_model)),
+//       )
+//     }
+//     ArticleGot(_, _) -> {
+//       persist.localstorage_set(
+//         persist.model_localstorage_key,
+//         persist.encode(persistent_model(new_model)),
+//       )
+//     }
+//     _ -> Nil
+//   }
+//   #(new_model, effect)
+// }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
@@ -362,34 +361,34 @@ fn effect_navigation(model: Model, route: Route) -> Effect(Msg) {
   }
 }
 
-fn update_websocket_on_message(
-  model: Model,
-  data: String,
-) -> #(Model, Effect(Msg)) {
-  echo "message: " <> data
-  #(model, effect.none())
-}
+// fn update_websocket_on_message(
+//   model: Model,
+//   data: String,
+// ) -> #(Model, Effect(Msg)) {
+//   echo "message: " <> data
+//   #(model, effect.none())
+// }
 
-fn update_websocket_on_close(
-  model: Model,
-  data: String,
-) -> #(Model, Effect(Msg)) {
-  echo "close: " <> data
-  #(model, effect.none())
-}
+// fn update_websocket_on_close(
+//   model: Model,
+//   data: String,
+// ) -> #(Model, Effect(Msg)) {
+//   echo "close: " <> data
+//   #(model, effect.none())
+// }
 
-fn update_websocket_on_error(
-  model: Model,
-  data: String,
-) -> #(Model, Effect(Msg)) {
-  echo "error: " <> data
-  #(model, effect.none())
-}
+// fn update_websocket_on_error(
+//   model: Model,
+//   data: String,
+// ) -> #(Model, Effect(Msg)) {
+//   echo "error: " <> data
+//   #(model, effect.none())
+// }
 
-fn update_websocket_on_open(model: Model, data: String) -> #(Model, Effect(Msg)) {
-  echo "open: " <> data
-  #(model, effect.none())
-}
+// fn update_websocket_on_open(model: Model, data: String) -> #(Model, Effect(Msg)) {
+//   echo "open: " <> data
+//   #(model, effect.none())
+// }
 
 fn update_got_articles_metadata(
   model: Model,
@@ -414,7 +413,7 @@ fn update_got_articles_metadata(
       #(Model(..model, articles: Loaded(articles)), effect)
     }
     Error(err) -> {
-      let error_string = error_string.http_error(err)
+      // let error_string = error_string.http_error(err)
       // let user_messages =
       //   list.append(model.user_messages, [
       //     UserError(user_message_id_next(model.user_messages), error_string),
@@ -478,7 +477,13 @@ fn update_got_article_error(
               article.subtitle,
               error_string,
             )
-          #(Model(..model, articles: Errored(err)), effect.none())
+          #(
+            Model(
+              ..model,
+              articles: Loaded(dict.insert(articles, slug, article)),
+            ),
+            effect.none(),
+          )
         }
         Error(_) -> {
           echo "not found: " <> error_string.http_error(err)
@@ -514,12 +519,12 @@ fn articles_update(
   |> dict.merge(old_articles, _)
 }
 
-fn user_message_id_next(user_messages: List(UserMessage)) -> Int {
-  case list.last(user_messages) {
-    Ok(msg) -> msg.id + 1
-    Error(_) -> 0
-  }
-}
+// fn user_message_id_next(user_messages: List(UserMessage)) -> Int {
+//   case list.last(user_messages) {
+//     Ok(msg) -> msg.id + 1
+//     Error(_) -> 0
+//   }
+// }
 
 // VIEW ------------------------------------------------------------------------
 
@@ -858,7 +863,7 @@ fn view_article_listing(articles: Dict(String, Article)) -> List(Element(Msg)) {
     articles
     |> dict.values
     |> list.sort(fn(a, b) { string.compare(a.slug, b.slug) })
-    |> list.index_map(fn(article, index) {
+    |> list.index_map(fn(article, _index) {
       case article {
         ArticleFull(slug, _, title, leading, subtitle, _)
         | ArticleSummary(slug, _, title, leading, subtitle) -> {
@@ -1070,19 +1075,19 @@ fn view_h2(title: String) -> Element(msg) {
   )
 }
 
-fn view_h3(title: String) -> Element(msg) {
-  html.h3(
-    [attr.class("text-xl text-pink-600 font-light"), attr.class("article-h3")],
-    [html.text(title)],
-  )
-}
+// fn view_h3(title: String) -> Element(msg) {
+//   html.h3(
+//     [attr.class("text-xl text-pink-600 font-light"), attr.class("article-h3")],
+//     [html.text(title)],
+//   )
+// }
 
-fn view_h4(title: String) -> Element(msg) {
-  html.h4(
-    [attr.class("text-lg text-pink-600 font-light"), attr.class("article-h4")],
-    [html.text(title)],
-  )
-}
+// fn view_h4(title: String) -> Element(msg) {
+//   html.h4(
+//     [attr.class("text-lg text-pink-600 font-light"), attr.class("article-h4")],
+//     [html.text(title)],
+//   )
+// }
 
 fn view_paragraph(contents: List(Content)) -> Element(msg) {
   html.p([attr.class("pt-8")], view_article_content(contents))
