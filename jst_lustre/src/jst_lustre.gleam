@@ -8,6 +8,7 @@ import gleam/dict.{type Dict}
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import gleam/string
 import gleam/uri.{type Uri}
 import lustre
@@ -155,6 +156,14 @@ type Msg {
   // ARTICLE EDIT
   ArticleEditCancelled(article: Article)
   ArticleEditSaved(article: Article)
+  ArticleEditUpdated(article: Article)
+  // ARTICLE CONTENT EDIT
+  ArticleEditContentUpdate(index: Int, content: Content)
+  ArticleEditContentRemove(index: Int)
+  ArticleEditContentMoveUp(index: Int)
+  ArticleEditContentMoveDown(index: Int)
+  ArticleEditContentListItemAdd(index: Int)
+  ArticleEditContentListItemRemove(content_index: Int, item_index: Int)
   // CHAT
   ChatMsg(msg: chat.Msg)
 }
@@ -206,13 +215,36 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               #(Model(..model, route:), effect_navigation(model, route))
             }
             Error(_) -> {
-              let articles_drafts =
-                dict.insert(
-                  model.articles_drafts,
-                  slug,
-                  ArticleSummary(slug, 0, "", "", ""),
-                )
-              #(Model(..model, route:, articles_drafts:), effect.none())
+              // Check if we have a full article in the loaded articles
+              let maybe_full_article = case model.articles {
+                Loaded(articles) -> dict.get(articles, slug)
+                _ -> Error(Nil)
+              }
+
+              let articles_drafts = case maybe_full_article {
+                // If we have a full article, use it as the draft
+                Ok(full_article) ->
+                  dict.insert(model.articles_drafts, slug, full_article)
+                // Otherwise create a summary as before
+                Error(_) ->
+                  dict.insert(
+                    model.articles_drafts,
+                    slug,
+                    ArticleSummary(slug, 0, "", "", ""),
+                  )
+              }
+
+              // If we only have a summary, fetch the full article
+              let effect = case maybe_full_article {
+                Ok(ArticleSummary(_, _, _, _, _)) | Error(_) ->
+                  article.get_article(
+                    fn(result) { ArticleGot(slug, result) },
+                    slug,
+                  )
+                _ -> effect.none()
+              }
+
+              #(Model(..model, route:, articles_drafts:), effect)
             }
           }
         }
@@ -310,17 +342,235 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           ..model,
           articles_drafts: dict.delete(model.articles_drafts, article.slug),
           articles: Loaded(dict.insert(articles, article.slug, article)),
+          route: ArticleBySlug(article.slug),
+        ),
+        modem.push(route_url(ArticleBySlug(article.slug)), None, None),
+      )
+    }
+    ArticleEditUpdated(article:) -> {
+      #(
+        Model(
+          ..model,
+          articles_drafts: dict.insert(
+            model.articles_drafts,
+            article.slug,
+            article,
+          ),
         ),
         effect.none(),
       )
     }
-    // MESSAGES
-    // UserMessageDismissed(msg) -> {
-    //   let user_messages = list.filter(model.user_messages, fn(m) { m != msg })
-    //   #(Model(..model, user_messages:), effect.none())
-    // }
-    // CHAT
-    ChatMsg(msg:) -> {
+    // ARTICLE CONTENT EDIT
+    ArticleEditContentUpdate(index, content) -> {
+      case model.route {
+        ArticleBySlugEdit(slug) -> {
+          let assert Ok(draft) = model.articles_drafts |> dict.get(slug)
+          let assert ArticleFull(_, _, _, _, _, content_list) = draft
+          let updated_content = list_set(content_list, index, content)
+          let updated_article =
+            update_article_content_blocks(draft, updated_content)
+          #(
+            Model(
+              ..model,
+              articles_drafts: dict.insert(
+                model.articles_drafts,
+                slug,
+                updated_article,
+              ),
+            ),
+            effect.none(),
+          )
+        }
+        _ -> #(model, effect.none())
+      }
+    }
+
+    ArticleEditContentRemove(index) -> {
+      case model.route {
+        ArticleBySlugEdit(slug) -> {
+          let assert Ok(draft) = model.articles_drafts |> dict.get(slug)
+          let assert ArticleFull(_, _, _, _, _, content_list) = draft
+          let before = list.take(content_list, index)
+          let after = list.drop(content_list, index + 1)
+          let updated_content = list.append(before, after)
+          let updated_article =
+            update_article_content_blocks(draft, updated_content)
+          #(
+            Model(
+              ..model,
+              articles_drafts: dict.insert(
+                model.articles_drafts,
+                slug,
+                updated_article,
+              ),
+            ),
+            effect.none(),
+          )
+        }
+        _ -> #(model, effect.none())
+      }
+    }
+
+    ArticleEditContentMoveUp(index) -> {
+      case index {
+        0 -> #(model, effect.none())
+        _ -> {
+          case model.route {
+            ArticleBySlugEdit(slug) -> {
+              let assert Ok(draft) = model.articles_drafts |> dict.get(slug)
+              let assert ArticleFull(_, _, _, _, _, content_list) = draft
+              let item = list_at(content_list, index)
+              let prev_item = list_at(content_list, index - 1)
+
+              case item, prev_item {
+                Ok(current), Ok(previous) -> {
+                  let updated_content =
+                    content_list
+                    |> list_set(index, previous)
+                    |> list_set(index - 1, current)
+
+                  let updated_article =
+                    update_article_content_blocks(draft, updated_content)
+
+                  #(
+                    Model(
+                      ..model,
+                      articles_drafts: dict.insert(
+                        model.articles_drafts,
+                        slug,
+                        updated_article,
+                      ),
+                    ),
+                    effect.none(),
+                  )
+                }
+                _, _ -> #(model, effect.none())
+              }
+            }
+            _ -> #(model, effect.none())
+          }
+        }
+      }
+    }
+
+    ArticleEditContentMoveDown(index) -> {
+      case model.route {
+        ArticleBySlugEdit(slug) -> {
+          let assert Ok(draft) = model.articles_drafts |> dict.get(slug)
+          let assert ArticleFull(_, _, _, _, _, content_list) = draft
+          case index >= list.length(content_list) - 1 {
+            True -> #(model, effect.none())
+            False -> {
+              let item = list_at(content_list, index)
+              let next_item = list_at(content_list, index + 1)
+
+              case item, next_item {
+                Ok(current), Ok(next) -> {
+                  let updated_content =
+                    content_list
+                    |> list_set(index, next)
+                    |> list_set(index + 1, current)
+
+                  let updated_article =
+                    update_article_content_blocks(draft, updated_content)
+
+                  #(
+                    Model(
+                      ..model,
+                      articles_drafts: dict.insert(
+                        model.articles_drafts,
+                        slug,
+                        updated_article,
+                      ),
+                    ),
+                    effect.none(),
+                  )
+                }
+                _, _ -> #(model, effect.none())
+              }
+            }
+          }
+        }
+        _ -> #(model, effect.none())
+      }
+    }
+
+    ArticleEditContentListItemAdd(index) -> {
+      case model.route {
+        ArticleBySlugEdit(slug) -> {
+          let assert Ok(draft) = model.articles_drafts |> dict.get(slug)
+          let assert ArticleFull(_, _, _, _, _, content_list) = draft
+          let content_item = list_at(content_list, index)
+
+          case content_item {
+            Ok(article.List(items)) -> {
+              let updated_items = list.append(items, [article.Text("")])
+              let updated_content =
+                list_set(content_list, index, article.List(updated_items))
+              let updated_article =
+                update_article_content_blocks(draft, updated_content)
+
+              #(
+                Model(
+                  ..model,
+                  articles_drafts: dict.insert(
+                    model.articles_drafts,
+                    slug,
+                    updated_article,
+                  ),
+                ),
+                effect.none(),
+              )
+            }
+            _ -> #(model, effect.none())
+          }
+        }
+        _ -> #(model, effect.none())
+      }
+    }
+
+    ArticleEditContentListItemRemove(content_index, item_index) -> {
+      case model.route {
+        ArticleBySlugEdit(slug) -> {
+          let assert Ok(draft) = model.articles_drafts |> dict.get(slug)
+          let assert ArticleFull(_, _, _, _, _, content_list) = draft
+
+          let content_item = list_at(content_list, content_index)
+
+          case content_item {
+            Ok(article.List(items)) -> {
+              let before = list.take(items, item_index)
+              let after = list.drop(items, item_index + 1)
+              let updated_items = list.append(before, after)
+              let updated_content =
+                list_set(
+                  content_list,
+                  content_index,
+                  article.List(updated_items),
+                )
+              let updated_article =
+                update_article_content_blocks(draft, updated_content)
+
+              #(
+                Model(
+                  ..model,
+                  articles_drafts: dict.insert(
+                    model.articles_drafts,
+                    slug,
+                    updated_article,
+                  ),
+                ),
+                effect.none(),
+              )
+            }
+            _ -> #(model, effect.none())
+          }
+        }
+        _ -> #(model, effect.none())
+      }
+    }
+
+    ChatMsg(msg) -> {
       let #(chat_model, chat_effect) = chat.update(msg, model.chat)
       #(Model(..model, chat: chat_model), effect.map(chat_effect, ChatMsg))
     }
@@ -399,6 +649,13 @@ fn update_got_articles_metadata(
       let articles = article.list_to_dict(articles)
       let effect = case model.route {
         ArticleBySlug(_) -> {
+          echo "loading article content"
+          effect_navigation(
+            Model(..model, articles: Loaded(articles)),
+            model.route,
+          )
+        }
+        ArticleBySlugEdit(_) -> {
           echo "loading article content"
           effect_navigation(
             Model(..model, articles: Loaded(articles)),
@@ -624,7 +881,7 @@ fn view(model: Model) -> Element(Msg) {
                   False -> {
                     let article = dict.get(articles, slug)
                     case article {
-                      Ok(article) -> view_article_edit(article)
+                      Ok(article) -> view_article_edit(model, article)
                       Error(_) -> view_not_found()
                     }
                   }
@@ -930,31 +1187,272 @@ fn view_article_listing(articles: Dict(String, Article)) -> List(Element(Msg)) {
   [view_title("Articles", "articles"), ..articles]
 }
 
-fn view_article_edit(article: Article) -> List(Element(msg)) {
-  let content = case article {
-    ArticleSummary(slug, _revision, title, leading, subtitle) -> [
-      view_title(title, slug),
-      view_subtitle(subtitle, slug),
-      view_leading(leading, slug),
-      view_paragraph([article.Text("loading content..")]),
-    ]
-    ArticleFull(slug, _revision, title, leading, subtitle, content) -> [
-      view_title(title, slug),
-      view_subtitle(subtitle, slug),
-      view_leading(leading, slug),
-      ..view_article_content(content)
-    ]
-    ArticleWithError(slug, _revision, title, leading, subtitle, error) -> [
-      view_title(title, slug),
-      view_subtitle(subtitle, slug),
-      view_leading(leading, slug),
-      view_error(error),
-    ]
+fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
+  let draft_article = case model.articles_drafts |> dict.get(article.slug) {
+    Ok(draft) -> draft
+    Error(_) -> article
   }
+
+  // Ensure we're working with an ArticleFull that has content blocks
+  let draft_article = case draft_article {
+    ArticleSummary(slug, revision, title, leading, subtitle) ->
+      ArticleFull(slug, revision, title, leading, subtitle, [])
+    ArticleWithError(slug, revision, title, leading, subtitle, _) ->
+      ArticleFull(slug, revision, title, leading, subtitle, [])
+    article -> article
+  }
+
+  let #(title, subtitle, leading) = case draft_article {
+    ArticleSummary(_, _, title, leading, subtitle) -> #(
+      title,
+      subtitle,
+      leading,
+    )
+    ArticleFull(_, _, title, leading, subtitle, _) -> #(
+      title,
+      subtitle,
+      leading,
+    )
+    ArticleWithError(_, _, title, leading, subtitle, _) -> #(
+      title,
+      subtitle,
+      leading,
+    )
+  }
+  let assert Ok(index_uri) = uri.parse("/")
+
   [
-    html.article([attr.class("with-transition")], content),
-    html.p([attr.class("mt-14")], [view_link(Articles, "<- Go back?")]),
+    html.article([attr.class("with-transition")], [
+      html.div([attr.class("mb-4")], [
+        html.label(
+          [attr.class("block text-sm font-medium text-zinc-400 mb-1")],
+          [html.text("Title")],
+        ),
+        html.input([
+          attr.class(
+            "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 text-3xl text-pink-700 font-light",
+          ),
+          attr.value(title),
+          attr.id("edit-title-" <> article.slug),
+          event.on_input(fn(new_title) {
+            let updated_article =
+              update_article_field(draft_article, "title", new_title)
+            ArticleEditUpdated(updated_article)
+          }),
+        ]),
+      ]),
+      html.div([attr.class("mb-4")], [
+        html.label(
+          [attr.class("block text-sm font-medium text-zinc-400 mb-1")],
+          [html.text("Subtitle")],
+        ),
+        html.input([
+          attr.class(
+            "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 text-md text-zinc-500 font-light",
+          ),
+          attr.value(subtitle),
+          attr.id("edit-subtitle-" <> article.slug),
+          event.on_input(fn(new_subtitle) {
+            let updated_article =
+              update_article_field(draft_article, "subtitle", new_subtitle)
+            ArticleEditUpdated(updated_article)
+          }),
+        ]),
+      ]),
+      html.div([attr.class("mb-4")], [
+        html.label(
+          [attr.class("block text-sm font-medium text-zinc-400 mb-1")],
+          [html.text("Leading Text")],
+        ),
+        html.textarea(
+          [
+            attr.class(
+              "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 font-bold",
+            ),
+            attr.value(leading),
+            attr.id("edit-leading-" <> article.slug),
+            attr.rows(3),
+            event.on_input(fn(new_leading) {
+              let updated_article =
+                update_article_field(draft_article, "leading", new_leading)
+              ArticleEditUpdated(updated_article)
+            }),
+          ],
+          leading <> "maybe this is a test",
+        ),
+      ]),
+      // Content editor with support for different content types
+      case draft_article {
+        ArticleFull(_, _, _, _, _, content) ->
+          html.div([attr.class("mb-4")], [
+            html.label(
+              [attr.class("block text-sm font-medium text-zinc-400 mb-1")],
+              [html.text("Content")],
+            ),
+            // Content blocks container
+            html.div(
+              [attr.class("space-y-4 mb-4")],
+              list.index_map(content, fn(content_item, index) {
+                view_content_editor_block(content_item, index, article.slug)
+              }),
+            ),
+            // Add content buttons
+            html.div([attr.class("flex flex-wrap gap-2 mt-4")], [
+              view_add_content_button("Text", article.slug, fn() {
+                let updated_content = list.append(content, [article.Text("")])
+                let updated_article =
+                  update_article_content_blocks(draft_article, updated_content)
+                ArticleEditUpdated(updated_article)
+              }),
+              view_add_content_button("Heading", article.slug, fn() {
+                let updated_content =
+                  list.append(content, [article.Heading("")])
+                let updated_article =
+                  update_article_content_blocks(draft_article, updated_content)
+                ArticleEditUpdated(updated_article)
+              }),
+              view_add_content_button("List", article.slug, fn() {
+                let updated_content = list.append(content, [article.List([])])
+                let updated_article =
+                  update_article_content_blocks(draft_article, updated_content)
+                ArticleEditUpdated(updated_article)
+              }),
+              view_add_content_button("Block", article.slug, fn() {
+                let updated_content = list.append(content, [article.Block([])])
+                let updated_article =
+                  update_article_content_blocks(draft_article, updated_content)
+                ArticleEditUpdated(updated_article)
+              }),
+              view_add_content_button("Link", article.slug, fn() {
+                let updated_content =
+                  list.append(content, [article.Link(index_uri, "link_title")])
+                let updated_article =
+                  update_article_content_blocks(draft_article, updated_content)
+                ArticleEditUpdated(updated_article)
+              }),
+              view_add_content_button("External Link", article.slug, fn() {
+                let updated_content =
+                  list.append(content, [
+                    article.LinkExternal(index_uri, "link_title"),
+                  ])
+                let updated_article =
+                  update_article_content_blocks(draft_article, updated_content)
+                ArticleEditUpdated(updated_article)
+              }),
+              view_add_content_button("Image", article.slug, fn() {
+                let updated_content =
+                  list.append(content, [article.Image(index_uri, "")])
+                let updated_article =
+                  update_article_content_blocks(draft_article, updated_content)
+                ArticleEditUpdated(updated_article)
+              }),
+            ]),
+          ])
+        _ -> html.div([], [])
+      },
+      html.div([attr.class("flex justify-end gap-4 mt-6")], [
+        html.button(
+          [
+            attr.class(
+              "px-4 py-2 bg-zinc-700 text-zinc-300 rounded-md hover:bg-zinc-600",
+            ),
+            event.on_click(ArticleEditCancelled(draft_article)),
+          ],
+          [html.text("Cancel")],
+        ),
+        html.button(
+          [
+            attr.class(
+              "px-4 py-2 bg-pink-700 text-white rounded-md hover:bg-pink-600",
+            ),
+            event.on_click(ArticleEditSaved(draft_article)),
+          ],
+          [html.text("Save")],
+        ),
+      ]),
+    ]),
   ]
+}
+
+// Helper function to update article fields
+fn update_article_field(
+  article: Article,
+  field: String,
+  value: String,
+) -> Article {
+  case article {
+    ArticleSummary(slug, revision, title, leading, subtitle) -> {
+      case field {
+        "title" -> ArticleSummary(slug, revision, value, leading, subtitle)
+        "subtitle" -> ArticleSummary(slug, revision, title, leading, value)
+        "leading" -> ArticleSummary(slug, revision, title, value, subtitle)
+        _ -> article
+      }
+    }
+    ArticleFull(slug, revision, title, leading, subtitle, content) -> {
+      case field {
+        "title" ->
+          ArticleFull(slug, revision, value, leading, subtitle, content)
+        "subtitle" ->
+          ArticleFull(slug, revision, title, leading, value, content)
+        "leading" ->
+          ArticleFull(slug, revision, title, value, subtitle, content)
+        _ -> article
+      }
+    }
+    ArticleWithError(slug, revision, title, leading, subtitle, error) -> {
+      case field {
+        "title" ->
+          ArticleWithError(slug, revision, value, leading, subtitle, error)
+        "subtitle" ->
+          ArticleWithError(slug, revision, title, leading, value, error)
+        "leading" ->
+          ArticleWithError(slug, revision, title, value, subtitle, error)
+        _ -> article
+      }
+    }
+  }
+}
+
+// Helper function to update article content
+fn update_article_content(article: Article, content_text: String) -> Article {
+  // This is a simplified implementation - in a real app you'd parse the content text
+  // into proper Content structures
+  case article {
+    ArticleFull(slug, revision, title, leading, subtitle, _) -> {
+      let parsed_content = [article.Text(content_text)]
+      ArticleFull(slug, revision, title, leading, subtitle, parsed_content)
+    }
+    _ -> {
+      // Convert other article types to ArticleFull with the new content
+      let slug = article.slug
+      let revision = article.revision
+      let title = article.title
+      let leading = article.leading
+      let subtitle = article.subtitle
+      let parsed_content = [article.Text(content_text)]
+      ArticleFull(slug, revision, title, leading, subtitle, parsed_content)
+    }
+  }
+}
+
+// Helper function to convert content to string for editing
+fn content_to_string(content: List(Content)) -> String {
+  content
+  |> list.map(fn(c) {
+    case c {
+      article.Text(text) -> text
+      article.Image(url, alt) -> "image not implemented"
+      article.Block(_) -> "block not implemented"
+      article.Heading(_) -> "heading not implemented"
+      article.Link(_, _) -> "link not implemented"
+      article.LinkExternal(_, _) -> "link external not implemented"
+      article.List(_) -> "list not implemented"
+      article.Paragraph(_) -> "paragraph not implemented"
+      article.Unknown(_) -> "unknown not implemented"
+    }
+  })
+  |> string.join("\n\n")
 }
 
 fn view_article(article: Article) -> List(Element(msg)) {
@@ -1173,4 +1671,362 @@ fn view_article_content(contents: List(Content)) -> List(Element(msg)) {
     }
   }
   list.map(contents, view_content)
+}
+
+// Helper function to create add content buttons
+fn view_add_content_button(
+  label: String,
+  slug: String,
+  on_click_handler,
+) -> Element(Msg) {
+  html.button(
+    [
+      attr.class(
+        "px-3 py-1 bg-zinc-700 text-zinc-300 rounded-md hover:bg-zinc-600 text-sm",
+      ),
+      event.on_click(on_click_handler()),
+    ],
+    [html.text("+ " <> label)],
+  )
+}
+
+// Helper function to render content editor blocks based on content type
+fn view_content_editor_block(
+  content_item: Content,
+  index: Int,
+  slug: String,
+) -> Element(Msg) {
+  html.div([attr.class("border border-zinc-700 rounded-md p-3 bg-zinc-800")], [
+    // Content type label and controls
+    html.div([attr.class("flex justify-between items-center mb-2")], [
+      html.span([attr.class("text-xs text-zinc-500")], [
+        html.text(content_type_label(content_item)),
+      ]),
+      html.div([attr.class("flex gap-2")], [
+        // Move up button
+        html.button(
+          [
+            attr.class(
+              "text-xs px-2 py-1 bg-zinc-700 rounded hover:bg-zinc-600",
+            ),
+            event.on_click(ArticleEditContentMoveUp(index)),
+            attr.disabled(index == 0),
+          ],
+          [html.text("↑")],
+        ),
+        // Move down button
+        html.button(
+          [
+            attr.class(
+              "text-xs px-2 py-1 bg-zinc-700 rounded hover:bg-zinc-600",
+            ),
+            event.on_click(ArticleEditContentMoveDown(index)),
+          ],
+          [html.text("↓")],
+        ),
+        // Delete button
+        html.button(
+          [
+            attr.class("text-xs px-2 py-1 bg-red-900 rounded hover:bg-red-800"),
+            event.on_click(ArticleEditContentRemove(index)),
+          ],
+          [html.text("×")],
+        ),
+      ]),
+    ]),
+    // Content editor based on type
+    case content_item {
+      article.Text(text) ->
+        html.textarea(
+          [
+            attr.class(
+              "w-full bg-zinc-900 border border-zinc-700 rounded-md p-2",
+            ),
+            attr.rows(3),
+            attr.value(text),
+            event.on_input(fn(new_text) {
+              ArticleEditContentUpdate(index, article.Text(new_text))
+            }),
+          ],
+          text,
+        )
+
+      article.Heading(text) ->
+        html.input([
+          attr.class(
+            "w-full bg-zinc-900 border border-zinc-700 rounded-md p-2 text-xl text-pink-600",
+          ),
+          attr.value(text),
+          event.on_input(fn(new_text) {
+            ArticleEditContentUpdate(index, article.Heading(new_text))
+          }),
+        ])
+
+      article.Link(url, title) ->
+        html.div([attr.class("space-y-2")], [
+          html.input([
+            attr.class(
+              "w-full bg-zinc-900 border border-zinc-700 rounded-md p-2",
+            ),
+            attr.placeholder("Link text"),
+            attr.value(title),
+            event.on_input(fn(new_title) {
+              ArticleEditContentUpdate(index, article.Link(url, new_title))
+            }),
+          ]),
+          html.input([
+            attr.class(
+              "w-full bg-zinc-900 border border-zinc-700 rounded-md p-2",
+            ),
+            attr.placeholder("URL (e.g., /articles)"),
+            attr.value(uri.to_string(url)),
+            event.on_input(fn(new_url) {
+              case uri.parse(new_url) {
+                Ok(parsed_url) ->
+                  ArticleEditContentUpdate(
+                    index,
+                    article.Link(parsed_url, title),
+                  )
+                Error(_) ->
+                  ArticleEditContentUpdate(index, article.Link(url, title))
+              }
+            }),
+          ]),
+        ])
+
+      article.LinkExternal(url, title) ->
+        html.div([attr.class("space-y-2")], [
+          html.input([
+            attr.class(
+              "w-full bg-zinc-900 border border-zinc-700 rounded-md p-2",
+            ),
+            attr.placeholder("Link text"),
+            attr.value(title),
+            event.on_input(fn(new_title) {
+              ArticleEditContentUpdate(
+                index,
+                article.LinkExternal(url, new_title),
+              )
+            }),
+          ]),
+          html.input([
+            attr.class(
+              "w-full bg-zinc-900 border border-zinc-700 rounded-md p-2",
+            ),
+            attr.placeholder("URL (e.g., https://example.com)"),
+            attr.value(uri.to_string(url)),
+            event.on_input(fn(new_url) {
+              case uri.parse(new_url) {
+                Ok(parsed_url) ->
+                  ArticleEditContentUpdate(
+                    index,
+                    article.LinkExternal(parsed_url, title),
+                  )
+                Error(_) ->
+                  ArticleEditContentUpdate(
+                    index,
+                    article.LinkExternal(url, title),
+                  )
+              }
+            }),
+          ]),
+        ])
+
+      article.Image(url, alt) ->
+        html.div([attr.class("space-y-2")], [
+          html.input([
+            attr.class(
+              "w-full bg-zinc-900 border border-zinc-700 rounded-md p-2",
+            ),
+            attr.placeholder("Alt text"),
+            attr.value(alt),
+            event.on_input(fn(new_alt) {
+              ArticleEditContentUpdate(index, article.Image(url, new_alt))
+            }),
+          ]),
+          html.input([
+            attr.class(
+              "w-full bg-zinc-900 border border-zinc-700 rounded-md p-2",
+            ),
+            attr.placeholder("Image URL"),
+            attr.value(uri.to_string(url)),
+            event.on_input(fn(new_url) {
+              case uri.parse(new_url) {
+                Ok(parsed_url) ->
+                  ArticleEditContentUpdate(
+                    index,
+                    article.Image(parsed_url, alt),
+                  )
+                Error(_) ->
+                  ArticleEditContentUpdate(index, article.Image(url, alt))
+              }
+            }),
+          ]),
+        ])
+
+      article.List(items) ->
+        html.div(
+          [attr.class("space-y-2")],
+          list.append(
+            list.index_map(items, fn(item, item_index) {
+              html.div([attr.class("flex gap-2")], [
+                html.input([
+                  attr.class(
+                    "w-full bg-zinc-900 border border-zinc-700 rounded-md p-2",
+                  ),
+                  attr.value(content_to_string([item])),
+                  event.on_input(fn(new_text) {
+                    let updated_items =
+                      list_set(items, item_index, article.Text(new_text))
+                    ArticleEditContentUpdate(index, article.List(updated_items))
+                  }),
+                ]),
+                html.button(
+                  [
+                    attr.class("px-2 bg-zinc-700 rounded hover:bg-zinc-600"),
+                    event.on_click(ArticleEditContentListItemRemove(
+                      index,
+                      item_index,
+                    )),
+                  ],
+                  [html.text("×")],
+                ),
+              ])
+            }),
+            [
+              html.button(
+                [
+                  attr.class(
+                    "w-full mt-2 px-2 py-1 bg-zinc-700 text-zinc-300 rounded hover:bg-zinc-600 text-sm",
+                  ),
+                  event.on_click(ArticleEditContentListItemAdd(index)),
+                ],
+                [html.text("+ Add Item")],
+              ),
+            ],
+          ),
+        )
+
+      article.Block(contents) ->
+        html.div([attr.class("space-y-2")], [
+          html.div(
+            [attr.class("bg-zinc-900 border border-zinc-700 rounded-md p-3")],
+            [
+              html.div([attr.class("mb-2 text-xs text-zinc-500")], [
+                html.text("Block Contents"),
+              ]),
+              // Nested content blocks
+              html.div(
+                [attr.class("space-y-3")],
+                list.index_map(contents, fn(nested_content, nested_index) {
+                  html.div([attr.class("flex gap-2")], [
+                    html.textarea(
+                      [
+                        attr.class(
+                          "w-full bg-zinc-950 border border-zinc-700 rounded-md p-2",
+                        ),
+                        attr.rows(2),
+                        attr.value(content_to_string([nested_content])),
+                        event.on_input(fn(new_text) {
+                          let updated_contents =
+                            list_set(
+                              contents,
+                              nested_index,
+                              article.Text(new_text),
+                            )
+                          ArticleEditContentUpdate(
+                            index,
+                            article.Block(updated_contents),
+                          )
+                        }),
+                      ],
+                      content_to_string([nested_content]),
+                    ),
+                    html.button(
+                      [
+                        attr.class("px-2 bg-zinc-700 rounded hover:bg-zinc-600"),
+                        event.on_click(ArticleEditContentListItemRemove(
+                          index,
+                          nested_index,
+                        )),
+                      ],
+                      [html.text("×")],
+                    ),
+                  ])
+                }),
+              ),
+              html.button(
+                [
+                  attr.class(
+                    "w-full mt-2 px-2 py-1 bg-zinc-700 text-zinc-300 rounded hover:bg-zinc-600 text-sm",
+                  ),
+                  event.on_click(ArticleEditContentListItemAdd(index)),
+                ],
+                [html.text("+ Add Block Item")],
+              ),
+            ],
+          ),
+        ])
+
+      _ ->
+        html.div([], [
+          html.text(
+            "Unsupported content type: " <> content_type_label(content_item),
+          ),
+        ])
+    },
+  ])
+}
+
+// Helper function to get a label for content type
+fn content_type_label(content: Content) -> String {
+  case content {
+    article.Text(_) -> "Text"
+    article.Heading(_) -> "Heading"
+    article.Link(_, _) -> "Link"
+    article.LinkExternal(_, _) -> "External Link"
+    article.Image(_, _) -> "Image"
+    article.List(_) -> "List"
+    article.Block(_) -> "Block"
+    article.Paragraph(_) -> "Paragraph"
+    article.Unknown(type_) -> "Unknown: " <> type_
+  }
+}
+
+// Helper function to update article content blocks
+fn update_article_content_blocks(
+  article: Article,
+  content: List(Content),
+) -> Article {
+  case article {
+    ArticleFull(slug, revision, title, leading, subtitle, _) ->
+      ArticleFull(slug, revision, title, leading, subtitle, content)
+    _ -> {
+      // Convert other article types to ArticleFull with the new content
+      let slug = article.slug
+      let revision = article.revision
+      let title = article.title
+      let leading = article.leading
+      let subtitle = article.subtitle
+      ArticleFull(slug, revision, title, leading, subtitle, content)
+    }
+  }
+}
+
+// Add this helper function near your other helpers
+fn list_set(list: List(a), index: Int, value: a) -> List(a) {
+  list
+  |> list.index_map(fn(item, i) {
+    case i == index {
+      True -> value
+      False -> item
+    }
+  })
+}
+
+fn list_at(list: List(a), index: Int) -> Result(a, Nil) {
+  list
+  |> list.index_map(fn(item, i) { #(item, i) })
+  |> list.find(fn(pair) { pair.1 == index })
+  |> result.map(fn(pair) { pair.0 })
 }
