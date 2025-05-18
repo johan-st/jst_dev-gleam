@@ -1,13 +1,20 @@
+import article/content.{
+  type Content, Block, Heading, Image, Link, LinkExternal, List, Paragraph, Text,
+  Unknown,
+}
+import article/draft.{type Draft}
 import gleam/dict.{type Dict}
 import gleam/dynamic/decode
-import gleam/int
+import gleam/http as gleam_http
+import gleam/http/request
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/uri
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
-import utils/http
+import utils/http.{type HttpError}
+import utils/remote_data.{type RemoteData}
 
 pub type Article {
   ArticleSummary(
@@ -33,18 +40,15 @@ pub type Article {
     subtitle: String,
     error: String,
   )
-}
-
-pub type Content {
-  Text(String)
-  Block(List(Content))
-  Heading(String)
-  Paragraph(List(Content))
-  Link(uri.Uri, String)
-  LinkExternal(uri.Uri, String)
-  Image(uri.Uri, String)
-  List(List(Content))
-  Unknown(String)
+  ArticleFullWithDraft(
+    slug: String,
+    revision: Int,
+    title: String,
+    leading: String,
+    subtitle: String,
+    content: List(Content),
+    draft: Draft,
+  )
 }
 
 // Fetch ------------------------------------------------------------------------
@@ -57,6 +61,18 @@ pub fn get_article(msg, slug: String) -> Effect(a) {
 pub fn get_metadata_all(msg) -> Effect(a) {
   let url = "http://127.0.0.1:8080/api/article"
   http.get(url, http.expect_json(metadata_decoder(), msg))
+}
+
+pub fn save_article(msg, article: Article) -> Effect(a) {
+  let url = "http://127.0.0.1:8080/api/article/" <> article.slug
+  let body = article_encoder(article) |> json.to_string
+  let request =
+    request.new()
+    |> request.set_method(gleam_http.Put)
+    |> request.set_path(url)
+    |> request.set_body(body)
+
+  http.send(request, http.expect_json(article_decoder(), msg))
 }
 
 fn content_decoder() -> decode.Decoder(Content) {
@@ -216,6 +232,25 @@ pub fn article_encoder(article: Article) -> json.Json {
         #("error", json.string(error)),
       ])
     }
+    ArticleFullWithDraft(
+      slug,
+      revision,
+      title,
+      leading,
+      subtitle,
+      content,
+      _draft,
+    ) -> {
+      json.object([
+        #("type", json.string("article_v1")),
+        #("revision", json.int(revision)),
+        #("slug", json.string(slug)),
+        #("title", json.string(title)),
+        #("leading", json.string(leading)),
+        #("subtitle", json.string(subtitle)),
+        #("content", json.array(content, of: content_encoder)),
+      ])
+    }
   }
 }
 
@@ -276,6 +311,21 @@ pub fn content_encoder(content: Content) -> json.Json {
       ])
     }
   }
+}
+
+// Draft ------------------------------------------------------------------------
+
+pub fn draft_update(article: Article, draft: Draft) -> Article {
+  let assert ArticleFullWithDraft(
+    slug,
+    revision,
+    title,
+    leading,
+    subtitle,
+    content,
+    _,
+  ) = article
+  ArticleFullWithDraft(slug, revision, title, leading, subtitle, content, draft)
 }
 
 // Utils -----------------------------------------------------------------------

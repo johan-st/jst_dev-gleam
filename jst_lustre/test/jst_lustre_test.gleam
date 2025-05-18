@@ -1,7 +1,6 @@
 // In test/yourapp_test.gleam
-import article/article.{
-  ArticleFull, ArticleSummary, ArticleWithError, Heading, Paragraph, Text,
-}
+import article/article.{ArticleFull, ArticleSummary, ArticleWithError}
+import article/content.{Heading, Paragraph, Text}
 import gleam/dynamic
 import gleam/dynamic/decode
 import gleeunit
