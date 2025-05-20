@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply text-base antialiased;
+    @apply bg-zinc-900;
+    @apply text-zinc-400;
+  }
+}
+
+@layer theme {
+  .animate-break {
+    animation: break 0.15s ease-out 1 forwards;
+  }
+  .animate-break--mirror {
+    animation: break--mirror 0.15s ease-out 0.08s 1 forwards;
+  }
+  @keyframes break {
+    0% {
+      transform: rotate(0deg) translateY(0px);
+    }
+    100% {
+      transform: rotate(-1deg) translateY(4px);
+    }
+  }
+  @keyframes break--mirror {
+    0% {
+      transform: rotate(0deg) translateY(0px);
+    }
+    33.33%,
+    66.66% {
+      transform: rotate(1deg) translateY(-4px);
+    }
+    100% {
+      transform: rotate(3deg) translateY(8px);
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{
+    "path": "articles",
+    "type": "application/json",
+    "content": "{\"articles\": [{\"id\": 1,\"slug\": \"nats-all-the-way-down\",\"revision\": 1,\"title\": \"NATS all the way down\",\"subtitle\": \"..or, how to replace your stack with one tool.\",\"leading\": \"I've fallen in love several times these last few years since I started writing code for a living. A few highlights are Docker, Elm, functional programming, Go, simple and portable file formats, my son, markdown, gleam and now NATS. Each infatuation has taught me something important about a technology and usually also about myself.\"},{\"id\": 2,\"slug\": \"title-missing-article\",\"revision\": 12,\"title\": \"title missing article\",\"subtitle\": \"..or, how to not be there\",\"leading\": \"This article is missing altoghether... Triggering an error \"},{\"id\": 3,\"slug\": \"unsupported-format\",\"revision\": 4,\"title\": \"unsupported format\",\"subtitle\": \"..or, dealing with the unknown\",\"leading\": \"This article contains unsuportent content types\"}]}"
+}
