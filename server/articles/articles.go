@@ -84,7 +84,7 @@ const (
 	ContentList         ContentType = "list"
 )
 
-// --- GENERATORS ---
+// Text creates a Content block of type ContentText with the specified text.
 
 func Text(text string) Content {
 	return Content{
@@ -93,6 +93,7 @@ func Text(text string) Content {
 	}
 }
 
+// Block creates a Content block of type ContentBlock containing the provided child content elements.
 func Block(contents ...Content) Content {
 	return Content{
 		Type:    ContentBlock,
@@ -100,6 +101,7 @@ func Block(contents ...Content) Content {
 	}
 }
 
+// Heading creates a Content block of type ContentHeading with the specified text.
 func Heading(text string) Content {
 	return Content{
 		Type: ContentHeading,
@@ -107,6 +109,7 @@ func Heading(text string) Content {
 	}
 }
 
+// Paragraph creates a Content block of type ContentParagraph containing the provided content elements.
 func Paragraph(contents ...Content) Content {
 	return Content{
 		Type:    ContentParagraph,
@@ -114,6 +117,7 @@ func Paragraph(contents ...Content) Content {
 	}
 }
 
+// Link creates a Content block representing an internal link with the specified URL and display text.
 func Link(url string, text string) Content {
 	return Content{
 		Type: ContentLink,
@@ -122,6 +126,7 @@ func Link(url string, text string) Content {
 	}
 }
 
+// LinkExternal creates a Content block representing an external hyperlink with the given URL and display text.
 func LinkExternal(url string, text string) Content {
 	return Content{
 		Type: ContentLinkExternal,
@@ -129,6 +134,7 @@ func LinkExternal(url string, text string) Content {
 		Text: text,
 	}
 }
+// Image creates a Content block of type image with the specified URL and alt text.
 func Image(url string, alt string) Content {
 	return Content{
 		Type: ContentImage,
@@ -137,6 +143,7 @@ func Image(url string, alt string) Content {
 	}
 }
 
+// List creates a Content block of type ContentList containing the provided content items.
 func List(contents ...Content) Content {
 	return Content{
 		Type:    ContentList,
@@ -146,7 +153,8 @@ func List(contents ...Content) Content {
 
 // --- REPO ---
 
-// Creates a new ArticleRepo. This includes a nats kv store.
+// Repo initializes and returns an ArticleRepo backed by a JetStream key-value store.
+// Returns an error if the key-value store cannot be set up.
 func Repo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (ArticleRepo, error) {
 	kv, err := setup(ctx, nc)
 	if err != nil {
@@ -255,7 +263,9 @@ func (r *articleRepo) WatchAll() (jetstream.KeyWatcher, error) {
 
 // --- REPO WITH IN MEM CACHE ---
 
-// Wraps an ArticleRepo and adds an in-memory cache.
+// WithInMemCache wraps an ArticleRepoWithWatchAll with an in-memory cache that is kept in sync with JetStream updates.
+// It returns a new ArticleRepo instance that serves reads from the cache and propagates writes to the underlying repository.
+// The cache is updated in real time using a background goroutine that listens for key-value changes.
 func WithInMemCache(repo ArticleRepoWithWatchAll, l *jst_log.Logger) (ArticleRepo, error) {
 
 	repoWrapped := &articleRepoInMem{
@@ -374,7 +384,9 @@ func (r *articleRepoInMem) updater(ctx context.Context, w jetstream.KeyWatcher, 
 
 // --- SETUP ---
 
-// set up key-value store used for the articles.
+// setup initializes and returns a JetStream key-value store bucket named "article" for storing articles in JSON format.
+// The bucket is configured with a 5MB maximum value size, 64 history entries, and file storage.
+// Returns the created key-value store or an error if initialization fails.
 func setup(ctx context.Context, nc *nats.Conn) (jetstream.KeyValue, error) {
 	js, err := jetstream.New(nc)
 	if err != nil {

@@ -78,6 +78,8 @@ type WhoProlog struct {
 	l  *jst_log.Logger
 }
 
+// NewProlog initializes a WhoProlog instance with an embedded Prolog database for access control.
+// It loads the Prolog rules into a new interpreter and returns the configured WhoProlog or an error if initialization fails.
 func NewProlog(l *jst_log.Logger) (*WhoProlog, error) {
 	l.Debug("Initializing Prolog interpreter")
 	p := prolog.New(nil, nil)

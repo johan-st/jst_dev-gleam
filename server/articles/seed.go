@@ -1,5 +1,6 @@
 package articles
 
+// NatsAllTheWayDown returns an Article containing a narrative about adopting NATS as a messaging system, including reflections on its impact and usage in Go applications.
 func NatsAllTheWayDown() Article {
 	return Article{
 		StructVersion: 1,
@@ -32,6 +33,7 @@ func NatsAllTheWayDown() Article {
 	}
 }
 
+// TestArticle returns a sample Article struct demonstrating various content types, including headings, paragraphs, internal and external links, and nested lists.
 func TestArticle() Article {
 	return Article{
 		StructVersion: 1,
