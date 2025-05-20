@@ -16,6 +16,9 @@ type Conf struct {
 	ListenOnLocalhost bool
 }
 
+// EmbeddedServer starts an embedded NATS server with JetStream enabled and returns a client connection.
+// The server is configured according to the provided Conf struct and is automatically shut down when the context is canceled.
+// Returns a connected NATS client or an error if initialization, startup, or subscription setup fails.
 func EmbeddedServer(
 	ctx context.Context,
 	conf Conf,
@@ -86,6 +89,9 @@ func EmbeddedServer(
 	return nc, nil
 }
 
+// subscriptions registers NATS message handlers for "ping" and "stats" subjects on the provided connection.
+// The "ping" handler responds with "pong", and the "stats" handler responds with formatted connection statistics.
+// Returns an error if subscription setup fails.
 func subscriptions(nc *nats.Conn, l *jst_log.Logger) error {
 	var (
 		err   error

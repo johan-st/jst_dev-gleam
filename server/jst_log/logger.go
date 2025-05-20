@@ -50,6 +50,7 @@ type Logger struct {
 	children    []*Logger
 }
 
+// NewLogger creates a new Logger instance with the specified application name and subject configuration. The logger starts with the Info level, no NATS connection, and empty breadcrumbs and children.
 func NewLogger(appName string, subjects LoggerSubjects) *Logger {
 
 	logger := &Logger{
@@ -82,6 +83,7 @@ func (l *Logger) IsConnected() bool {
 	return l.nc != nil
 }
 
+// DefaultSubjects returns a LoggerSubjects struct with default subject strings for base and each log level.
 func DefaultSubjects() LoggerSubjects {
 	return LoggerSubjects{
 		base:  "log",
@@ -161,6 +163,8 @@ func (l *Logger) log(level Level, msg string, args ...any) {
 	}
 }
 
+// levelFromString parses a string and returns the corresponding Level constant.
+// Returns an error if the input does not match a known log level.
 func levelFromString(level string) (Level, error) {
 	switch strings.ToLower(level) {
 	case "debug":

@@ -25,6 +25,8 @@ type httpServer struct {
 //go:embed static
 var embedded embed.FS
 
+// New initializes and returns a new httpServer instance with embedded static files and an article repository.
+// Returns nil if the static files or article repository cannot be initialized.
 func New(ctx context.Context, nc *nats.Conn, l jst_log.Logger) *httpServer {
 	fs, err := fs.Sub(embedded, "static")
 	if err != nil {

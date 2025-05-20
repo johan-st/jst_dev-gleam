@@ -24,6 +24,8 @@ const (
 	SHARED_ENV_jwtSecret = "jst_dev_secret"
 )
 
+// main is the entry point of the server application, initializing the context and running the server.
+// If an error occurs during startup or execution, it prints the error to standard error and exits with status code 1.
 func main() {
 	ctx := context.Background()
 	if err := run(
@@ -40,7 +42,9 @@ func main() {
 	}
 }
 
-// isolating run enables easier testing and testing in perallell
+// run initializes and starts all core services, manages their lifecycle, and handles graceful shutdown on interrupt signals.
+// 
+// It loads configuration, sets up logging, starts embedded messaging, blog, HTTP, and user management services, and waits for OS interrupts to trigger a coordinated shutdown. Returns an error if any service fails to initialize or start.
 func run(
 	ctx context.Context,
 	// args []string, // The arguments passed in when executing your program. It’s also used for parsing flags.
@@ -168,6 +172,8 @@ func run(
 	return nil
 }
 
+// initDefaultUser creates a default user by sending a request over NATS and returns a cleanup function to delete the user.
+// If user creation fails, it returns nil. The cleanup function publishes a delete request for the created user.
 func initDefaultUser(l *jst_log.Logger, nc *nats.Conn) func() {
 	type userCreateReq struct {
 		Username string `json:"username"`

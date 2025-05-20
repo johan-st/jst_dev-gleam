@@ -155,7 +155,8 @@ type JwtClaims struct {
 //
 // This is ment to be imported and used outside of the who service.
 //
-//	subject, permissions, err := JwtVerify(secret, tokenStr)
+// JwtVerify verifies a JWT token using the provided secret and returns the subject and associated permissions.
+// Returns an error if the token is invalid or the claims cannot be parsed.
 func JwtVerify(secret, tokenStr string) (string, []Permission, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &JwtClaims{}, func(token *jwt.Token) (any, error) {
 		return secret, nil

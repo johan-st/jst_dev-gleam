@@ -28,6 +28,8 @@ type BlogArticle struct {
 	Content string `json:"content"`
 }
 
+// New initializes a Blog instance with JetStream using the provided NATS connection and logger.
+// Returns the Blog or an error if JetStream setup fails.
 func New(nc *nats.Conn, l *jst_log.Logger) (*Blog, error) {
 	// Create JetStream streams
 	js, err := jetstream.New(nc)

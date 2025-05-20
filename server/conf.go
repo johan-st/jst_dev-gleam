@@ -7,6 +7,7 @@ type GlobalConfig struct {
 	Talk talk.Conf
 }
 
+// loadConf returns a GlobalConfig instance with default settings for the talk component.
 func loadConf() (*GlobalConfig, error) {
 
 	conf := &GlobalConfig{

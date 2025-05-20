@@ -60,6 +60,9 @@ type Conf struct {
 	Logger    *jst_log.Logger
 }
 
+// New creates a new Who service instance with the provided configuration.
+// It validates the JWT secret length, initializes the password hash with a fixed salt, and sets up the service fields.
+// Returns the initialized Who instance or an error if configuration is invalid.
 func New(c *Conf) (*Who, error) {
 	var (
 		err  error

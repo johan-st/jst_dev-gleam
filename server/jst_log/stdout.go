@@ -24,6 +24,9 @@ type StdOutService struct {
 	level LogLevel
 }
 
+// StdOut creates a StdOutService that subscribes to NATS subjects for various log levels and prints received log messages to standard output if they meet the configured log level threshold.
+//
+// Returns the initialized StdOutService.
 func StdOut(nc *nats.Conn, base string, conf LoggerSubjects, level LogLevel) *StdOutService {
 	svc := &StdOutService{nc: nc, base: base, conf: conf, level: level}
 
