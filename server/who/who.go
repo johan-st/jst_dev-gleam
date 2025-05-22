@@ -19,6 +19,7 @@ import (
 	"jst_dev/server/who/api"
 )
 
+const UserKey = "who_user"
 const hashSalt = "jst_dev_salt"
 const jwtExpiresAfterTime = time.Hour * 12
 
@@ -43,13 +44,9 @@ type Who struct {
 }
 
 type User struct {
-	Version  int
-	ID       string
-	Username string
-	Email    string
+	api.User
 
 	// private
-	permissions  []api.Permission
 	passwordHash string
 	revision     uint64
 }
@@ -283,7 +280,7 @@ func (w *Who) handleUserCreate() micro.HandlerFunc {
 			ID:          user.ID,
 			Username:    user.Username,
 			Email:       user.Email,
-			Permissions: user.permissions,
+			Permissions: user.Permissions,
 		}
 		req.RespondJSON(respData)
 	}
@@ -343,7 +340,7 @@ func (w *Who) handleUserGet() micro.HandlerFunc {
 			ID:          user.ID,
 			Username:    user.Username,
 			Email:       user.Email,
-			Permissions: user.permissions,
+			Permissions: user.Permissions,
 		}
 		req.RespondJSON(respData)
 	}
@@ -646,13 +643,14 @@ func (w *Who) userCreate(username, email, password string) (*User, error) {
 	}
 
 	passwordHash = w.hash.Sum([]byte(password))
-
 	user = &User{
-		Version:      1,
-		ID:           uuid.New().String(),
-		Username:     username,
-		Email:        email,
-		permissions:  []api.Permission{},
+		User: api.User{
+			Version:     1,
+			ID:          uuid.New().String(),
+			Username:    username,
+			Email:       email,
+			Permissions: []api.Permission{},
+		},
 		passwordHash: hex.EncodeToString(passwordHash),
 	}
 	userBytes, err = json.Marshal(user)
@@ -693,7 +691,7 @@ func (w *Who) userByEmail(email string) *User {
 }
 
 func (w *Who) permGranted(user *User, perm api.Permission) bool {
-	return slices.Contains(user.permissions, perm)
+	return slices.Contains(user.Permissions, perm)
 }
 
 func (w *Who) userAddPermission(user *User, perm api.Permission) error {
@@ -703,12 +701,12 @@ func (w *Who) userAddPermission(user *User, perm api.Permission) error {
 	if w.permGranted(user, perm) {
 		return fmt.Errorf("permission already exists")
 	}
-	user.permissions = append(user.permissions, perm)
+	user.Permissions = append(user.Permissions, perm)
 	return nil
 }
 
 func (w *Who) userRemovePermission(user *User, perm api.Permission) error {
-	user.permissions = slices.DeleteFunc(user.permissions, func(p api.Permission) bool {
+	user.Permissions = slices.DeleteFunc(user.Permissions, func(p api.Permission) bool {
 		return p == perm
 	})
 	return nil
@@ -725,7 +723,7 @@ func (w *Who) userJwt(user *User) (string, error) {
 	)
 	// Create the Claims
 	claims = api.JwtClaims{
-		Permissions: user.permissions,
+		Permissions: user.Permissions,
 		StandardClaims: jwt.StandardClaims{
 			Audience:  "jst_dev.who, jst_dev.blog, jst_dev.web",
 			ExpiresAt: time.Now().Add(jwtExpiresAfterTime).Unix(),

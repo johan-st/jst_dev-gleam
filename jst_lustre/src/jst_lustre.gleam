@@ -5,10 +5,10 @@ import article/article.{
   ArticleWithError,
 }
 import article/content.{type Content}
-import article/draft.{type Draft, Draft}
+import article/draft.{Draft}
 import chat/chat
 import gleam/dict.{type Dict}
-import gleam/int
+import gleam/http/response.{type Response}
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -23,6 +23,7 @@ import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
 import modem
+import utils/auth
 import utils/error_string
 import utils/http.{type HttpError}
 import utils/persist.{type PersistentModel, PersistentModelV0, PersistentModelV1}
@@ -124,7 +125,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
       effect_modem,
       effect_navigation(model, route),
       effect.map(chat_effect, ChatMsg),
-      article.get_metadata_all(ArticleMetaGot),
+      article.article_metadata_get(ArticleMetaGot),
       persist.localstorage_get(
         persist.model_localstorage_key,
         persist.decoder(),
@@ -162,11 +163,13 @@ type Msg {
   ArticleDraftContentMoveDown(content_item: Content, index: Int)
   ArticleDraftContentRemove(content_item: Content, index: Int)
   ArticleDraftContentUpdate(content_item: Content, index: Int, content: Content)
-  // ARTICLE DRAFT SAVE
+  // ARTICLE DRAFT SAVE & CREATE & DISCARD
   ArticleDraftSaveClicked(article: Article)
   ArticleDraftSaveResponse(slug: String, result: Result(Article, HttpError))
-  // ARTICLE DRAFT DISCARD
   ArticleDraftDiscardClicked(article: Article)
+  // AUTH
+  AuthLoginClicked(username: String, password: String)
+  AuthLoginResponse(result: Result(Response(String), HttpError))
   // CHAT
   ChatMsg(msg: chat.Msg)
 }
@@ -268,7 +271,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         ArticleSummary(slug, _, _, _, _) -> {
           #(
             model,
-            article.get_article(fn(result) { ArticleGot(slug, result) }, slug),
+            article.article_get(fn(result) { ArticleGot(slug, result) }, slug),
           )
         }
         _ -> #(model, effect.none())
@@ -276,7 +279,6 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     // ARTICLE DRAFT
     ArticleDraftUpdatedTitle(article, text) -> {
-      echo msg
       case article {
         ArticleFullWithDraft(
           _slug,
@@ -288,7 +290,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           draft,
         ) -> {
           let updated_article =
-            article.draft_update(article, Draft(..draft, title: text))
+            article.draft_update(article, fn(draft) {
+              Draft(..draft, title: text)
+            })
           let updated_articles =
             remote_data.try_update(model.articles, dict.insert(
               _,
@@ -312,7 +316,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           draft,
         ) -> {
           let updated_article =
-            article.draft_update(article, Draft(..draft, leading: text))
+            article.draft_update(article, fn(draft) {
+              Draft(..draft, leading: text)
+            })
           let updated_articles =
             remote_data.try_update(model.articles, dict.insert(
               _,
@@ -336,7 +342,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           draft,
         ) -> {
           let updated_article =
-            article.draft_update(article, Draft(..draft, subtitle: text))
+            article.draft_update(article, fn(draft) {
+              Draft(..draft, subtitle: text)
+            })
           let updated_articles =
             remote_data.try_update(model.articles, dict.insert(
               _,
@@ -350,8 +358,21 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     ArticleDraftAddContent(article, content) -> {
-      todo as "add content"
-      #(model, effect.none())
+      let updated_article =
+        article.draft_update(article, fn(draft) {
+          Draft(..draft, content: list.append(draft.content, [content]))
+        })
+      #(
+        Model(
+          ..model,
+          articles: remote_data.try_update(model.articles, dict.insert(
+            _,
+            updated_article.slug,
+            updated_article,
+          )),
+        ),
+        effect.none(),
+      )
     }
     ArticleDraftContentMoveUp(content_item, index) -> {
       todo as "move up"
@@ -372,6 +393,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     // ARTICLE DRAFT DISCARD
     ArticleDraftDiscardClicked(article) -> {
+      echo "article draft discard clicked"
       case article {
         ArticleFullWithDraft(
           slug,
@@ -388,20 +410,84 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               draft.slug,
               ArticleFull(slug, revision, title, leading, subtitle, content),
             ))
-          #(Model(..model, articles: updated_articles), effect.none())
+          #(
+            Model(..model, articles: updated_articles),
+            modem.push(route_url(ArticleBySlug(slug)), None, None),
+          )
         }
         _ -> #(model, effect.none())
       }
     }
     // ARTICLE DRAFT SAVE
     ArticleDraftSaveClicked(article) -> {
-      #(model, effect.none())
+      echo "article draft save clicked"
+      let assert ArticleFullWithDraft(
+        slug: slug,
+        revision: revision,
+        title: title,
+        leading: leading,
+        subtitle: subtitle,
+        content: content,
+        draft: draft,
+      ) = article
+      echo "asserted article"
+      let updated_article =
+        article.draft_update(article, fn(draft) { Draft(..draft, saving: True) })
+      remote_data.try_update(model.articles, dict.insert(
+        _,
+        draft.slug,
+        ArticleFullWithDraft(
+          slug,
+          revision,
+          title,
+          leading,
+          subtitle,
+          content,
+          draft,
+        ),
+      ))
+
+      let article_draft =
+        ArticleFull(
+          draft.slug,
+          0,
+          draft.title,
+          draft.leading,
+          draft.subtitle,
+          draft.content,
+        )
+      #(
+        model,
+        article.article_create(ArticleDraftSaveResponse(slug, _), article_draft),
+      )
+      // #(model, article.article_update(ArticleDraftSaveResponse(slug, _), article))
     }
     ArticleDraftSaveResponse(slug, result) -> {
+      echo "article draft save response"
+      let article = case model.articles {
+        Loaded(articles) -> articles |> dict.get(slug)
+        _ -> Error(Nil)
+      }
+      let articles_updated = case article {
+        Ok(article) -> {
+          model.articles
+          |> remote_data.try_update(dict.insert(
+            _,
+            article.slug,
+            article.draft_update(article, fn(draft) {
+              Draft(..draft, saving: False)
+            }),
+          ))
+        }
+        Error(Nil) -> {
+          echo "no article found for slug: " <> slug
+          model.articles
+        }
+      }
       case result {
         Ok(saved_article) -> {
           let updated_articles =
-            remote_data.try_update(model.articles, dict.insert(
+            remote_data.try_update(articles_updated, dict.insert(
               _,
               saved_article.slug,
               saved_article,
@@ -417,6 +503,14 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         }
       }
     }
+    // AUTH
+    AuthLoginClicked(username, password) -> {
+      #(model, auth.login(AuthLoginResponse, username, password))
+    }
+    AuthLoginResponse(result) -> {
+      #(model, effect.none())
+    }
+
     // CHAT
     ChatMsg(msg) -> {
       let #(chat_model, chat_effect) = chat.update(msg, model.chat)
@@ -437,10 +531,10 @@ fn update_navigation(model: Model, route: Route) -> #(Model, Effect(Msg)) {
         Ok(article) -> {
           case article {
             ArticleSummary(slug, _, _, _, _) -> {
-              article.get_article(fn(result) { ArticleGot(slug, result) }, slug)
+              article.article_get(fn(result) { ArticleGot(slug, result) }, slug)
             }
             ArticleWithError(_, _, _, _, _, _) -> {
-              article.get_article(fn(result) { ArticleGot(slug, result) }, slug)
+              article.article_get(fn(result) { ArticleGot(slug, result) }, slug)
             }
             _ -> effect.none()
           }
@@ -482,13 +576,13 @@ fn update_navigation(model: Model, route: Route) -> #(Model, Effect(Msg)) {
         Ok(ArticleSummary(_, _, _, _, _)) -> {
           #(
             Model(..model, route:),
-            article.get_article(fn(result) { ArticleGot(slug, result) }, slug),
+            article.article_get(fn(result) { ArticleGot(slug, result) }, slug),
           )
         }
         Ok(ArticleWithError(_, _, _, _, _, _)) -> {
           #(
             Model(..model, route:),
-            article.get_article(fn(result) { ArticleGot(slug, result) }, slug),
+            article.article_get(fn(result) { ArticleGot(slug, result) }, slug),
           )
         }
         Error(_) -> {
@@ -514,10 +608,10 @@ fn effect_navigation(model: Model, route: Route) -> Effect(Msg) {
         Ok(article) -> {
           case article {
             ArticleSummary(slug, _, _, _, _) -> {
-              article.get_article(fn(result) { ArticleGot(slug, result) }, slug)
+              article.article_get(fn(result) { ArticleGot(slug, result) }, slug)
             }
             ArticleWithError(_, _, _, _, _, _) -> {
-              article.get_article(fn(result) { ArticleGot(slug, result) }, slug)
+              article.article_get(fn(result) { ArticleGot(slug, result) }, slug)
             }
             _ -> effect.none()
           }
@@ -539,10 +633,10 @@ fn effect_navigation(model: Model, route: Route) -> Effect(Msg) {
         Ok(article) -> {
           case article {
             ArticleSummary(slug, _, _, _, _) -> {
-              article.get_article(fn(result) { ArticleGot(slug, result) }, slug)
+              article.article_get(fn(result) { ArticleGot(slug, result) }, slug)
             }
             ArticleWithError(_, _, _, _, _, _) -> {
-              article.get_article(fn(result) { ArticleGot(slug, result) }, slug)
+              article.article_get(fn(result) { ArticleGot(slug, result) }, slug)
             }
             _ -> effect.none()
           }
@@ -957,12 +1051,16 @@ fn view_header(model: Model) -> Element(Msg) {
           //     }
           //   }),
           // ]),
-          html.ul([attr.class("flex space-x-4 md:space-x-8")], [
-            view_header_link(
-              current: model.route,
-              to: Index,
-              label: "Home",
-            ),
+          html.ul([attr.class("flex space-x-8 pr-2")], [
+            html.li([], [
+              html.button(
+                [
+                  event.on_click(AuthLoginClicked("jst_dev", "jst_dev")),
+                  attr.class("bg-pink-700 text-white px-4 py-2 rounded-md"),
+                ],
+                [html.text("Login")],
+              ),
+            ]),
             view_header_link(
               current: model.route,
               to: Articles,
@@ -1247,9 +1345,8 @@ fn view_article_listing(articles: Dict(String, Article)) -> List(Element(Msg)) {
 }
 
 fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
-  echo "asserting index uri"
   let assert Ok(index_uri) = uri.parse("/")
-  echo "asserting article"
+  echo "asserting ArticleFullWithDraft"
   let assert ArticleFullWithDraft(
     _,
     _,

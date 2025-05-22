@@ -1,90 +1,212 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-
 	"jst_dev/server/articles"
+	"jst_dev/server/jst_log"
+	"jst_dev/server/who"
+	whoApi "jst_dev/server/who/api"
+	"net/http"
+	"time"
+
+	"github.com/nats-io/nats.go"
 )
 
-func (s *httpServer) routes() {
-	s.mux = *http.NewServeMux()
-	// s.mux.HandleFunc("/", s.handlerTodo("catch-all"))
-	s.mux.HandleFunc("GET /api/seed", s.handlerSeed())
-	s.mux.HandleFunc("GET /api/article/", s.handlerArticleList())
-	s.mux.HandleFunc("POST /api/article", s.handlerArticleNew())
-	s.mux.HandleFunc("PUT /api/article", s.handlerArticleUpdate())
-	s.mux.HandleFunc("GET /api/article/{slug}/", s.handlerArticle())
+func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc *nats.Conn) {
+
+	// Add routes with their respective handlers
+	mux.Handle("GET /api/seed", handleSeed(l, repo))
+	mux.Handle("GET /api/article/", handleArticleList(l, repo))
+	mux.Handle("POST /api/article", handleArticleNew(l, repo))
+	mux.Handle("PUT /api/article", handleArticleUpdate(l, repo))
+	mux.Handle("GET /api/article/{slug}/", handleArticle(l, repo))
+
+	// auth
+	mux.Handle("GET /api/auth", handleAuth(l, nc))
+
+	// Add catch-all route
+	mux.Handle("/", http.NotFoundHandler())
 }
 
-func (s *httpServer) handlerSeed() http.HandlerFunc {
-	l := s.l.WithBreadcrumb("handlers").WithBreadcrumb("seed")
-	l.Debug("ready")
-	return func(w http.ResponseWriter, r *http.Request) {
-		l.Debug("seed handler called")
+// --- MIDDLEWARE ---
+
+func logger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("logger handler called")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func cors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("cors handler called")
+		w.Header().Set("Access-Control-Allow-Origin", "http://127.0.0.1:1234")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func authJwt(jwtSecret string, next http.Handler) http.Handler {
+	if jwtSecret == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("auth handler called")
+
+		jwtCookie, err := r.Cookie("jst.dev.who")
+		if err != nil {
+			fmt.Printf("authJwt: error getting jwt cookie: %s\n", err)
+			next.ServeHTTP(w, r)
+			return
+		}
+		if jwtCookie == nil {
+			fmt.Println("authJwt: no jwt cookie")
+			next.ServeHTTP(w, r)
+			return
+		}
+		if jwtCookie.Value == "" {
+			fmt.Println("authJwt: jwt cookie value is empty")
+			next.ServeHTTP(w, r)
+			return
+		}
+		subject, permissions, err := whoApi.JwtVerify(jwtSecret, jwtCookie.Value)
+		if err != nil {
+			fmt.Printf("authJwt: error verifying jwt: %s\n", err)
+			next.ServeHTTP(w, r)
+			return
+		}
+		fmt.Printf("subject: %s\n", subject)
+		fmt.Printf("permissions: %v\n", permissions)
+
+		ctx := context.WithValue(r.Context(), who.UserKey, whoApi.User{
+			ID:          subject,
+			Permissions: permissions,
+		})
+
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// --- HANDLERS ---
+
+func handleAuth(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req := whoApi.AuthRequest{
+			Username: "johan",
+			Password: "password",
+		}
+		reqBytes, err := json.Marshal(req)
+		if err != nil {
+			fmt.Printf("auth handler: error marshalling request: %s\n", err)
+			http.Error(w, "error marshalling request", http.StatusInternalServerError)
+			return
+		}
+		fmt.Printf("auth handler: request: %s\n", string(reqBytes))
+		fmt.Printf("auth handler: subject: %s\n", whoApi.Subj.AuthGroup+"."+whoApi.Subj.AuthLogin)
+
+		msg, err := nc.Request(fmt.Sprintf("%s.%s", whoApi.Subj.AuthGroup, whoApi.Subj.AuthLogin), reqBytes, 10*time.Second)
+		if err != nil {
+			fmt.Printf("auth handler: error requesting auth: %s\n", err)
+			http.Error(w, "error requesting auth", http.StatusInternalServerError)
+			return
+		}
+		fmt.Printf("auth handler: %s\n", msg.Data)
+		resp := whoApi.AuthResponse{}
+		err = json.Unmarshal(msg.Data, &resp)
+		if err != nil {
+			fmt.Printf("auth handler: error unmarshalling auth response: %s\n", err)
+			http.Error(w, "error unmarshalling auth response", http.StatusInternalServerError)
+			return
+		}
+
+		http.SetCookie(w, &http.Cookie{
+			Name:     "jst.dev.who",
+			Value:    resp.Token,
+			HttpOnly: false,
+			Secure:   false,
+			SameSite: http.SameSiteNoneMode,
+		})
+		respJson(w, resp, http.StatusOK)
+	})
+}
+
+// handleSeed creates a handler for seeding the database with test articles
+func handleSeed(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
+	logger := l.WithBreadcrumb("seed")
+	logger.Debug("ready")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Debug("seed handler called")
 
 		art := articles.TestArticle()
-		_, err := s.articleRepo.Create(art)
+		_, err := repo.Create(art)
 		if err != nil {
-			l.Error("failed to put test article in repo: %s", err.Error())
+			logger.Error("failed to put test article in repo: %s", err.Error())
 			http.Error(w, "failed to put test article in repo", http.StatusInternalServerError)
 			return
 		}
+
 		art = articles.NatsAllTheWayDown()
-		_, err = s.articleRepo.Create(art)
+		_, err = repo.Create(art)
 		if err != nil {
-			l.Error("failed to put nats all the way down article in repo: %s", err.Error())
+			logger.Error("failed to put nats all the way down article in repo: %s", err.Error())
 			http.Error(w, "failed to put nats all the way down article in repo", http.StatusInternalServerError)
 			return
 		}
 
-		s.respJson(w, "seeded", http.StatusOK)
-	}
+		respJson(w, "seeded", http.StatusOK)
+	})
 }
 
-func (s *httpServer) handlerArticleList() http.HandlerFunc {
+// handleArticleList creates a handler for listing all articles
+func handleArticleList(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 	type Resp struct {
 		Articles []articles.ArticleMetadata `json:"articles"`
 	}
 
-	l := s.l.WithBreadcrumb("handlers").WithBreadcrumb("article").WithBreadcrumb("list")
+	logger := l.WithBreadcrumb("article").WithBreadcrumb("list")
+	logger.Debug("ready")
 
-	return func(w http.ResponseWriter, r *http.Request) {
-		articles, err := s.articleRepo.AllNoContent()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		articles, err := repo.AllNoContent()
 		if err != nil {
-			l.Error("failed to get all articles: %s", err.Error())
+			logger.Error("failed to get all articles: %s", err.Error())
 			http.Error(w, "failed to get all articles", http.StatusInternalServerError)
 			return
 		}
-		l.Debug("articles count: %d", len(articles))
-		s.respJson(w, Resp{Articles: articles}, http.StatusOK)
-	}
+		logger.Debug("articles count: %d", len(articles))
+		respJson(w, Resp{Articles: articles}, http.StatusOK)
+	})
 }
 
-func (s *httpServer) handlerArticle() http.HandlerFunc {
-	l := s.l.WithBreadcrumb("handlers").WithBreadcrumb("article").WithBreadcrumb("get")
-	l.Debug("ready")
+// handleArticle creates a handler for getting a single article by slug
+func handleArticle(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
+	logger := l.WithBreadcrumb("article").WithBreadcrumb("get")
+	logger.Debug("ready")
 
-	return func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		slug := r.PathValue("slug")
-		article, err := s.articleRepo.Get(slug)
+		article, err := repo.Get(slug)
 		if err != nil {
-			l.Error("failed to get article: %s", err.Error())
+			logger.Error("failed to get article: %s", err.Error())
 			http.Error(w, "failed to get article", http.StatusInternalServerError)
 			return
 		}
 		if article == nil {
-			l.Info("not found, article \"%s\"", slug)
+			logger.Info("not found, article \"%s\"", slug)
 			http.NotFound(w, r)
 			return
 		}
-		l.Debug("article: %s (rev: %d)", article.Slug, article.Rev)
-		s.respJson(w, article, http.StatusOK)
-	}
+		logger.Debug("article: %s (rev: %d)", article.Slug, article.Rev)
+		respJson(w, article, http.StatusOK)
+	})
 }
 
-func (s *httpServer) handlerArticleNew() http.HandlerFunc {
+// handleArticleNew creates a handler for creating a new article
+func handleArticleNew(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 	type ReqNew struct {
 		Slug     string             `json:"slug"`
 		Title    string             `json:"title"`
@@ -93,17 +215,17 @@ func (s *httpServer) handlerArticleNew() http.HandlerFunc {
 		Content  []articles.Content `json:"content"`
 	}
 
-	l := s.l.WithBreadcrumb("handlers").WithBreadcrumb("article").WithBreadcrumb("new")
-	l.Debug("ready")
+	logger := l.WithBreadcrumb("article").WithBreadcrumb("new")
+	logger.Debug("ready")
 
-	return func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req ReqNew
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			l.Warn("Failed to decode request", "error", err)
+			logger.Warn("Failed to decode request", "error", err)
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
-		rev, err := s.articleRepo.Create(articles.Article{
+		rev, err := repo.Create(articles.Article{
 			StructVersion: 1,
 			Rev:           1,
 			Slug:          req.Slug,
@@ -113,13 +235,16 @@ func (s *httpServer) handlerArticleNew() http.HandlerFunc {
 			Content:       req.Content,
 		})
 		if err != nil {
-			l.Error("failed to put new article in repo: %w", err)
+			logger.Error("failed to put new article in repo: %v", err)
 			http.Error(w, "failed to put new article in repo", http.StatusInternalServerError)
+			return
 		}
-		s.respJson(w, fmt.Sprintf("%s (rev: %d)", req.Slug, rev), http.StatusOK)
-	}
+		respJson(w, fmt.Sprintf("%s (rev: %d)", req.Slug, rev), http.StatusOK)
+	})
 }
-func (s *httpServer) handlerArticleUpdate() http.HandlerFunc {
+
+// handleArticleUpdate creates a handler for updating an existing article
+func handleArticleUpdate(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 	type ReqUpdate struct {
 		Rev      int                `json:"revision"`
 		Slug     string             `json:"slug"`
@@ -129,17 +254,17 @@ func (s *httpServer) handlerArticleUpdate() http.HandlerFunc {
 		Content  []articles.Content `json:"content"`
 	}
 
-	l := s.l.WithBreadcrumb("handlers").WithBreadcrumb("article").WithBreadcrumb("update")
-	l.Debug("ready")
+	logger := l.WithBreadcrumb("article").WithBreadcrumb("update")
+	logger.Debug("ready")
 
-	return func(w http.ResponseWriter, r *http.Request) {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req ReqUpdate
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			l.Warn("Failed to decode request", "error", err)
+			logger.Warn("Failed to decode request", "error", err)
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
-		rev, err := s.articleRepo.Update(articles.Article{
+		rev, err := repo.Update(articles.Article{
 			StructVersion: 1,
 			Rev:           req.Rev,
 			Slug:          req.Slug,
@@ -149,31 +274,22 @@ func (s *httpServer) handlerArticleUpdate() http.HandlerFunc {
 			Content:       req.Content,
 		})
 		if err != nil {
-			l.Error("failed to update article in repo: %w", err)
+			logger.Error("failed to update article in repo: %v", err)
 			http.Error(w, fmt.Sprintf("failed to update article in repo: %s", err.Error()), http.StatusInternalServerError)
+			return
 		}
-		s.respJson(w, fmt.Sprintf("%s (rev: %d)", req.Slug, rev), http.StatusOK)
-	}
+		respJson(w, fmt.Sprintf("%s (rev: %d)", req.Slug, rev), http.StatusOK)
+	})
 }
 
-func (s *httpServer) handlerTodo(name string) http.HandlerFunc {
-	l := s.l.WithBreadcrumb(name)
-	l.Debug("ready")
+// --- HELPERS ---
 
-	return func(w http.ResponseWriter, r *http.Request) {
-		l.Error("Todo handler called")
-		l.Debug("path: %s", r.URL.Path)
-	}
-}
-
-// --- RESPONDERS ---
-
-// build and write the response
-func (s *httpServer) respJson(w http.ResponseWriter, content any, code int) {
+// respJson builds and writes a JSON response
+func respJson(w http.ResponseWriter, content any, code int) {
 	respBytes, err := json.Marshal(content)
 	if err != nil {
-		s.l.Error("failed to marchal json")
 		http.Error(w, "failed to marshal json", http.StatusInternalServerError)
+		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)

@@ -41,6 +41,14 @@ var Subj = struct {
 }
 
 // USER
+type User struct {
+	Version     int
+	ID          string
+	Username    string
+	Email       string
+	Permissions []Permission
+}
+
 type UserFullResponse struct {
 	ID          string       `json:"id"`
 	Username    string       `json:"username"`
@@ -80,7 +88,7 @@ type UserDeleteResponse struct {
 	IdDeleted string `json:"deleted_id"`
 }
 
-// PERMISSIONS
+// Permission represents actions that are allowed for the resource.
 type Permission string
 
 const (
