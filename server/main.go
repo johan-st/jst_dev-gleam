@@ -43,7 +43,7 @@ func main() {
 }
 
 // run initializes and starts all core services, manages their lifecycle, and handles graceful shutdown on interrupt signals.
-// 
+//
 // It loads configuration, sets up logging, starts embedded messaging, blog, HTTP, and user management services, and waits for OS interrupts to trigger a coordinated shutdown. Returns an error if any service fails to initialize or start.
 func run(
 	ctx context.Context,
@@ -101,11 +101,6 @@ func run(
 		return fmt.Errorf("start blog: %w", err)
 	}
 
-	// - web
-	l.Debug("http server, start")
-	httpServer := web.New(ctx, nc, *lRoot.WithBreadcrumb("http"))
-	go httpServer.Run(cleanShutdown)
-
 	// --- Who ---
 	l.Debug("starting who")
 	whoConf := &who.Conf{
@@ -124,7 +119,12 @@ func run(
 	}
 
 	// - debug
-	// initDefaultUserCleanup := initDefaultUser(lRoot.WithBreadcrumb("initDefaultUser"), nc)
+	initDefaultUserCleanup := initDefaultUser(lRoot.WithBreadcrumb("initDefaultUser"), nc)
+
+	// - web
+	l.Debug("http server, start")
+	httpServer := web.New(ctx, nc, SHARED_ENV_jwtSecret, lRoot.WithBreadcrumb("http"))
+	go httpServer.Run(cleanShutdown)
 
 	// ------------------------------------------------------------
 	// RUNNING
@@ -145,9 +145,9 @@ func run(
 	cancel()
 
 	l.Info("Received interrupt signal, starting graceful shutdown...")
-	// if initDefaultUserCleanup != nil {
-	// 	initDefaultUserCleanup()
-	// }
+	if initDefaultUserCleanup != nil {
+		initDefaultUserCleanup()
+	}
 	// Drain connections
 	l.Debug("draining connections")
 	err = nc.Drain()

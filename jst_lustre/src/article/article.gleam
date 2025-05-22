@@ -53,25 +53,49 @@ pub type Article {
 
 // Fetch ------------------------------------------------------------------------
 
-pub fn get_article(msg, slug: String) -> Effect(a) {
-  let url = "http://127.0.0.1:8080/api/article/" <> slug
-  http.get(url, http.expect_json(article_decoder(), msg))
+pub fn article_get(msg, slug: String) -> Effect(a) {
+  let request =
+    request.new()
+    |> request.set_method(gleam_http.Get)
+    |> request.set_scheme(gleam_http.Http)
+    |> request.set_host("127.0.0.1")
+    |> request.set_path("/api/article/" <> slug)
+    |> request.set_port(8080)
+  http.send(request, http.expect_json(article_decoder(), msg))
 }
 
-pub fn get_metadata_all(msg) -> Effect(a) {
-  let url = "http://127.0.0.1:8080/api/article"
-  http.get(url, http.expect_json(metadata_decoder(), msg))
+pub fn article_metadata_get(msg) -> Effect(a) {
+  let request =
+    request.new()
+    |> request.set_method(gleam_http.Get)
+    |> request.set_scheme(gleam_http.Http)
+    |> request.set_host("127.0.0.1")
+    |> request.set_path("/api/article")
+    |> request.set_port(8080)
+  http.send(request, http.expect_json(metadata_decoder(), msg))
 }
 
-pub fn save_article(msg, article: Article) -> Effect(a) {
-  let url = "http://127.0.0.1:8080/api/article/" <> article.slug
-  let body = article_encoder(article) |> json.to_string
+pub fn article_update(msg, article: Article) -> Effect(a) {
   let request =
     request.new()
     |> request.set_method(gleam_http.Put)
-    |> request.set_path(url)
-    |> request.set_body(body)
+    |> request.set_scheme(gleam_http.Http)
+    |> request.set_host("127.0.0.1")
+    |> request.set_path("/api/article/" <> article.slug)
+    |> request.set_port(8080)
+    |> request.set_body(article_encoder(article) |> json.to_string)
+  http.send(request, http.expect_json(article_decoder(), msg))
+}
 
+pub fn article_create(msg, article: Article) -> Effect(a) {
+  let request =
+    request.new()
+    |> request.set_method(gleam_http.Post)
+    |> request.set_scheme(gleam_http.Http)
+    |> request.set_host("127.0.0.1")
+    |> request.set_path("/api/article")
+    |> request.set_port(8080)
+    |> request.set_body(article_encoder(article) |> json.to_string)
   http.send(request, http.expect_json(article_decoder(), msg))
 }
 
@@ -315,17 +339,32 @@ pub fn content_encoder(content: Content) -> json.Json {
 
 // Draft ------------------------------------------------------------------------
 
-pub fn draft_update(article: Article, draft: Draft) -> Article {
-  let assert ArticleFullWithDraft(
-    slug,
-    revision,
-    title,
-    leading,
-    subtitle,
-    content,
-    _,
-  ) = article
-  ArticleFullWithDraft(slug, revision, title, leading, subtitle, content, draft)
+pub fn draft_update(article: Article, updater: fn(Draft) -> Draft) -> Article {
+  case article {
+    ArticleFullWithDraft(
+      slug,
+      revision,
+      title,
+      leading,
+      subtitle,
+      content,
+      draft,
+    ) -> {
+      ArticleFullWithDraft(
+        slug,
+        revision,
+        title,
+        leading,
+        subtitle,
+        content,
+        updater(draft),
+      )
+    }
+    _ -> {
+      echo "draft_update: not an article with draft"
+      article
+    }
+  }
 }
 
 // Utils -----------------------------------------------------------------------
