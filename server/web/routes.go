@@ -14,7 +14,11 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc *nats.Conn) {
+const (
+	cookieAuth = "jst_dev_who"
+)
+
+func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc *nats.Conn, jwtSecret string) {
 
 	// Add routes with their respective handlers
 	mux.Handle("GET /api/seed", handleSeed(l, repo))
@@ -25,6 +29,7 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 
 	// auth
 	mux.Handle("GET /api/auth", handleAuth(l, nc))
+	mux.Handle("GET /api/auth/check", handleAuthCheck(l, nc, jwtSecret))
 
 	// Add catch-all route
 	mux.Handle("/", http.NotFoundHandler())
@@ -41,22 +46,28 @@ func logger(next http.Handler) http.Handler {
 
 func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("cors handler called")
-		w.Header().Set("Access-Control-Allow-Origin", "http://127.0.0.1:1234")
+		origin := r.Header.Get("Origin")
+		// Allow either localhost:1234 or 127.0.0.1:1234
+		if origin == "http://localhost:1234" || origin == "http://127.0.0.1:1234" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Credentials", "true") // Required for cookies
 		next.ServeHTTP(w, r)
 	})
 }
 
 func authJwt(jwtSecret string, next http.Handler) http.Handler {
+
 	if jwtSecret == "" {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("auth handler called")
+		fmt.Printf("auth handler: cookies=%v\n", r.Cookies())
 
-		jwtCookie, err := r.Cookie("jst.dev.who")
+		jwtCookie, err := r.Cookie(cookieAuth)
 		if err != nil {
 			fmt.Printf("authJwt: error getting jwt cookie: %s\n", err)
 			next.ServeHTTP(w, r)
@@ -78,6 +89,7 @@ func authJwt(jwtSecret string, next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+
 		fmt.Printf("subject: %s\n", subject)
 		fmt.Printf("permissions: %v\n", permissions)
 
@@ -94,6 +106,8 @@ func authJwt(jwtSecret string, next http.Handler) http.Handler {
 
 func handleAuth(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Printf("auth handler: cookies=%v\n", r.Cookies())
+
 		req := whoApi.AuthRequest{
 			Username: "johan",
 			Password: "password",
@@ -122,14 +136,82 @@ func handleAuth(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 			return
 		}
 
-		http.SetCookie(w, &http.Cookie{
-			Name:     "jst.dev.who",
-			Value:    resp.Token,
-			HttpOnly: false,
-			Secure:   false,
-			SameSite: http.SameSiteNoneMode,
-		})
+		// cookie := &http.Cookie{
+		// 	Name:     cookieAuth,
+		// 	Value:    resp.Token,
+		// 	// MaxAge:   30 * 60,
+		// 	// Path:     "/",
+		// 	// Domain:   "http://localhost:8080", // Let browser set the domain
+		// 	// HttpOnly: false,
+		// 	// Secure:   false,                 // Set to true in production
+		// 	// SameSite: http.SameSiteNoneMode, // Changed from Strict for cross-origin
+		// }
+		// err = cookie.Valid()
+		// if err != nil {
+		// 	fmt.Printf("auth handler: error validating cookie: %s\n", err)
+		// 	http.Error(w, "error validating cookie", http.StatusInternalServerError)
+		// 	return
+		// }
+		// http.SetCookie(w, cookie)
+		// fmt.Printf("auth handler: setting cookie %s with value length %d\n", cookie.Name, len(cookie.Value))
+
 		respJson(w, resp, http.StatusOK)
+	})
+}
+
+func handleAuthCheck(l *jst_log.Logger, nc *nats.Conn, jwtSecret string) http.Handler {
+
+	type Req struct {
+		Token string `json:"token"`
+	}
+	type Resp struct {
+		Valid       bool     `json:"valid"`
+		Subject     string   `json:"subject"`
+		Permissions []string `json:"permissions"`
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req Req
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			fmt.Printf("auth handler: error decoding request: %s\n", err)
+			http.Error(w, "error decoding request", http.StatusBadRequest)
+			return
+		}
+		// jwtCookie, err := r.Cookie(cookieAuth)
+		// if err != nil {
+		// 	fmt.Printf("authJwt: error getting jwt cookie: %s\n", err)
+		// 	respJson(w, "error getting jwt cookie", http.StatusUnauthorized)
+		// 	return
+		// }
+		// if jwtCookie == nil {
+		// 	fmt.Println("authJwt: no jwt cookie")
+		// 	respJson(w, "no jwt cookie", http.StatusUnauthorized)
+		// 	return
+		// }
+		// if jwtCookie.Value == "" {
+		// 	fmt.Println("authJwt: jwt cookie value is empty")
+		// 	respJson(w, "jwt cookie value is empty", http.StatusUnauthorized)
+		// 	return
+		// }
+		subject, permissions, err := whoApi.JwtVerify(jwtSecret, req.Token)
+		if err != nil {
+			fmt.Printf("authJwt: error verifying jwt: %s\n", err)
+			respJson(w, "error verifying jwt", http.StatusUnauthorized)
+			return
+		}
+		permissionsList := make([]string, len(permissions))
+		for i, permission := range permissions {
+			permissionsList[i] = string(permission)
+		}
+		respJson(w, struct {
+			Valid       bool     `json:"valid"`
+			Subject     string   `json:"subject"`
+			Permissions []string `json:"permissions"`
+		}{
+			Valid:       true,
+			Subject:     subject,
+			Permissions: permissionsList,
+		}, http.StatusOK)
 	})
 }
 

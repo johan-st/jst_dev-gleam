@@ -52,7 +52,7 @@ func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger
 	}
 
 	// Set up routes on the mux
-	routes(s.mux, l.WithBreadcrumb("route"), artRepo, nc)
+	routes(s.mux, l.WithBreadcrumb("route"), artRepo, nc, jwtSecret)
 
 	// Apply middleware to create the final handler
 	// note: last added is first called
