@@ -61,6 +61,7 @@ pub fn article_get(msg, slug: String) -> Effect(a) {
     |> request.set_host("127.0.0.1")
     |> request.set_path("/api/article/" <> slug)
     |> request.set_port(8080)
+    // |> request.set_header("Cookie", "jst.dev.who=" <> jwt)
   http.send(request, http.expect_json(article_decoder(), msg))
 }
 

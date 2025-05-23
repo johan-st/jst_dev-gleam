@@ -4,7 +4,7 @@ import article/content.{
 }
 import article/draft.{type Draft}
 import gleam/dict.{type Dict}
-import gleam/dynamic/decode
+import gleam/dynamic/decode.{type Decoder}
 import gleam/http as gleam_http
 import gleam/http/request
 import gleam/json
@@ -40,4 +40,23 @@ pub fn login(msg, username: String, password: String) -> Effect(a) {
     )
 
   http.send(request, expect)
+}
+
+pub fn auth_check(msg) -> Effect(a) {
+  let request =
+    request.new()
+    |> request.set_method(gleam_http.Get)
+    |> request.set_scheme(gleam_http.Http)
+    |> request.set_host("127.0.0.1")
+    |> request.set_path("/api/auth/check")
+    |> request.set_port(8080)
+
+  http.send(request, http.expect_json(auth_check_decoder(), msg))
+}
+
+pub fn auth_check_decoder() -> Decoder(#(Bool, String, List(String))) {
+  use valid <- decode.field("valid", decode.bool)
+  use subject <- decode.field("subject", decode.string)
+  use permissions <- decode.field("permissions", decode.list(decode.string))
+  decode.success(#(valid, subject, permissions))
 }

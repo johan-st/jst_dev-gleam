@@ -119,11 +119,12 @@ fn init(_) -> #(Model, Effect(Msg)) {
       |> parse_route
       |> UserNavigatedTo
     })
+  let #(model_nav, effect_nav) = update_navigation(model, model.route)
   #(
-    model,
+    model_nav,
     effect.batch([
       effect_modem,
-      effect_navigation(model, route),
+      effect_nav,
       effect.map(chat_effect, ChatMsg),
       article.article_metadata_get(ArticleMetaGot),
       persist.localstorage_get(
@@ -155,6 +156,7 @@ type Msg {
   ArticleGot(slug: String, result: Result(Article, HttpError))
   ArticleMetaGot(result: Result(List(Article), HttpError))
   // ARTICLE DRAFT
+  ArticleDraftUpdatedSlug(article: Article, text: String)
   ArticleDraftUpdatedTitle(article: Article, text: String)
   ArticleDraftUpdatedLeading(article: Article, text: String)
   ArticleDraftAddContent(article: Article, content: Content)
@@ -170,6 +172,8 @@ type Msg {
   // AUTH
   AuthLoginClicked(username: String, password: String)
   AuthLoginResponse(result: Result(Response(String), HttpError))
+  AuthCheckClicked
+  AuthCheckResponse(result: Result(#(Bool, String, List(String)), HttpError))
   // CHAT
   ChatMsg(msg: chat.Msg)
 }
@@ -213,6 +217,8 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
     // NAVIGATION
     UserNavigatedTo(route:) -> {
+      echo "user navigated to"
+      echo route
       update_navigation(model, route)
     }
     // Browser Persistance
@@ -278,6 +284,41 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       }
     }
     // ARTICLE DRAFT
+    ArticleDraftUpdatedSlug(article, text) -> {
+      case article {
+        ArticleFullWithDraft(
+          slug,
+          _revision,
+          _title,
+          _leading,
+          _subtitle,
+          _content,
+          _draft,
+        ) -> {
+          echo "updating draft"
+          echo text
+          let updated_article =
+            article.draft_update(article, fn(draft) {
+              echo "updating draft"
+              echo draft
+              echo "updating draft with slug: " <> text
+              echo Draft(..draft, slug: text)
+            })
+          #(
+            Model(
+              ..model,
+              articles: remote_data.try_update(model.articles, dict.insert(
+                _,
+                slug,
+                updated_article,
+              )),
+            ),
+            effect.none(),
+          )
+        }
+        _ -> #(model, effect.none())
+      }
+    }
     ArticleDraftUpdatedTitle(article, text) -> {
       case article {
         ArticleFullWithDraft(
@@ -402,12 +443,12 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           leading,
           subtitle,
           content,
-          draft,
+          _draft,
         ) -> {
           let updated_articles =
             remote_data.try_update(model.articles, dict.insert(
               _,
-              draft.slug,
+              slug,
               ArticleFull(slug, revision, title, leading, subtitle, content),
             ))
           #(
@@ -494,7 +535,8 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             ))
           #(
             Model(..model, articles: updated_articles),
-            effect_navigation(model, ArticleBySlug(saved_article.slug)),
+            modem.push(route_url(ArticleBySlug(saved_article.slug)), None, None),
+            // effect_navigation(model, ArticleBySlug(saved_article.slug)),
           )
         }
 
@@ -509,6 +551,23 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     AuthLoginResponse(result) -> {
       #(model, effect.none())
+    }
+    AuthCheckClicked -> {
+      #(model, auth.auth_check(AuthCheckResponse))
+    }
+    AuthCheckResponse(result) -> {
+      echo "auth check response"
+      echo result
+      case result {
+        Ok(response) -> {
+          echo "auth check response ok"
+          #(model, effect.none())
+        }
+        Error(err) -> {
+          echo "auth check response error"
+          #(model, effect.none())
+        }
+      }
     }
 
     // CHAT
@@ -541,7 +600,6 @@ fn update_navigation(model: Model, route: Route) -> #(Model, Effect(Msg)) {
         }
         Error(Nil) -> {
           echo "no article found for slug: " <> slug
-          echo "set up article not found route"
           effect.none()
         }
       }
@@ -576,19 +634,18 @@ fn update_navigation(model: Model, route: Route) -> #(Model, Effect(Msg)) {
         Ok(ArticleSummary(_, _, _, _, _)) -> {
           #(
             Model(..model, route:),
-            article.article_get(fn(result) { ArticleGot(slug, result) }, slug),
+            article.article_get(ArticleGot(slug, _), slug),
           )
         }
         Ok(ArticleWithError(_, _, _, _, _, _)) -> {
           #(
             Model(..model, route:),
-            article.article_get(fn(result) { ArticleGot(slug, result) }, slug),
+            article.article_get(ArticleGot(slug, _), slug),
           )
         }
         Error(_) -> {
           echo "no article found for slug: " <> slug
-          echo "set up article not found route"
-          #(Model(..model, route: Articles), effect.none())
+          #(model, modem.push(route_url(Articles), None, None))
         }
       }
     }
@@ -687,16 +744,13 @@ fn update_got_articles_metadata(
   model: Model,
   result: Result(List(Article), HttpError),
 ) {
-  case echo result {
+  case result {
     Ok(articles) -> {
       let articles = article.list_to_dict(articles)
       let effect = case model.route {
-        ArticleBySlug(_) -> {
-          echo "loading article content"
-          effect_navigation(
-            Model(..model, articles: Loaded(articles)),
-            model.route,
-          )
+        ArticleBySlug(slug) -> {
+          echo "loading article content for slug: " <> slug
+          article.article_get(ArticleGot(slug, _), slug)
         }
         ArticleBySlugEdit(_) -> {
           echo "loading article content"
@@ -1022,7 +1076,7 @@ fn view(model: Model) -> Element(Msg) {
   )
 }
 
-// VIEW HEADER ----------------------------------------------------------------påökjölmnnm,öoigbo9ybnpuhbp.,kb iuu
+// VIEW HEADER ----------------------------------------------------------------
 fn view_header(model: Model) -> Element(Msg) {
   html.nav(
     [attr.class("py-3 border-b bg-zinc-800 border-pink-700 font-mono sticky top-0 z-10 shadow-md")],
@@ -1056,9 +1110,18 @@ fn view_header(model: Model) -> Element(Msg) {
               html.button(
                 [
                   event.on_click(AuthLoginClicked("jst_dev", "jst_dev")),
-                  attr.class("bg-pink-700 text-white px-4 py-2 rounded-md"),
+                  attr.class("bg-pink-700 text-white px-2 rounded-md"),
                 ],
                 [html.text("Login")],
+              ),
+            ]),
+            html.li([], [
+              html.button(
+                [
+                  event.on_click(AuthCheckClicked),
+                  attr.class("bg-teal-700 text-white px-2 rounded-md"),
+                ],
+                [html.text("Check")],
               ),
             ]),
             view_header_link(
@@ -1348,8 +1411,8 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
   let assert Ok(index_uri) = uri.parse("/")
   echo "asserting ArticleFullWithDraft"
   let assert ArticleFullWithDraft(
-    _,
-    _,
+    _slug,
+    _revision,
     _title,
     _leading,
     _subtitle,
@@ -1358,18 +1421,33 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
   ) = article
   echo "asserts succeded"
   [
-    html.article([
-      attr.class("with-transition bg-zinc-900/30 rounded-lg p-4 md:p-6 shadow-lg")
-    ], [
-      // Editor header with title
-      html.div([attr.class("mb-6 pb-4 border-b border-zinc-800")], [
-        html.h2([
-          attr.class("text-xl md:text-2xl text-pink-600 font-light mb-2")
-        ], [
-          html.text("Editing Article")
+    html.article([attr.class("with-transition")], [
+      html.div([attr.class("mb-4")], [
+        html.label(
+          [attr.class("block text-sm font-medium text-zinc-400 mb-1")],
+          [html.text("Slug")],
+        ),
+        html.input([
+          attr.class(
+            "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 font-light",
+          ),
+          attr.value(draft.slug),
+          attr.id("edit-title-" <> article.slug),
+          event.on_input(ArticleDraftUpdatedSlug(article, _)),
         ]),
-        html.p([attr.class("text-zinc-500 text-sm")], [
-          html.text("Make your changes below and click Save when you're done.")
+      ]),
+      html.div([attr.class("mb-4")], [
+        html.label(
+          [attr.class("block text-sm font-medium text-zinc-400 mb-1")],
+          [html.text("Title")],
+        ),
+        html.input([
+          attr.class(
+            "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 text-3xl text-pink-700 font-light",
+          ),
+          attr.value(draft.title),
+          attr.id("edit-title-" <> article.slug),
+          event.on_input(ArticleDraftUpdatedTitle(article, _)),
         ]),
       ]),
       
@@ -1560,47 +1638,6 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
       ]),
     ]),
   ]
-}
-
-// Helper function to update article content
-fn update_article_content(article: Article, content_text: String) -> Article {
-  // This is a simplified implementation - in a real app you'd parse the content text
-  // into proper Content structures
-  case article {
-    ArticleFull(slug, revision, title, leading, subtitle, _) -> {
-      let parsed_content = [content.Text(content_text)]
-      ArticleFull(slug, revision, title, leading, subtitle, parsed_content)
-    }
-    _ -> {
-      // Convert other article types to ArticleFull with the new content
-      let slug = article.slug
-      let revision = article.revision
-      let title = article.title
-      let leading = article.leading
-      let subtitle = article.subtitle
-      let parsed_content = [content.Text(content_text)]
-      ArticleFull(slug, revision, title, leading, subtitle, parsed_content)
-    }
-  }
-}
-
-// Helper function to convert content to string for editing
-fn content_to_string(content: List(Content)) -> String {
-  content
-  |> list.map(fn(c) {
-    case c {
-      content.Text(text) -> text
-      content.Image(url, alt) -> "image not implemented"
-      content.Block(_) -> "block not implemented"
-      content.Heading(_) -> "heading not implemented"
-      content.Link(_, _) -> "link not implemented"
-      content.LinkExternal(_, _) -> "link external not implemented"
-      content.List(_) -> "list not implemented"
-      content.Paragraph(_) -> "paragraph not implemented"
-      content.Unknown(_) -> "unknown not implemented"
-    }
-  })
-  |> string.join("\n\n")
 }
 
 fn view_article(article: Article) -> List(Element(msg)) {
