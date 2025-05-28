@@ -21,7 +21,7 @@ pub fn login(msg, username: String, password: String) -> Effect(a) {
     request.new()
     |> request.set_method(gleam_http.Get)
     |> request.set_scheme(gleam_http.Http)
-    |> request.set_host("127.0.0.1")
+    |> request.set_host("localhost")
     |> request.set_path("/api/auth")
     |> request.set_port(8080)
   // |> request.set_body(
@@ -47,10 +47,10 @@ pub fn auth_check(msg) -> Effect(a) {
     request.new()
     |> request.set_method(gleam_http.Get)
     |> request.set_scheme(gleam_http.Http)
-    |> request.set_host("127.0.0.1")
+    |> request.set_host("localhost")
     |> request.set_path("/api/auth/check")
     |> request.set_port(8080)
-
+    |> request.set_header("credentials", "include")
   http.send(request, http.expect_json(auth_check_decoder(), msg))
 }
 
@@ -59,4 +59,15 @@ pub fn auth_check_decoder() -> Decoder(#(Bool, String, List(String))) {
   use subject <- decode.field("subject", decode.string)
   use permissions <- decode.field("permissions", decode.list(decode.string))
   decode.success(#(valid, subject, permissions))
+}
+
+pub type Session {
+  Session(subject: String, token: String, expiry: Int)
+}
+
+pub fn session_decoder() -> Decoder(Session) {
+  use subject <- decode.field("subject", decode.string)
+  use token <- decode.field("token", decode.string)
+  use expiry <- decode.field("expiry", decode.int)
+  decode.success(Session(subject, token, expiry))
 }

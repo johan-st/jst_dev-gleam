@@ -45,6 +45,7 @@ pub fn main() {
 
 type Model {
   Model(
+    // session: Session,
     route: Route,
     articles: RemoteData(Dict(String, Article), HttpError),
     // user_messages: List(UserMessage),
