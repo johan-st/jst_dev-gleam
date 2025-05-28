@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/golang-jwt/jwt"
 )
@@ -165,22 +166,26 @@ type JwtClaims struct {
 //
 // JwtVerify verifies a JWT token using the provided secret and returns the subject and associated permissions.
 // Returns an error if the token is invalid or the claims cannot be parsed.
-func JwtVerify(secret, tokenStr string) (string, []Permission, error) {
+func JwtVerify(secret, audienceName, tokenStr string) (string, []Permission, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &JwtClaims{}, func(token *jwt.Token) (any, error) {
-		return secret, nil
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(secret), nil
 	})
 	if err != nil {
 		return "", nil, fmt.Errorf("invalid token: %w", err)
 	}
-
 	claims, ok := token.Claims.(*JwtClaims)
 	if !ok {
 		return "", nil, fmt.Errorf("invalid custom claims token")
 	}
-
 	err = claims.Valid()
 	if err != nil {
 		return "", nil, fmt.Errorf("invalid token: %w", err)
+	}
+	if !strings.Contains(claims.Audience, audienceName) {
+		return "", nil, fmt.Errorf("invalid audience: %s", claims.Audience)
 	}
 
 	return claims.Subject, claims.Permissions, nil

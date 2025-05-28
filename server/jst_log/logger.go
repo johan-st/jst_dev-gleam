@@ -130,13 +130,14 @@ func (l *Logger) Fatal(msg string, args ...any) {
 }
 
 func (l *Logger) log(level Level, msg string, args ...any) {
+	msg = strings.TrimSuffix(msg, "\n") + "\n"
+
 	if l.nc == nil {
-		fmt.Printf("[logger has no connection. Message in queue] %s\n", msg)
+		fmt.Printf("[local] %s\n", msg)
 		l.queue = append(l.queue, LogMessage{level, msg, args})
 		return
 	}
 	unixMicro := strconv.FormatInt(time.Now().UnixMicro(), 10)
-	// Format the message if args are provided
 	if len(args) > 0 {
 		msg = fmt.Sprintf(msg, args...)
 	}
