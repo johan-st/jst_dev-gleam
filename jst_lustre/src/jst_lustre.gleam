@@ -1326,66 +1326,34 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
   echo "asserts succeded"
   [
     html.article([attr.class("with-transition")], [
-      html.div([attr.class("mb-4")], [
-        html.label(
-          [attr.class("block text-sm font-medium text-zinc-400 mb-1")],
-          [html.text("Slug")],
-        ),
-        html.input([
-          attr.class(
-            "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 font-light",
-          ),
-          attr.value(draft.slug),
-          attr.id("edit-title-" <> article.slug),
-          event.on_input(ArticleDraftUpdatedSlug(article, _)),
-        ]),
-      ]),
-      html.div([attr.class("mb-4")], [
-        html.label(
-          [attr.class("block text-sm font-medium text-zinc-400 mb-1")],
-          [html.text("Title")],
-        ),
-        html.input([
-          attr.class(
-            "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 text-3xl text-pink-700 font-light",
-          ),
-          attr.value(draft.title),
-          attr.id("edit-title-" <> article.slug),
-          event.on_input(ArticleDraftUpdatedTitle(article, _)),
-        ]),
-      ]),
-      html.div([attr.class("mb-4")], [
-        html.label(
-          [attr.class("block text-sm font-medium text-zinc-400 mb-1")],
-          [html.text("Subtitle")],
-        ),
-        html.input([
-          attr.class(
-            "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 text-md text-zinc-500 font-light",
-          ),
-          attr.value(draft.subtitle),
-          attr.id("edit-subtitle-" <> article.slug),
-          event.on_input(ArticleDraftUpdatedSubtitle(article, _)),
-        ]),
-      ]),
-      html.div([attr.class("mb-4")], [
-        html.label(
-          [attr.class("block text-sm font-medium text-zinc-400 mb-1")],
-          [html.text("Leading Text")],
-        ),
-        html.textarea(
-          [
-            attr.class(
-              "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 font-bold",
-            ),
-            attr.value(draft.leading),
-            attr.id("edit-leading-" <> article.slug),
-            attr.rows(3),
-            event.on_input(ArticleDraftUpdatedLeading(article, _)),
-          ],
-          draft.leading <> "maybe this is a test",
-        ),
-      ]),
+      view_article_edit_input(
+        "Slug",
+        ArticleEditInputTypeSlug,
+        draft.slug,
+        ArticleDraftUpdatedSlug(article, _),
+        article.slug,
+      ),
+      view_article_edit_input(
+        "Title",
+        ArticleEditInputTypeTitle,
+        draft.title,
+        ArticleDraftUpdatedTitle(article, _),
+        article.slug,
+      ),
+      view_article_edit_input(
+        "Subtitle",
+        ArticleEditInputTypeSubtitle,
+        draft.subtitle,
+        ArticleDraftUpdatedSubtitle(article, _),
+        article.slug,
+      ),
+      view_article_edit_input(
+        "Leading",
+        ArticleEditInputTypeLeading,
+        draft.leading,
+        ArticleDraftUpdatedLeading(article, _),
+        article.slug,
+      ),
       // Content editor with support for different content types
       html.div([attr.class("mb-4")], [
         html.label(
@@ -1469,6 +1437,50 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
       ]),
     ]),
   ]
+}
+
+type ArticleEditInputType {
+  ArticleEditInputTypeSlug
+  ArticleEditInputTypeTitle
+  ArticleEditInputTypeSubtitle
+  ArticleEditInputTypeLeading
+}
+
+fn view_article_edit_input(
+  label: String,
+  input_type: ArticleEditInputType,
+  value: String,
+  on_input: fn(String) -> Msg,
+  article_slug: String,
+) -> Element(Msg) {
+  let label_classes = attr.class("block text-sm font-medium text-zinc-400 mb-1")
+  let input_classes = case input_type {
+    ArticleEditInputTypeSlug ->
+      attr.class(
+        "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 font-light",
+      )
+    ArticleEditInputTypeTitle ->
+      attr.class(
+        "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 text-3xl text-pink-700 font-light",
+      )
+    ArticleEditInputTypeSubtitle ->
+      attr.class(
+        "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 text-md text-zinc-500 font-light",
+      )
+    ArticleEditInputTypeLeading ->
+      attr.class(
+        "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 font-bold",
+      )
+  }
+  html.div([attr.class("mb-4")], [
+    html.label([label_classes], [html.text(label)]),
+    html.input([
+      input_classes,
+      attr.value(value),
+      attr.id("edit-" <> article_slug <> "-" <> label),
+      event.on_input(on_input),
+    ]),
+  ])
 }
 
 fn view_article(article: Article) -> List(Element(msg)) {
