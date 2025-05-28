@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -15,8 +14,6 @@ import (
 	"jst_dev/server/talk"
 	web "jst_dev/server/web"
 	"jst_dev/server/who"
-
-	"github.com/nats-io/nats.go"
 )
 
 const (
@@ -117,9 +114,6 @@ func run(
 		return fmt.Errorf("start who: %w", err)
 	}
 
-	// - debug
-	initDefaultUserCleanup := initDefaultUser(lRoot.WithBreadcrumb("initDefaultUser"), nc)
-
 	// - web
 	l.Debug("http server, start")
 	httpServer := web.New(ctx, nc, SHARED_ENV_jwtSecret, lRoot.WithBreadcrumb("http"))
@@ -144,9 +138,7 @@ func run(
 	cancel()
 
 	l.Info("Received interrupt signal, starting graceful shutdown...")
-	if initDefaultUserCleanup != nil {
-		initDefaultUserCleanup()
-	}
+
 	// Drain connections
 	l.Debug("draining connections")
 	err = nc.Drain()
@@ -169,66 +161,4 @@ func run(
 	cleanShutdown.Wait()
 	fmt.Println("Server shutdown complete")
 	return nil
-}
-
-// initDefaultUser creates a default user by sending a request over NATS and returns a cleanup function to delete the user.
-// If user creation fails, it returns nil. The cleanup function publishes a delete request for the created user.
-func initDefaultUser(l *jst_log.Logger, nc *nats.Conn) func() {
-	type userCreateReq struct {
-		Username string `json:"username"`
-		Email    string `json:"email"`
-		Password string `json:"password"`
-	}
-	type userCreateResp struct {
-		ID string `json:"id"`
-	}
-
-	reqData := userCreateReq{
-		Username: "johan",
-		Email:    "johan@example.com",
-		Password: "password",
-	}
-	reqDataBytes, err := json.Marshal(reqData)
-	if err != nil {
-		l.Error("marshal: %w", err)
-		return nil
-	}
-
-	if nc == nil {
-		l.Error("nc is nil")
-		return nil
-	}
-
-	if nc.Status() != nats.CONNECTED {
-		l.Error("nc is not connected")
-		return nil
-	}
-
-	l.Debug("nc status: %s", nc.Status())
-	l.Debug("nc connected: %t", nc.IsConnected())
-	l.Debug("nc draining: %t", nc.IsDraining())
-	l.Debug("nc reconnecting: %t", nc.IsReconnecting())
-	l.Debug("nc closed: %t", nc.IsClosed())
-
-	time.Sleep(1 * time.Second)
-
-	l.Debug("requesting user create")
-	msg, err := nc.Request("svc.who.users.create", reqDataBytes, 10*time.Second)
-	if err != nil {
-		l.Error("request: %w", err)
-		return nil
-	}
-
-	var respData userCreateResp
-	err = json.Unmarshal(msg.Data, &respData)
-	if err != nil {
-		l.Error("unmarshal: %w", err)
-		return nil
-	}
-
-	l.Debug("got response: %+v", respData)
-	return func() {
-		l.Debug("cleaning up")
-		nc.Publish("who.users.delete", []byte(respData.ID))
-	}
 }
