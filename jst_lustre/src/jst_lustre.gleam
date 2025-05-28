@@ -1423,65 +1423,52 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
   echo "asserts succeded"
   [
     html.article([attr.class("with-transition")], [
+      view_article_edit_input(
+        "Slug",
+        ArticleEditInputTypeSlug,
+        draft.slug,
+        ArticleDraftUpdatedSlug(article, _),
+        article.slug,
+      ),
+      view_article_edit_input(
+        "Title",
+        ArticleEditInputTypeTitle,
+        draft.title,
+        ArticleDraftUpdatedTitle(article, _),
+        article.slug,
+      ),
+      view_article_edit_input(
+        "Subtitle",
+        ArticleEditInputTypeSubtitle,
+        draft.subtitle,
+        ArticleDraftUpdatedSubtitle(article, _),
+        article.slug,
+      ),
+      view_article_edit_input(
+        "Leading",
+        ArticleEditInputTypeLeading,
+        draft.leading,
+        ArticleDraftUpdatedLeading(article, _),
+        article.slug,
+      ),
+      // Content editor with support for different content types
       html.div([attr.class("mb-4")], [
         html.label(
           [attr.class("block text-sm font-medium text-zinc-400 mb-1")],
-          [html.text("Slug")],
+          [html.text("Content")],
         ),
-        html.input([
-          attr.class(
-            "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 font-light",
-          ),
-          attr.value(draft.slug),
-          attr.id("edit-title-" <> article.slug),
-          event.on_input(ArticleDraftUpdatedSlug(article, _)),
-        ]),
-      ]),
-      html.div([attr.class("mb-4")], [
-        html.label(
-          [attr.class("block text-sm font-medium text-zinc-400 mb-1")],
-          [html.text("Title")],
+        // Content blocks container
+        html.div(
+          [attr.class("space-y-4 mb-4")],
+          list.index_map(draft.content, fn(content_item, index) {
+            view_content_editor_block(content_item, index)
+          }),
         ),
-        html.input([
-          attr.class(
-            "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 text-3xl text-pink-700 font-light",
-          ),
-          attr.value(draft.title),
-          attr.id("edit-title-" <> article.slug),
-          event.on_input(ArticleDraftUpdatedTitle(article, _)),
-        ]),
-      ]),
-      
-      // Form fields
-      html.div([attr.class("space-y-6")], [
-        // Title field
-        html.div([attr.class("mb-4")], [
-          html.label(
-            [
-              attr.class("block text-sm font-medium text-zinc-400 mb-2"),
-              attr.for("edit-title-" <> article.slug),
-            ],
-            [html.text("Title")],
-          ),
-          html.input([
-            attr.class(
-              "w-full bg-zinc-800 border border-zinc-700 rounded-md p-3 text-2xl md:text-3xl text-pink-600 font-light",
-            ),
-            attr.class("focus:border-pink-600 focus:ring-1 focus:ring-pink-600 focus:outline-none transition-colors"),
-            attr.value(draft.title),
-            attr.id("edit-title-" <> article.slug),
-            event.on_input(ArticleDraftUpdatedTitle(article, _)),
-          ]),
-        ]),
-        
-        // Subtitle field
-        html.div([attr.class("mb-4")], [
-          html.label(
-            [
-              attr.class("block text-sm font-medium text-zinc-400 mb-2"),
-              attr.for("edit-subtitle-" <> article.slug),
-            ],
-            [html.text("Subtitle")],
+        // Add content buttons
+        html.div([attr.class("flex flex-wrap gap-2 mt-4")], [
+          view_add_content_button(
+            "Text",
+            ArticleDraftAddContent(article, content.Text("")),
           ),
           html.input([
             attr.class(
@@ -1639,6 +1626,50 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
       ]),
     ]),
   ]
+}
+
+type ArticleEditInputType {
+  ArticleEditInputTypeSlug
+  ArticleEditInputTypeTitle
+  ArticleEditInputTypeSubtitle
+  ArticleEditInputTypeLeading
+}
+
+fn view_article_edit_input(
+  label: String,
+  input_type: ArticleEditInputType,
+  value: String,
+  on_input: fn(String) -> Msg,
+  article_slug: String,
+) -> Element(Msg) {
+  let label_classes = attr.class("block text-sm font-medium text-zinc-400 mb-1")
+  let input_classes = case input_type {
+    ArticleEditInputTypeSlug ->
+      attr.class(
+        "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 font-light",
+      )
+    ArticleEditInputTypeTitle ->
+      attr.class(
+        "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 text-3xl text-pink-700 font-light",
+      )
+    ArticleEditInputTypeSubtitle ->
+      attr.class(
+        "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 text-md text-zinc-500 font-light",
+      )
+    ArticleEditInputTypeLeading ->
+      attr.class(
+        "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 font-bold",
+      )
+  }
+  html.div([attr.class("mb-4")], [
+    html.label([label_classes], [html.text(label)]),
+    html.input([
+      input_classes,
+      attr.value(value),
+      attr.id("edit-" <> article_slug <> "-" <> label),
+      event.on_input(on_input),
+    ]),
+  ])
 }
 
 fn view_article(article: Article) -> List(Element(msg)) {
