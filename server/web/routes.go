@@ -160,14 +160,13 @@ func handleAuth(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		l.Debug("auth handler: token: %s\n", token)
 
 		cookie := &http.Cookie{
-			Name:  cookieAuth,
-			Value: resp.Token,
-			// MaxAge:   30 * 60,
-			// Path:     "/",
-			// Domain:   "http://localhost:8080", // Let browser set the domain
-			// HttpOnly: false,
-			// Secure:   false,                 // Set to true in production
-			// SameSite: http.SameSiteNoneMode, // Changed from Strict for cross-origin
+			Name:     cookieAuth,
+			Value:    resp.Token,
+			MaxAge:   30 * 60,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   true,
+			SameSite: http.SameSiteStrictMode,
 		}
 		err = cookie.Valid()
 		if err != nil {
