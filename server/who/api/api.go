@@ -110,9 +110,6 @@ const (
 	PermissionUserRevokeAny  Permission = "user_revoke_any"
 )
 
-type PermissionsListRequest struct {
-	ID string `json:"id"`
-}
 type PermissionsListResponse struct {
 	Permissions []Permission `json:"permissions"`
 }
