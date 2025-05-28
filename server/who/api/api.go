@@ -45,6 +45,7 @@ var Subj = struct {
 type User struct {
 	Version     int
 	ID          string
+	Revision    uint64
 	Username    string
 	Email       string
 	Permissions []Permission
@@ -52,6 +53,7 @@ type User struct {
 
 type UserFullResponse struct {
 	ID          string       `json:"id"`
+	Revision    uint64       `json:"revision"`
 	Username    string       `json:"username"`
 	Email       string       `json:"email"`
 	Permissions []Permission `json:"permissions"`
@@ -65,18 +67,21 @@ type UserCreateRequest struct {
 
 type UserGetRequest struct {
 	ID       string `json:"id,omitempty"`
+	Revision uint64 `json:"revision,omitempty"`
 	Username string `json:"username,omitempty"`
 	Email    string `json:"email,omitempty"`
 }
 
 type UserUpdateRequest struct {
 	ID       string `json:"id"`
+	Revision uint64 `json:"revision,omitempty"`
 	Username string `json:"username,omitempty"`
 	Email    string `json:"email,omitempty"`
 	Password string `json:"password,omitempty"`
 }
 type UserUpdateResponse struct {
 	ID              string `json:"id"`
+	Revision        uint64 `json:"revision"`
 	Username        string `json:"username"`
 	Email           string `json:"email"`
 	PasswordChanged bool   `json:"passwordChanged"`
@@ -113,31 +118,31 @@ type PermissionsListResponse struct {
 }
 
 type PermissionsGrantRequest struct {
-	ID         string     `json:"id"`
-	Permission Permission `json:"permission"`
+	ID          string       `json:"id"`
+	Permissions []Permission `json:"permissions"`
 }
 type PermissionsGrantResponse struct {
-	ID    string     `json:"id"`
-	Added Permission `json:"added"`
+	ID    string       `json:"id"`
+	Added []Permission `json:"added"`
 }
 
 type PermissionsRevokeRequest struct {
-	ID         string     `json:"id"`
-	Permission Permission `json:"permission"`
+	ID          string       `json:"id"`
+	Permissions []Permission `json:"permissions"`
 }
 type PermissionsRevokeResponse struct {
-	ID      string     `json:"id"`
-	Removed Permission `json:"removed"`
+	ID      string       `json:"id"`
+	Removed []Permission `json:"removed"`
 }
 
 type PermissionsCheckRequest struct {
-	ID         string     `json:"id"`
-	Permission Permission `json:"permission"`
+	ID          string       `json:"id"`
+	Permissions []Permission `json:"permissions"`
 }
 type PermissionsCheckResponse struct {
-	ID         string     `json:"id"`
-	Permission Permission `json:"permission"`
-	Granted    bool       `json:"granted"`
+	ID          string       `json:"id"`
+	Permissions []Permission `json:"permissions"`
+	AllGranted  bool         `json:"allGranted"`
 }
 
 // AUTH

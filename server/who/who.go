@@ -492,15 +492,17 @@ func (w *Who) handlePermissionsGrant() micro.HandlerFunc {
 			req.Error("NOT_FOUND", "user not found and could thus not be granted permission", []byte(reqData.ID))
 			return
 		}
-		err = w.userAddPermission(user, reqData.Permission)
-		if err != nil {
-			l.Warn(fmt.Sprintf("failed to add permission: %s", err.Error()))
-			req.Error("OPERATION_FAILED", "the operation failed to complete", []byte(err.Error()))
-			return
+		for _, perm := range reqData.Permissions {
+			err = w.userAddPermission(user, perm)
+			if err != nil {
+				l.Warn(fmt.Sprintf("failed to add permission: %s", err.Error()))
+				req.Error("OPERATION_FAILED", "the operation failed to complete", []byte(err.Error()))
+				return
+			}
 		}
 		respData = api.PermissionsGrantResponse{
 			ID:    user.ID,
-			Added: reqData.Permission,
+			Added: reqData.Permissions,
 		}
 		req.RespondJSON(respData)
 	}
@@ -528,15 +530,17 @@ func (w *Who) handlePermissionsRevoke() micro.HandlerFunc {
 			req.Error("NOT_FOUND", "user not found and could thus not be revoked permission", []byte(reqData.ID))
 			return
 		}
-		err = w.userRemovePermission(user, reqData.Permission)
-		if err != nil {
-			l.Warn(fmt.Sprintf("failed to remove permission: %s", err.Error()))
-			req.Error("OPERATION_FAILED", "the operation failed to complete", []byte(err.Error()))
-			return
+		for _, perm := range reqData.Permissions {
+			err = w.userRemovePermission(user, perm)
+			if err != nil {
+				l.Warn(fmt.Sprintf("failed to remove permission: %s", err.Error()))
+				req.Error("OPERATION_FAILED", "the operation failed to complete", []byte(err.Error()))
+				return
+			}
 		}
 		respData = api.PermissionsRevokeResponse{
 			ID:      user.ID,
-			Removed: reqData.Permission,
+			Removed: reqData.Permissions,
 		}
 		req.RespondJSON(respData)
 	}
@@ -566,9 +570,9 @@ func (w *Who) handlePermissionsCheck() micro.HandlerFunc {
 			return
 		}
 		respData = api.PermissionsCheckResponse{
-			ID:         user.ID,
-			Permission: reqData.Permission,
-			Granted:    w.permGranted(user, reqData.Permission),
+			ID:          user.ID,
+			Permissions: reqData.Permissions,
+			AllGranted:  w.permGranted(user, reqData.Permissions),
 		}
 		req.RespondJSON(respData)
 	}
@@ -657,7 +661,7 @@ func (w *Who) userCreate(username, email, password string) (*User, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal user: %w", err)
 	}
-	rev, err = w.usersKv.Put(user.ID, userBytes)
+	rev, err = w.usersKv.Create(user.ID, userBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to put user in kv: %w", err)
 	}
@@ -690,16 +694,21 @@ func (w *Who) userByEmail(email string) *User {
 	return nil
 }
 
-func (w *Who) permGranted(user *User, perm api.Permission) bool {
-	return slices.Contains(user.Permissions, perm)
+func (w *Who) permGranted(user *User, perms []api.Permission) bool {
+	for _, perm := range perms {
+		if !slices.Contains(user.Permissions, perm) {
+			return false
+		}
+	}
+	return true
 }
 
 func (w *Who) userAddPermission(user *User, perm api.Permission) error {
 	if !slices.Contains(PermissionsAll, perm) {
-		return fmt.Errorf("invalid permission")
+		return fmt.Errorf("permission %s is not a valid permission", perm)
 	}
-	if w.permGranted(user, perm) {
-		return fmt.Errorf("permission already exists")
+	if w.permGranted(user, []api.Permission{perm}) {
+		return fmt.Errorf("permission %s already exists", perm) // TODO: should this be an error?
 	}
 	user.Permissions = append(user.Permissions, perm)
 	return nil
