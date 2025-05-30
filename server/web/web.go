@@ -52,7 +52,7 @@ func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger
 	// Apply global middleware to create the final handler
 	// note: last added is first called
 	var handler http.Handler = s.mux
-	handler = logger(handler)
+	handler = logger(l.WithBreadcrumb("log"), handler)
 	handler = authJwt(jwtSecret, handler)
 	handler = cors(handler)
 	s.handler = handler // Store the wrapped handler

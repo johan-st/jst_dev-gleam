@@ -41,9 +41,14 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 
 // --- MIDDLEWARE ---
 
-func logger(next http.Handler) http.Handler {
+func logger(l *jst_log.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("logger handler called")
+		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		if ok {
+			l.Debug("%s %s %s", r.Method, r.URL.Path, user.ID)
+		} else {
+			l.Debug("%s %s (no_user)", r.Method, r.URL.Path)
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -99,16 +104,14 @@ func authJwt(jwtSecret string, next http.Handler) http.Handler {
 
 func handleProxy(l *jst_log.Logger, targetUrl string) http.Handler {
 
-	l.Debug("handleProxy: parsing target URL: %s\n", targetUrl)
 	proxyUrl, err := url.Parse(targetUrl)
 	if err != nil {
 		l.Error("handleProxy: error parsing target URL: %s\n", err)
 		panic(err)
 	}
-	l.Debug("handleProxy: successfully parsed URL, creating reverse proxy")
 	proxy := httputil.NewSingleHostReverseProxy(proxyUrl)
 
-	l.Debug("ready")
+	l.Debug("ready (%s)", targetUrl)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		l.Debug("handleProxy: proxying request %s %s to %s\n", r.Method, r.URL.Path, targetUrl)
 		proxy.ServeHTTP(w, r)
@@ -120,7 +123,7 @@ func handleAuth(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		l.Debug("auth handler: cookies=%v\n", r.Cookies())
 
 		req := whoApi.AuthRequest{
-			Username: "johan",
+			Username:    "johan-st",
 			Password: "password",
 		}
 		reqBytes, err := json.Marshal(req)
@@ -138,7 +141,7 @@ func handleAuth(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 			http.Error(w, "error requesting auth", http.StatusInternalServerError)
 			return
 		}
-		l.Debug("auth handler: %s\n", msg.Data)
+		l.Debug("auth handler: msg.Data: %s\n", string(msg.Data))
 		resp := whoApi.AuthResponse{}
 		err = json.Unmarshal(msg.Data, &resp)
 		if err != nil {
