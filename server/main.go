@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"jst_dev/server/blog"
+	"jst_dev/server/articles"
 	"jst_dev/server/jst_log"
 	"jst_dev/server/talk"
 	web "jst_dev/server/web"
@@ -87,17 +87,17 @@ func run(
 	time.Sleep(1 * time.Millisecond)
 
 	// - blog
-	l.Debug("starting blog")
-	blogSvc, err := blog.New(nc, lRoot.WithBreadcrumb("blog"))
-	if err != nil {
-		return fmt.Errorf("new blog: %w", err)
-	}
-	err = blogSvc.Start(ctx)
-	if err != nil {
-		return fmt.Errorf("start blog: %w", err)
-	}
+	// l.Debug("starting blog")
+	// blogSvc, err := blog.New(nc, lRoot.WithBreadcrumb("blog"))
+	// if err != nil {
+	// 	return fmt.Errorf("new blog: %w", err)
+	// }
+	// err = blogSvc.Start(ctx)
+	// if err != nil {
+	// 	return fmt.Errorf("start blog: %w", err)
+	// }
 
-	// --- Who ---
+	// - who 
 	l.Debug("starting who")
 	whoConf := &who.Conf{
 		Logger:    lRoot.WithBreadcrumb("who"),
@@ -114,9 +114,16 @@ func run(
 		return fmt.Errorf("start who: %w", err)
 	}
 
+	// - articles
+	l.Debug("starting articles")
+	articleRepo, err := articles.Repo(ctx, nc, lRoot.WithBreadcrumb("articles	"))
+	if err != nil {
+		return fmt.Errorf("new articles: %w", err)
+	}
+
 	// - web
 	l.Debug("http server, start")
-	httpServer := web.New(ctx, nc, SHARED_ENV_jwtSecret, lRoot.WithBreadcrumb("http"))
+	httpServer := web.New(ctx, nc, SHARED_ENV_jwtSecret, lRoot.WithBreadcrumb("http"), articleRepo)
 	go httpServer.Run(cleanShutdown)
 
 	// ------------------------------------------------------------
