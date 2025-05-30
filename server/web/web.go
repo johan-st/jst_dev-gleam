@@ -29,16 +29,10 @@ var embedded embed.FS
 
 // New initializes and returns a new httpServer instance with embedded static files and an article repository.
 // Returns nil if the static files or article repository cannot be initialized.
-func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger) *httpServer {
+func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger, articleRepo articles.ArticleRepo) *httpServer {
 	fs, err := fs.Sub(embedded, "static")
 	if err != nil {
 		l.Error("Failed to load static folder")
-		return nil
-	}
-	// artRepo, err := articles.RepoWithInMemCache(ctx, nc, l.WithBreadcrumb("articleRepo"))
-	artRepo, err := articles.Repo(ctx, nc, l.WithBreadcrumb("articleRepo"))
-	if err != nil {
-		l.Error("Failed to create article repo: %s", err)
 		return nil
 	}
 
@@ -47,14 +41,14 @@ func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger
 		ctx:         ctx,
 		l:           l,
 		embedFs:     fs,
-		articleRepo: artRepo,
+		articleRepo: articleRepo,
 		mux:         http.NewServeMux(),
 	}
 
 	// Set up routes on the mux
-	routes(s.mux, l.WithBreadcrumb("route"), artRepo, nc, jwtSecret)
+	routes(s.mux, l.WithBreadcrumb("route"), s.articleRepo, nc, jwtSecret)
 
-	// Apply middleware to create the final handler
+	// Apply global middleware to create the final handler
 	// note: last added is first called
 	var handler http.Handler = s.mux
 	handler = logger(handler)
