@@ -20,6 +20,7 @@ pub fn hello_world_test() {
 pub fn article_encoder_and_decoder_test() {
   let a_full =
     ArticleFull(
+      id: "1",
       slug: "test",
       revision: 1,
       leading: "leading",
@@ -29,6 +30,7 @@ pub fn article_encoder_and_decoder_test() {
     )
   let a_sum =
     ArticleSummary(
+      id: "2",
       slug: "test2",
       revision: 1,
       leading: "leading",
@@ -37,6 +39,7 @@ pub fn article_encoder_and_decoder_test() {
     )
   let a_err =
     ArticleWithError(
+      id: "3",
       slug: "test3",
       revision: 1,
       leading: "leading",
@@ -71,6 +74,7 @@ pub fn model_encoder_and_decoder_test() {
   let model_v1 =
     PersistentModelV1(version: 1, articles: [
       ArticleFull(
+        id: "1",
         slug: "test",
         revision: 1,
         leading: "leading",
@@ -79,6 +83,7 @@ pub fn model_encoder_and_decoder_test() {
         content: [Heading("test"), Paragraph([Text("test")])],
       ),
       ArticleSummary(
+        id: "2",
         slug: "test2",
         revision: 1,
         leading: "leading",
@@ -86,6 +91,7 @@ pub fn model_encoder_and_decoder_test() {
         subtitle: "subtitle",
       ),
       ArticleWithError(
+        id: "3",
         slug: "test3",
         revision: 1,
         leading: "leading",

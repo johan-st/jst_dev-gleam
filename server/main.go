@@ -106,7 +106,7 @@ func run(
 		JwtSecret: []byte(SHARED_ENV_jwtSecret),
 		HashSalt:  "jst_dev_salt",
 	}
-	whoSvc, err := who.New(whoConf)
+	whoSvc, err := who.New(ctx, whoConf)
 	if err != nil {
 		return fmt.Errorf("new who: %w", err)
 	}

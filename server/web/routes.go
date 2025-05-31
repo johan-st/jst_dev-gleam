@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 )
 
@@ -26,9 +27,9 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 	// Add routes with their respective handlers
 	mux.Handle("GET /api/seed", handleSeed(l, repo))
 	mux.Handle("GET /api/article/", handleArticleList(l, repo))
-	mux.Handle("POST /api/article", handleArticleNew(l, repo))
-	mux.Handle("PUT /api/article", handleArticleUpdate(l, repo))
-	mux.Handle("GET /api/article/{slug}/", handleArticle(l, repo))
+	mux.Handle("POST /api/article/", handleArticleNew(l, repo))
+	mux.Handle("PUT /api/article/{id}/", handleArticleUpdate(l, repo))
+	mux.Handle("GET /api/article/{id}/", handleArticle(l, repo))
 
 	// auth
 	mux.Handle("GET /api/auth", handleAuth(l, nc))
@@ -286,15 +287,21 @@ func handleArticle(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 	logger.Debug("ready")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		slug := r.PathValue("slug")
-		article, err := repo.Get(slug)
+		id := r.PathValue("id")
+		idUuid, err := uuid.Parse(id)
+		if err != nil {
+			logger.Error("failed to parse id: %s", err.Error())
+			http.Error(w, "failed to parse id", http.StatusBadRequest)
+			return
+		}
+		article, err := repo.Get(idUuid)
 		if err != nil {
 			logger.Error("failed to get article: %s", err.Error())
 			http.Error(w, "failed to get article", http.StatusInternalServerError)
 			return
 		}
 		if article == nil {
-			logger.Info("not found, article \"%s\"", slug)
+			logger.Info("not found, article \"%s\"", id)
 			http.NotFound(w, r)
 			return
 		}
@@ -364,7 +371,7 @@ func handleArticleUpdate(l *jst_log.Logger, repo articles.ArticleRepo) http.Hand
 		}
 		rev, err := repo.Update(articles.Article{
 			StructVersion: 1,
-			Rev:           req.Rev,
+			Rev:           uint64(req.Rev),
 			Slug:          req.Slug,
 			Title:         req.Title,
 			Subtitle:      req.Subtitle,

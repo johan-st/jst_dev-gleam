@@ -1,9 +1,12 @@
 package articles
 
+import "github.com/google/uuid"
+
 // NatsAllTheWayDown returns an Article containing a narrative about adopting NATS as a messaging system, including reflections on its impact and usage in Go applications.
 func NatsAllTheWayDown() Article {
 	return Article{
 		StructVersion: 1,
+		Id:            uuid.New(),
 		Slug:          "nats-all-the-way-down",
 		Rev:           10,
 		Title:         "Nats All The Way Down",
@@ -37,6 +40,7 @@ func NatsAllTheWayDown() Article {
 func TestArticle() Article {
 	return Article{
 		StructVersion: 1,
+		Id:            uuid.New(),
 		Slug:          "test-article",
 		Rev:           9,
 		Title:         "Test Article",

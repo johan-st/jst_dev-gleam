@@ -18,6 +18,7 @@ import utils/remote_data.{type RemoteData}
 
 pub type Article {
   ArticleSummary(
+    id: String,
     slug: String,
     revision: Int,
     title: String,
@@ -25,6 +26,7 @@ pub type Article {
     subtitle: String,
   )
   ArticleFull(
+    id: String,
     slug: String,
     revision: Int,
     title: String,
@@ -33,6 +35,7 @@ pub type Article {
     content: List(Content),
   )
   ArticleWithError(
+    id: String,
     slug: String,
     revision: Int,
     title: String,
@@ -41,6 +44,7 @@ pub type Article {
     error: String,
   )
   ArticleFullWithDraft(
+    id: String,
     slug: String,
     revision: Int,
     title: String,
@@ -53,15 +57,14 @@ pub type Article {
 
 // Fetch ------------------------------------------------------------------------
 
-pub fn article_get(msg, slug: String) -> Effect(a) {
+pub fn article_get(msg, id: String) -> Effect(a) {
   let request =
     request.new()
     |> request.set_method(gleam_http.Get)
     |> request.set_scheme(gleam_http.Http)
     |> request.set_host("localhost")
-    |> request.set_path("/api/article/" <> slug)
+    |> request.set_path("/api/article/" <> id)
     |> request.set_port(8080)
-    // |> request.set_header("Cookie", "jst.dev.who=" <> jwt)
   http.send(request, http.expect_json(article_decoder(), msg))
 }
 
@@ -184,6 +187,7 @@ fn metadata_decoder() -> decode.Decoder(List(Article)) {
 
 pub fn article_decoder() -> decode.Decoder(Article) {
   use article_type <- decode.optional_field("type", "not_set", decode.string)
+  use id <- decode.field("id", decode.string)
   use slug <- decode.field("slug", decode.string)
   use revision <- decode.field("revision", decode.int)
   use title <- decode.field("title", decode.string)
@@ -193,6 +197,7 @@ pub fn article_decoder() -> decode.Decoder(Article) {
   let decode_full = fn() -> decode.Decoder(Article) {
     use content <- decode.field("content", decode.list(content_decoder()))
     decode.success(ArticleFull(
+      id:,
       slug:,
       revision:,
       title:,
@@ -205,6 +210,7 @@ pub fn article_decoder() -> decode.Decoder(Article) {
   let decode_error = fn() -> decode.Decoder(Article) {
     use error <- decode.field("error", decode.string)
     decode.success(ArticleWithError(
+      id:,
       slug:,
       revision:,
       title:,
@@ -215,7 +221,14 @@ pub fn article_decoder() -> decode.Decoder(Article) {
   }
 
   let decode_summary = fn() -> decode.Decoder(Article) {
-    decode.success(ArticleSummary(slug:, revision:, title:, leading:, subtitle:))
+    decode.success(ArticleSummary(
+      id:,
+      slug:,
+      revision:,
+      title:,
+      leading:,
+      subtitle:,
+    ))
   }
 
   decode.one_of(decode_full(), [decode_error(), decode_summary()])
@@ -225,9 +238,10 @@ pub fn article_decoder() -> decode.Decoder(Article) {
 
 pub fn article_encoder(article: Article) -> json.Json {
   case article {
-    ArticleSummary(slug, revision, title, leading, subtitle) -> {
+    ArticleSummary(id, slug, revision, title, leading, subtitle) -> {
       json.object([
         #("type", json.string("metadata_v1")),
+        #("id", json.string(id)),
         #("revision", json.int(revision)),
         #("slug", json.string(slug)),
         #("title", json.string(title)),
@@ -235,9 +249,10 @@ pub fn article_encoder(article: Article) -> json.Json {
         #("subtitle", json.string(subtitle)),
       ])
     }
-    ArticleFull(slug, revision, title, leading, subtitle, content) -> {
+    ArticleFull(id, slug, revision, title, leading, subtitle, content) -> {
       json.object([
         #("type", json.string("article_v1")),
+        #("id", json.string(id)),
         #("revision", json.int(revision)),
         #("slug", json.string(slug)),
         #("title", json.string(title)),
@@ -246,9 +261,10 @@ pub fn article_encoder(article: Article) -> json.Json {
         #("content", json.array(content, of: content_encoder)),
       ])
     }
-    ArticleWithError(slug, revision, title, leading, subtitle, error) -> {
+    ArticleWithError(id, slug, revision, title, leading, subtitle, error) -> {
       json.object([
         #("type", json.string("with_error_v1")),
+        #("id", json.string(id)),
         #("revision", json.int(revision)),
         #("slug", json.string(slug)),
         #("title", json.string(title)),
@@ -258,6 +274,7 @@ pub fn article_encoder(article: Article) -> json.Json {
       ])
     }
     ArticleFullWithDraft(
+      id,
       slug,
       revision,
       title,
@@ -268,6 +285,7 @@ pub fn article_encoder(article: Article) -> json.Json {
     ) -> {
       json.object([
         #("type", json.string("article_v1")),
+        #("id", json.string(id)),
         #("revision", json.int(revision)),
         #("slug", json.string(slug)),
         #("title", json.string(title)),
@@ -342,24 +360,8 @@ pub fn content_encoder(content: Content) -> json.Json {
 
 pub fn draft_update(article: Article, updater: fn(Draft) -> Draft) -> Article {
   case article {
-    ArticleFullWithDraft(
-      slug,
-      revision,
-      title,
-      leading,
-      subtitle,
-      content,
-      draft,
-    ) -> {
-      ArticleFullWithDraft(
-        slug,
-        revision,
-        title,
-        leading,
-        subtitle,
-        content,
-        updater(draft),
-      )
+    ArticleFullWithDraft(_, _, _, _, _, _, _, _) -> {
+      ArticleFullWithDraft(..article, draft: updater(article.draft))
     }
     _ -> {
       echo "draft_update: not an article with draft"
@@ -380,8 +382,9 @@ pub fn list_to_dict(articles: List(Article)) -> Dict(String, Article) {
 
 pub fn loading_article() -> Article {
   ArticleWithError(
+    id: "-",
+    slug: "placeholder_loading",
     revision: 0,
-    slug: "placeholder",
     title: "fetching articles..",
     subtitle: "articles have not been fetched yet",
     leading: "This is a placeholder article. At the moment, the articles are being fetched from the server.. please wait.",
