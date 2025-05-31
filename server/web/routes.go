@@ -36,7 +36,7 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 
 	// Add catch-all route
 	// mux.Handle("/", http.NotFoundHandler())
-	mux.Handle("/", handleProxy(l.WithBreadcrumb("proxy"), "http://127.0.0.1:1234"))
+	mux.Handle("/", handleProxy(l.WithBreadcrumb("proxy_frontend"), "http://127.0.0.1:1234"))
 }
 
 // --- MIDDLEWARE ---
@@ -45,7 +45,7 @@ func logger(l *jst_log.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
 		if ok {
-			l.Debug("%s %s %s", r.Method, r.URL.Path, user.ID)
+			l.Debug("%s %s (%s)", r.Method, r.URL.Path, user.ID)
 		} else {
 			l.Debug("%s %s (no_user)", r.Method, r.URL.Path)
 		}
@@ -110,57 +110,68 @@ func handleProxy(l *jst_log.Logger, targetUrl string) http.Handler {
 		panic(err)
 	}
 	proxy := httputil.NewSingleHostReverseProxy(proxyUrl)
+	proxy.Rewrite = func(r *httputil.ProxyRequest) {
+		r.SetXForwarded()
+		r.SetURL(proxyUrl)
+		r.Out.Host = r.In.Host
+	}
+	proxy.Director = nil
+
+	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		l.Error("error proxying request: %s\n", err)
+		http.Error(w, "error proxying request", http.StatusBadGateway)
+	}
 
 	l.Debug("ready (%s)", targetUrl)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		l.Debug("handleProxy: proxying request %s %s to %s\n", r.Method, r.URL.Path, targetUrl)
+		l.Debug("proxying request %s %s to %s\n", r.Method, r.URL.Path, targetUrl)
 		proxy.ServeHTTP(w, r)
 	})
 }
 
 func handleAuth(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		l.Debug("auth handler: cookies=%v\n", r.Cookies())
+		l.Debug("cookies=%v\n", r.Cookies())
 
 		req := whoApi.AuthRequest{
-			Username:    "johan-st",
+			Username: "johan-st",
 			Password: "password",
 		}
 		reqBytes, err := json.Marshal(req)
 		if err != nil {
-			l.Debug("auth handler: error marshalling request: %s\n", err)
+			l.Debug("error marshalling request: %s\n", err)
 			http.Error(w, "error marshalling request", http.StatusInternalServerError)
 			return
 		}
-		l.Debug("auth handler: request: %s\n", string(reqBytes))
-		l.Debug("auth handler: subject: %s\n", whoApi.Subj.AuthGroup+"."+whoApi.Subj.AuthLogin)
+		l.Debug("request: %s\n", string(reqBytes))
+		l.Debug("subject: %s\n", whoApi.Subj.AuthGroup+"."+whoApi.Subj.AuthLogin)
 
 		msg, err := nc.Request(fmt.Sprintf("%s.%s", whoApi.Subj.AuthGroup, whoApi.Subj.AuthLogin), reqBytes, 10*time.Second)
 		if err != nil {
-			l.Debug("auth handler: error requesting auth: %s\n", err)
+			l.Debug("error requesting auth: %s\n", err)
 			http.Error(w, "error requesting auth", http.StatusInternalServerError)
 			return
 		}
-		l.Debug("auth handler: msg.Data: %s\n", string(msg.Data))
+		l.Debug("msg.Data: %s\n", string(msg.Data))
 		resp := whoApi.AuthResponse{}
 		err = json.Unmarshal(msg.Data, &resp)
 		if err != nil {
-			l.Debug("auth handler: error unmarshalling auth response: %s\n", err)
+			l.Debug("error unmarshalling auth response: %s\n", err)
 			http.Error(w, "error unmarshalling auth response", http.StatusInternalServerError)
 			return
 		}
 
 		token := resp.Token
-		l.Debug("auth handler: token: %s\n", token)
+		l.Debug("token: %s\n", token)
 		subject, permissions, err := whoApi.JwtVerify("jst_dev_secret", audience, token)
 		if err != nil {
-			l.Debug("auth handler: error verifying jwt: %s\n", err)
+			l.Debug("error verifying jwt: %s\n", err)
 			http.Error(w, "error verifying jwt", http.StatusInternalServerError)
 			return
 		}
-		l.Debug("auth handler: subject: %s\n", subject)
-		l.Debug("auth handler: permissions: %v\n", permissions)
-		l.Debug("auth handler: token: %s\n", token)
+		l.Debug("subject: %s\n", subject)
+		l.Debug("permissions: %v\n", permissions)
+		l.Debug("token: %s\n", token)
 
 		cookie := &http.Cookie{
 			Name:     cookieAuth,
@@ -173,12 +184,12 @@ func handleAuth(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		}
 		err = cookie.Valid()
 		if err != nil {
-			l.Debug("auth handler: error validating cookie: %s\n", err)
+			l.Debug("error validating cookie: %s\n", err)
 			http.Error(w, "error validating cookie", http.StatusInternalServerError)
 			return
 		}
 		http.SetCookie(w, cookie)
-		l.Debug("auth handler: setting cookie %s with value length %d\n", cookie.Name, len(cookie.Value))
+		l.Debug("setting cookie %s with value length %d\n", cookie.Name, len(cookie.Value))
 
 		respJson(w, resp, http.StatusOK)
 	})
@@ -202,7 +213,7 @@ func handleAuthCheck(l *jst_log.Logger, nc *nats.Conn, jwtSecret string) http.Ha
 			}, http.StatusUnauthorized)
 			return
 		}
-		l.Debug("auth check handler: user: %+v\n", user)
+		l.Debug("user: %+v\n", user)
 
 		permissionsList := make([]string, len(user.Permissions))
 		for i, permission := range user.Permissions {
