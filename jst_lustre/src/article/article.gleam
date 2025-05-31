@@ -63,7 +63,7 @@ pub fn article_get(msg, id: String) -> Effect(a) {
     |> request.set_method(gleam_http.Get)
     |> request.set_scheme(gleam_http.Http)
     |> request.set_host("localhost")
-    |> request.set_path("/api/article/" <> id)
+    |> request.set_path("/api/article/" <> id <> "/")
     |> request.set_port(8080)
   http.send(request, http.expect_json(article_decoder(), msg))
 }
@@ -85,7 +85,7 @@ pub fn article_update(msg, article: Article) -> Effect(a) {
     |> request.set_method(gleam_http.Put)
     |> request.set_scheme(gleam_http.Http)
     |> request.set_host("localhost")
-    |> request.set_path("/api/article/" <> article.slug)
+    |> request.set_path("/api/article/" <> article.id <> "/")
     |> request.set_port(8080)
     |> request.set_body(article_encoder(article) |> json.to_string)
   http.send(request, http.expect_json(article_decoder(), msg))
