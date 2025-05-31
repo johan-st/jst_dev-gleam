@@ -275,10 +275,10 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     ArticleHovered(article:) -> {
       case article {
-        ArticleSummary(slug, _, _, _, _) -> {
+        ArticleSummary(id, slug, _, _, _, _) -> {
           #(
             model,
-            article.article_get(fn(result) { ArticleGot(slug, result) }, slug),
+            article.article_get(fn(result) { ArticleGot(slug, result) }, id),
           )
         }
         _ -> #(model, effect.none())
@@ -288,6 +288,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ArticleDraftUpdatedSlug(article, text) -> {
       case article {
         ArticleFullWithDraft(
+          _,
           slug,
           _revision,
           _title,
@@ -323,6 +324,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ArticleDraftUpdatedTitle(article, text) -> {
       case article {
         ArticleFullWithDraft(
+          _id,
           _slug,
           _revision,
           _title,
@@ -349,6 +351,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ArticleDraftUpdatedLeading(article, text) -> {
       case article {
         ArticleFullWithDraft(
+          _id,
           _slug,
           _revision,
           _title,
@@ -375,6 +378,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ArticleDraftUpdatedSubtitle(article, text) -> {
       case article {
         ArticleFullWithDraft(
+          _id,
           _slug,
           _revision,
           _title,
@@ -438,6 +442,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       echo "article draft discard clicked"
       case article {
         ArticleFullWithDraft(
+          id,
           slug,
           revision,
           title,
@@ -450,7 +455,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             remote_data.try_update(model.articles, dict.insert(
               _,
               slug,
-              ArticleFull(slug, revision, title, leading, subtitle, content),
+              ArticleFull(id, slug, revision, title, leading, subtitle, content),
             ))
           #(
             Model(..model, articles: updated_articles),
@@ -464,6 +469,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ArticleDraftSaveClicked(article) -> {
       echo "article draft save clicked"
       let assert ArticleFullWithDraft(
+        id: id,
         slug: slug,
         revision: revision,
         title: title,
@@ -479,6 +485,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         _,
         draft.slug,
         ArticleFullWithDraft(
+          id,
           slug,
           revision,
           title,
@@ -491,6 +498,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
       let article_draft =
         ArticleFull(
+          id,
           draft.slug,
           0,
           draft.title,
@@ -590,11 +598,11 @@ fn update_navigation(model: Model, route: Route) -> #(Model, Effect(Msg)) {
       let effect_nav = case article {
         Ok(article) -> {
           case article {
-            ArticleSummary(slug, _, _, _, _) -> {
-              article.article_get(fn(result) { ArticleGot(slug, result) }, slug)
+            ArticleSummary(id, slug, _, _, _, _) -> {
+              article.article_get(fn(result) { ArticleGot(slug, result) }, id)
             }
-            ArticleWithError(_, _, _, _, _, _) -> {
-              article.article_get(fn(result) { ArticleGot(slug, result) }, slug)
+            ArticleWithError(id, slug, _, _, _, _, _) -> {
+              article.article_get(fn(result) { ArticleGot(slug, result) }, id)
             }
             _ -> effect.none()
           }
@@ -613,12 +621,13 @@ fn update_navigation(model: Model, route: Route) -> #(Model, Effect(Msg)) {
       }
 
       case article {
-        Ok(ArticleFullWithDraft(_, _, _, _, _, _, _)) -> {
+        Ok(ArticleFullWithDraft(_, _, _, _, _, _, _, _)) -> {
           #(Model(..model, route:), effect.none())
         }
-        Ok(ArticleFull(slug, revision, title, leading, subtitle, content)) -> {
+        Ok(ArticleFull(id, slug, revision, title, leading, subtitle, content)) -> {
           let updated_article =
             ArticleFullWithDraft(
+              id,
               slug,
               revision,
               title,
@@ -632,16 +641,16 @@ fn update_navigation(model: Model, route: Route) -> #(Model, Effect(Msg)) {
             |> remote_data.try_update(dict.insert(_, slug, updated_article))
           #(Model(..model, route:, articles: articles_updated), effect.none())
         }
-        Ok(ArticleSummary(_, _, _, _, _)) -> {
+        Ok(ArticleSummary(id, slug, _, _, _, _)) -> {
           #(
             Model(..model, route:),
-            article.article_get(ArticleGot(slug, _), slug),
+            article.article_get(ArticleGot(slug, _), id),
           )
         }
-        Ok(ArticleWithError(_, _, _, _, _, _)) -> {
+        Ok(ArticleWithError(id, slug, _, _, _, _, _)) -> {
           #(
             Model(..model, route:),
-            article.article_get(ArticleGot(slug, _), slug),
+            article.article_get(ArticleGot(slug, _), id),
           )
         }
         Error(_) -> {
@@ -665,11 +674,11 @@ fn effect_navigation(model: Model, route: Route) -> Effect(Msg) {
       case article {
         Ok(article) -> {
           case article {
-            ArticleSummary(slug, _, _, _, _) -> {
-              article.article_get(fn(result) { ArticleGot(slug, result) }, slug)
+            ArticleSummary(id, slug, _, _, _, _) -> {
+              article.article_get(fn(result) { ArticleGot(slug, result) }, id)
             }
-            ArticleWithError(_, _, _, _, _, _) -> {
-              article.article_get(fn(result) { ArticleGot(slug, result) }, slug)
+            ArticleWithError(id, slug, _, _, _, _, _) -> {
+              article.article_get(fn(result) { ArticleGot(slug, result) }, id)
             }
             _ -> effect.none()
           }
@@ -690,11 +699,11 @@ fn effect_navigation(model: Model, route: Route) -> Effect(Msg) {
       case article {
         Ok(article) -> {
           case article {
-            ArticleSummary(slug, _, _, _, _) -> {
-              article.article_get(fn(result) { ArticleGot(slug, result) }, slug)
+            ArticleSummary(id, slug, _, _, _, _) -> {
+              article.article_get(fn(result) { ArticleGot(slug, result) }, id)
             }
-            ArticleWithError(_, _, _, _, _, _) -> {
-              article.article_get(fn(result) { ArticleGot(slug, result) }, slug)
+            ArticleWithError(id, slug, _, _, _, _, _) -> {
+              article.article_get(fn(result) { ArticleGot(slug, result) }, id)
             }
             _ -> effect.none()
           }
@@ -750,15 +759,33 @@ fn update_got_articles_metadata(
       let articles = article.list_to_dict(articles)
       let effect = case model.route {
         ArticleBySlug(slug) -> {
-          echo "loading article content for slug: " <> slug
-          article.article_get(ArticleGot(slug, _), slug)
+          let article = dict.get(articles, slug)
+          case article {
+            Ok(article) -> {
+              echo "loading article content for slug: " <> slug
+              article.article_get(ArticleGot(slug, _), article.id)
+            }
+            Error(_) -> {
+              echo "no article found for slug: " <> slug
+              effect.none()
+            }
+          }
         }
-        ArticleBySlugEdit(_) -> {
-          echo "loading article content"
-          effect_navigation(
-            Model(..model, articles: Loaded(articles)),
-            model.route,
-          )
+        ArticleBySlugEdit(slug) -> {
+          let article = dict.get(articles, slug)
+          case article {
+            Ok(article) -> {
+              echo "loading article content"
+              effect_navigation(
+                Model(..model, articles: Loaded(articles)),
+                model.route,
+              )
+            }
+            Error(_) -> {
+              echo "no article found for slug: " <> slug
+              effect.none()
+            }
+          }
         }
         _ -> {
           echo "no effect for route: " <> route_url(model.route)
@@ -801,7 +828,8 @@ fn update_got_article_error(
             articles_update(
               [
                 ArticleWithError(
-                  slug,
+                  article.id,
+                  article.slug,
                   article.revision,
                   article.title,
                   article.leading,
@@ -825,7 +853,8 @@ fn update_got_article_error(
         Ok(article) -> {
           let article =
             ArticleWithError(
-              slug,
+              article.id,
+              article.slug,
               article.revision,
               article.title,
               article.leading,
@@ -1052,7 +1081,7 @@ fn view(model: Model) -> Element(Msg) {
                     case article {
                       Ok(article) -> {
                         case article {
-                          ArticleFullWithDraft(_, _, _, _, _, _, _) -> {
+                          ArticleFullWithDraft(_, _, _, _, _, _, _, _) -> {
                             view_article_edit(model, article)
                           }
                           _ -> view_article(article)
@@ -1328,12 +1357,10 @@ fn view_article_listing(articles: Dict(String, Article)) -> List(Element(Msg)) {
     |> list.sort(fn(a, b) { string.compare(a.slug, b.slug) })
     |> list.index_map(fn(article, _index) {
       case article {
-        ArticleFull(slug, _, title, leading, subtitle, _)
-        | ArticleSummary(slug, _, title, leading, subtitle)
-        | ArticleFullWithDraft(slug, _, title, leading, subtitle, _, _) -> {
-          html.article([
-            attr.class("mt-8 md:mt-14 transition-all duration-300 hover:translate-x-1"),
-          ], [
+        ArticleFull(_, slug, _, title, leading, subtitle, _)
+        | ArticleSummary(_, slug, _, title, leading, subtitle)
+        | ArticleFullWithDraft(_, slug, _, title, leading, subtitle, _, _) -> {
+          html.article([attr.class("mt-14")], [
             html.a(
               [
                 attr.class(
@@ -1363,7 +1390,15 @@ fn view_article_listing(articles: Dict(String, Article)) -> List(Element(Msg)) {
             ),
           ])
         }
-        ArticleWithError(slug, _revision, title, _leading, _subtitle, error) -> {
+        ArticleWithError(
+          _id,
+          slug,
+          _revision,
+          title,
+          _leading,
+          _subtitle,
+          error,
+        ) -> {
           html.article(
             [
               attr.class("mt-8 md:mt-14 group"),
@@ -1412,6 +1447,7 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
   let assert Ok(index_uri) = uri.parse("/")
   echo "asserting ArticleFullWithDraft"
   let assert ArticleFullWithDraft(
+    _id,
     _slug,
     _revision,
     _title,
@@ -1674,55 +1710,50 @@ fn view_article_edit_input(
 
 fn view_article(article: Article) -> List(Element(msg)) {
   let content = case article {
-    ArticleFull(slug, _revision, title, leading, subtitle, content) -> [
-      html.div([attr.class("flex flex-col mb-4 mt-4 md:mt-8")], [
-        html.div([attr.class("flex justify-between items-start gap-3")], [
-          view_title(title, slug),
-          view_edit_link(article, "Edit"),
-        ]),
-        view_subtitle(subtitle, slug),
-        view_leading(leading, slug),
-        html.div([attr.class("mt-6 space-y-4")], view_article_content(content)),
-      ])
+    ArticleFull(_id, slug, _revision, title, leading, subtitle, content) -> [
+      html.div([attr.class("flex justify-between mb-4 mt-8")], [
+        view_title(title, slug),
+        view_edit_link(article, "edit"),
+      ]),
+      view_subtitle(subtitle, slug),
+      view_leading(leading, slug),
+      ..view_article_content(content)
     ]
-    ArticleFullWithDraft(slug, _revision, title, leading, subtitle, content, _) -> [
-      html.div([attr.class("flex flex-col mb-4 mt-4 md:mt-8")], [
-        html.div([attr.class("flex justify-between items-start gap-3")], [
-          view_title(title, slug),
-          view_edit_link(article, "Edit"),
-        ]),
-        view_subtitle(subtitle, slug),
-        view_leading(leading, slug),
-        html.div([attr.class("mt-6 space-y-4")], view_article_content(content)),
-      ])
+    ArticleFullWithDraft(
+      _id,
+      slug,
+      _revision,
+      title,
+      leading,
+      subtitle,
+      content,
+      _,
+    ) -> [
+      html.div([attr.class("flex justify-between mb-4 mt-8")], [
+        view_title(title, slug),
+        view_edit_link(article, "edit"),
+      ]),
+      view_subtitle(subtitle, slug),
+      view_leading(leading, slug),
+      ..view_article_content(content)
     ]
-    ArticleSummary(slug, _revision, title, leading, subtitle) -> [
-      html.div([attr.class("flex flex-col mb-4 mt-4 md:mt-8")], [
-        html.div([attr.class("flex justify-between items-start gap-3")], [
-          view_title(title, slug),
-          view_edit_link(article, "Edit"),
-        ]),
-        view_subtitle(subtitle, slug),
-        view_leading(leading, slug),
-        html.div(
-          [attr.class("mt-6 animate-pulse bg-zinc-800/50 p-6 rounded-lg text-center")],
-          [html.text("Loading content...")]
-        ),
-      ])
+    ArticleSummary(_id, slug, _revision, title, leading, subtitle) -> [
+      html.div([attr.class("flex justify-between mb-4 mt-8")], [
+        view_title(title, slug),
+        view_edit_link(article, "edit"),
+      ]),
+      view_subtitle(subtitle, slug),
+      view_leading(leading, slug),
+      view_paragraph([content.Text("loading content..")]),
     ]
-    ArticleWithError(slug, _revision, title, leading, subtitle, error) -> [
-      html.div([attr.class("flex flex-col mb-4 mt-4 md:mt-8")], [
-        html.div([attr.class("flex justify-between items-start gap-3")], [
-          view_title(title, slug),
-          view_edit_link(article, "Edit"),
-        ]),
-        view_subtitle(subtitle, slug),
-        view_leading(leading, slug),
-        html.div(
-          [attr.class("mt-6 bg-orange-900/20 border border-orange-800/30 rounded-lg p-4")],
-          [view_error(error)]
-        ),
-      ])
+    ArticleWithError(_id, slug, _revision, title, leading, subtitle, error) -> [
+      html.div([attr.class("flex justify-between mb-4 mt-8")], [
+        view_title(title, slug),
+        view_edit_link(article, "edit"),
+      ]),
+      view_subtitle(subtitle, slug),
+      view_leading(leading, slug),
+      view_error(error),
     ]
   }
 
@@ -2417,16 +2448,19 @@ fn update_article_content_blocks(
   content: List(Content),
 ) -> Article {
   case article {
-    ArticleFull(slug, revision, title, leading, subtitle, _) ->
-      ArticleFull(slug, revision, title, leading, subtitle, content)
+    ArticleFull(id, slug, revision, title, leading, subtitle, _) ->
+      ArticleFull(id, slug, revision, title, leading, subtitle, content)
     _ -> {
       // Convert other article types to ArticleFull with the new content
-      let slug = article.slug
-      let revision = article.revision
-      let title = article.title
-      let leading = article.leading
-      let subtitle = article.subtitle
-      ArticleFull(slug, revision, title, leading, subtitle, content)
+      ArticleFull(
+        article.id,
+        article.slug,
+        article.revision,
+        article.title,
+        article.leading,
+        article.subtitle,
+        content,
+      )
     }
   }
 }

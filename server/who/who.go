@@ -13,6 +13,7 @@ import (
 	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nats.go/micro"
 
 	"jst_dev/server/jst_log"
@@ -39,7 +40,7 @@ type Who struct {
 	nc      *nats.Conn
 	hash    hash.Hash
 	secret  []byte
-	usersKv nats.KeyValue
+	usersKv jetstream.KeyValue
 	ctx     context.Context
 }
 
@@ -61,7 +62,7 @@ type Conf struct {
 // New creates a new Who service instance with the provided configuration.
 // It validates the JWT secret length, initializes the password hash with a fixed salt, and sets up the service fields.
 // Returns the initialized Who instance or an error if configuration is invalid.
-func New(c *Conf) (*Who, error) {
+func New(ctx context.Context, c *Conf) (*Who, error) {
 	var (
 		err  error
 		hash hash.Hash
@@ -79,10 +80,11 @@ func New(c *Conf) (*Who, error) {
 	}
 
 	who = &Who{
-		users:   []User{},
 		l:       c.Logger,
 		nc:      c.NatsConn,
+		ctx:     ctx,
 		hash:    hash,
+		users:   []User{},
 		secret:  c.JwtSecret,
 		usersKv: nil,
 	}
@@ -95,19 +97,19 @@ func (w *Who) Start(ctx context.Context) error {
 		return fmt.Errorf("nats connection not connected: %s", w.nc.Status())
 	}
 
-	js, err := w.nc.JetStream()
+	js, err := jetstream.New(w.nc)
 	if err != nil {
 		return fmt.Errorf("failed to get JetStream context: %w", err)
 	}
 
-	confKv := nats.KeyValueConfig{
+	confKv := jetstream.KeyValueConfig{
 		Bucket:       "who_users",
 		Description:  "who users by id",
-		Storage:      nats.FileStorage,
+		Storage:      jetstream.FileStorage,
 		MaxValueSize: 1024 * 1024 * 1, // 1MB
 		History:      64,
 	}
-	kv, err := js.CreateKeyValue(&confKv)
+	kv, err := js.CreateOrUpdateKeyValue(w.ctx, confKv)
 	if err != nil {
 		w.l.Error(fmt.Sprintf("create users kv store %s:%s", confKv.Bucket, err.Error()))
 		return fmt.Errorf("create users kv store %s:%w", confKv.Bucket, err)
@@ -170,9 +172,9 @@ func (w *Who) Start(ctx context.Context) error {
 
 func (w *Who) userWatcher() error {
 	var (
-		watcher nats.KeyWatcher
+		watcher jetstream.KeyWatcher
 		err     error
-		kv      nats.KeyValueEntry
+		kv      jetstream.KeyValueEntry
 		user    User
 		u       *User
 	)
@@ -180,7 +182,7 @@ func (w *Who) userWatcher() error {
 	// Store the context in the Who struct
 	w.ctx = context.Background()
 
-	watcher, err = w.usersKv.WatchAll(nats.Context(w.ctx))
+	watcher, err = w.usersKv.WatchAll(w.ctx)
 	if err != nil {
 		return fmt.Errorf("failed to watch users: %w", err)
 	}
@@ -194,7 +196,7 @@ func (w *Who) userWatcher() error {
 					continue
 				}
 				switch kv.Operation() {
-				case nats.KeyValuePut:
+				case jetstream.KeyValuePut:
 					err = json.Unmarshal(kv.Value(), &user)
 					if err != nil {
 						w.l.Error("failed to unmarshal user: %s", err.Error())
@@ -205,7 +207,7 @@ func (w *Who) userWatcher() error {
 						w.users = append(w.users, user)
 						w.l.Debug("new user(%s). %d users loaded", user.ID, len(w.users))
 					}
-				case nats.KeyValueDelete:
+				case jetstream.KeyValueDelete:
 					w.l.Debug("deleted user(%s). %d users loaded", kv.Key(), len(w.users))
 				default:
 					w.l.Error("unknown operation: %s", kv.Operation())
@@ -393,7 +395,7 @@ func (w *Who) handleUserUpdate() micro.HandlerFunc {
 			req.Error("SERVER_ERROR", "server error while updating user", []byte(err.Error()))
 			return
 		}
-		rev, err = w.usersKv.Put(user.ID, userBytes)
+		rev, err = w.usersKv.Put(w.ctx, user.ID, userBytes)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to update user: %s", err.Error()))
 			req.Error("SERVER_ERROR", "server error while updating user", []byte(err.Error()))
@@ -432,7 +434,7 @@ func (w *Who) handleUserDelete() micro.HandlerFunc {
 			req.Error("NOT_FOUND", "user not found and could thus not be deleted", []byte(reqData.ID))
 			return
 		}
-		err = w.usersKv.Delete(user.ID)
+		err = w.usersKv.Delete(w.ctx, user.ID)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to delete user: %s", err.Error()))
 			req.Error("SERVER_ERROR", "server error while deleting user", []byte(err.Error()))
@@ -661,7 +663,7 @@ func (w *Who) userCreate(username, email, password string) (*User, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal user: %w", err)
 	}
-	rev, err = w.usersKv.Create(user.ID, userBytes)
+	rev, err = w.usersKv.Create(w.ctx, user.ID, userBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to put user in kv: %w", err)
 	}
