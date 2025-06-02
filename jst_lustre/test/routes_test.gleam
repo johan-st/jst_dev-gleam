@@ -5,6 +5,7 @@ import gleam/uri
 import gleeunit
 import gleeunit/should
 import routes/routes
+import utils/remote_data.{Loaded}
 
 pub fn route_url_test() {
   let article_id = "test-id"
@@ -13,18 +14,18 @@ pub fn route_url_test() {
       id: id.from_string(article_id),
       slug: "test",
       revision: 12,
-      leading: "leading",
-      title: "test",
-      subtitle: "subtitle",
-      content: [Heading("test"), Paragraph([Text("test")])],
+      leading: "l",
+      title: "t",
+      subtitle: "sub",
+      content: [],
     )
   let route = routes.ArticleEdit(article)
   let url = routes.to_string(route)
   let assert Ok(parsed_url) = uri.parse(url)
-  let parsed_url = routes.from_uri(parsed_url, [article])
+  let parsed_route = routes.from_uri(parsed_url, Loaded([article]))
 
-  route
-  |> should.equal(parsed_url)
+  parsed_route
+  |> should.equal(route)
   url
   |> should.equal("/article/" <> article_id <> "/edit")
 }

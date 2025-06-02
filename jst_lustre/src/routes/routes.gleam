@@ -2,39 +2,57 @@ import article/article.{type Article}
 import article/id.{type ArticleId} as article_id
 import gleam/list
 import gleam/uri.{type Uri}
+import utils/http.{type HttpError}
+import utils/remote_data.{
+  type RemoteData, Errored, Loaded, NotInitialized, Pending,
+}
 
 pub type Route {
   Index
-  Articles
+  Articles(RemoteData(List(Article), HttpError))
   Article(article: Article)
+  ArticleNotFound(
+    available_articles: RemoteData(List(Article), HttpError),
+    slug: String,
+  )
   ArticleEdit(article: Article)
-  // ArticleEdit(article: Article, editor: Editor)
   About
   /// It's good practice to store whatever `Uri` we failed to match in case we
   /// want to log it or hint to the user that maybe they made a typo.
   NotFound(uri: Uri)
 }
 
-pub fn from_uri(uri: Uri, articles: List(Article)) -> Route {
+pub fn from_uri(
+  uri: Uri,
+  loaded_articles: RemoteData(List(Article), HttpError),
+) -> Route {
   case uri.path_segments(uri.path) {
     [] | [""] -> Index
-    ["articles"] -> Articles
+    ["articles"] -> Articles(loaded_articles)
     ["article", slug] -> {
-      case list.find(articles, fn(article) { article.slug == slug }) {
-        Ok(article) -> Article(article)
-        Error(_) -> NotFound(uri:)
+      case loaded_articles {
+        Loaded(articles) -> {
+          case list.find(articles, fn(article) { article.slug == slug }) {
+            Ok(article) -> Article(article)
+            Error(Nil) -> ArticleNotFound(loaded_articles, slug)
+          }
+        }
+        _ -> ArticleNotFound(loaded_articles, slug)
       }
     }
     ["article", id, "edit"] -> {
-      case
-        echo list.find(articles, fn(article) {
-          echo "article.id: " <> article_id.to_string(article.id)
-          echo "id: " <> id
-          article.id == article_id.from_string(id)
-        })
-      {
-        Ok(article) -> ArticleEdit(article)
-        Error(_) -> NotFound(uri:)
+      case loaded_articles {
+        Loaded(articles) -> {
+          case
+            list.find(articles, fn(article) {
+              article.id == article_id.from_string(id)
+            })
+          {
+            Ok(article) -> ArticleEdit(article)
+            Error(Nil) -> ArticleNotFound(loaded_articles, id)
+          }
+        }
+        _ -> ArticleNotFound(loaded_articles, id)
       }
     }
     ["about"] -> About
@@ -45,11 +63,12 @@ pub fn from_uri(uri: Uri, articles: List(Article)) -> Route {
 pub fn to_string(route: Route) -> String {
   case route {
     Index -> "/"
-    About -> "/about/"
-    Articles -> "/articles/"
-    Article(article) -> "/article/" <> article.slug <> "/"
+    About -> "/about"
+    Articles(_loaded_articles) -> "/articles"
+    Article(article) -> "/article/" <> article.slug
+    ArticleNotFound(_available_articles, slug) -> "/article/" <> slug
     ArticleEdit(article) ->
       "/article/" <> article_id.to_string(article.id) <> "/edit"
-    NotFound(_) -> "/404"
+    NotFound(uri) -> "/404?uri=" <> uri.to_string(uri)
   }
 }

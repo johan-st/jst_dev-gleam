@@ -29,6 +29,7 @@ gleam test
   - or presta way. id <>"-"<>slug where only the id is used for routing
 - try listening to nats for articles
 - add states for initial load of article meta and local storage data
+- article content should probably be RemoteData(List(Content), HttpError) to simplify states where we are loading or failed to load the content.
 
 ```gleam
 

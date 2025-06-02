@@ -69,7 +69,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
   // HTTP request, and let the app itself determine what to show. Modem stores
   // the first URL so we can parse it for the app's initial route.
   let route = case modem.initial_uri() {
-    Ok(uri) -> routes.from_uri(uri, [])
+    Ok(uri) -> routes.from_uri(uri, Pending)
     Error(_) -> routes.Index
   }
   // let #(chat_model, chat_effect) = chat.init()
@@ -84,7 +84,6 @@ fn init(_) -> #(Model, Effect(Msg)) {
   let effect_modem =
     modem.init(fn(uri) {
       uri
-      |> routes.from_uri([])
       |> UserNavigatedTo
     })
   let #(model_nav, effect_nav) = update_navigation(model, model.route)
@@ -100,7 +99,6 @@ fn init(_) -> #(Model, Effect(Msg)) {
         persist.decoder(),
         PersistGotModel,
       ),
-      // flags_get(GotFlags),
     ]),
   )
 }
@@ -114,7 +112,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
 
 type Msg {
   // NAVIGATION
-  UserNavigatedTo(route: Route)
+  UserNavigatedTo(uri: Uri)
   // MESSAGES
   // UserMessageDismissed(msg: UserMessage)
   // LOCALSTORAGE
@@ -184,16 +182,8 @@ type Msg {
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
     // NAVIGATION
-    UserNavigatedTo(route:) -> {
-      case route {
-        routes.NotFound(uri) -> {
-          echo "url not found: " <> uri.to_string(uri)
-        }
-        _ -> {
-          echo "user navigated to: " <> routes.to_string(route)
-        }
-      }
-      update_navigation(model, route)
+    UserNavigatedTo(uri:) -> {
+      update_navigation(model, routes.from_uri(uri, model.articles))
     }
     // Browser Persistance
     PersistGotModel(opt:) -> {
@@ -212,32 +202,38 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ArticleMetaGot(result:) -> {
       update_got_articles_metadata(model, result)
     }
-    ArticleGot(slug, result) -> {
+    ArticleGot(id, result) -> {
       case result {
         Ok(article) -> {
-          case model.articles {
+          let articles_model = case model.articles {
             Loaded(articles) -> {
-              #(
-                Model(
-                  ..model,
-                  articles: Loaded(
-                    list.map(articles, fn(article_current) {
-                      case article.id == article_current.id {
-                        True -> article
-                        False -> article_current
-                      }
-                    }),
-                  ),
-                ),
-                effect.none(),
+              Loaded(
+                list.map(articles, fn(article_current) {
+                  case article.id == article_current.id {
+                    True -> article
+                    False -> article_current
+                  }
+                }),
               )
             }
-            _ -> {
-              #(Model(..model, articles: Loaded([article])), effect.none())
-            }
+            _ -> Loaded([article])
           }
+          let route =
+            echo case model.route {
+              routes.ArticleNotFound(_, slug) -> {
+                case slug == article.slug {
+                  True -> echo routes.Article(article)
+                  False -> echo model.route
+                }
+              }
+              routes.Article(ArticleSummary(_, _, _, _, _, _)) -> {
+                echo routes.Article(article)
+              }
+              _ -> echo model.route
+            }
+          #(Model(route:, articles: articles_model), effect.none())
         }
-        Error(err) -> update_got_article_error(model, err, slug)
+        Error(err) -> update_got_article_error(model, err, id)
       }
     }
     ArticleHovered(article:) -> {
@@ -510,10 +506,6 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 fn update_navigation(model: Model, route: Route) -> #(Model, Effect(Msg)) {
   case route {
     routes.Article(article) -> {
-      let articles = case model.articles {
-        Loaded(articles) -> articles
-        _ -> []
-      }
       let effect_nav = case article {
         ArticleSummary(id, _, _, _, _, _) -> {
           article.article_get(fn(result) { ArticleGot(id, result) }, id)
@@ -552,14 +544,32 @@ fn update_navigation(model: Model, route: Route) -> #(Model, Effect(Msg)) {
                 }
               }),
             )
-          #(Model(..model, route:, articles: articles_updated), effect.none())
+          #(Model(route:, articles: articles_updated), effect.none())
         }
-        ArticleSummary(id, slug, _, _, _, _) -> {
+        ArticleSummary(id, _, _, _, _, _) -> {
           #(Model(..model, route:), article.article_get(ArticleGot(id, _), id))
         }
-        ArticleWithError(id, slug, _, _, _, _, _) -> {
+        ArticleWithError(id, _, _, _, _, _, _) -> {
           #(Model(..model, route:), article.article_get(ArticleGot(id, _), id))
         }
+      }
+    }
+    routes.Articles(articles) -> {
+      case articles {
+        Errored(err) -> {
+          echo err
+          #(
+            Model(..model, route:),
+            article.article_metadata_get(ArticleMetaGot),
+          )
+        }
+        NotInitialized -> {
+          #(
+            Model(..model, route:),
+            article.article_metadata_get(ArticleMetaGot),
+          )
+        }
+        _ -> #(Model(..model, route:), effect.none())
       }
     }
     _ -> #(Model(..model, route:), effect.none())
@@ -572,16 +582,43 @@ fn update_got_articles_metadata(
 ) {
   case result {
     Ok(articles) -> {
-      let effect = case model.route {
-        routes.Article(article) | routes.ArticleEdit(article) -> {
-          article.article_get(ArticleGot(article.id, _), article.id)
+      case model.route {
+        routes.ArticleNotFound(_available_articles, slug) -> {
+          case list.find(articles, fn(article) { article.slug == slug }) {
+            Ok(article) -> {
+              case article {
+                ArticleSummary(id, _, _, _, _, _) -> {
+                  #(
+                    Model(
+                      route: routes.Article(article),
+                      articles: Loaded(articles),
+                    ),
+                    article.article_get(ArticleGot(id, _), id),
+                  )
+                }
+                ArticleWithError(id, _, _, _, _, _, _) -> {
+                  #(
+                    Model(
+                      route: routes.Article(article),
+                      articles: Loaded(articles),
+                    ),
+                    article.article_get(ArticleGot(id, _), id),
+                  )
+                }
+                _ -> {
+                  #(Model(..model, articles: Loaded(articles)), effect.none())
+                }
+              }
+            }
+            Error(Nil) -> {
+              #(Model(..model, articles: Loaded(articles)), effect.none())
+            }
+          }
         }
         _ -> {
-          echo "no effect for route: " <> routes.to_string(model.route)
-          effect.none()
+          #(Model(..model, articles: Loaded(articles)), effect.none())
         }
       }
-      #(Model(..model, articles: Loaded(articles)), effect)
     }
     Error(err) -> {
       #(Model(..model, articles: Errored(err)), effect.none())
@@ -695,7 +732,7 @@ fn view(model: Model) -> Element(Msg) {
               _ -> view_not_found()
             }
           }
-          routes.Articles -> {
+          routes.Articles(articles) -> {
             case model.articles {
               Loaded(articles) -> {
                 case list.is_empty(articles) {
@@ -759,6 +796,9 @@ fn view(model: Model) -> Element(Msg) {
           }
           routes.Article(article) -> {
             view_article(article)
+          }
+          routes.ArticleNotFound(available_articles, slug) -> {
+            view_article_not_found(available_articles, slug)
           }
           routes.ArticleEdit(article) -> {
             case article {
@@ -824,7 +864,7 @@ fn view_header(model: Model) -> Element(Msg) {
             ]),
             view_header_link(
               current: model.route,
-              to: routes.Articles,
+              to: routes.Articles(model.articles),
               label: "Articles",
             ),
             view_header_link(
@@ -845,8 +885,8 @@ fn view_header_link(
   label text: String,
 ) -> Element(msg) {
   let is_active = case current, target {
-    routes.Article(_), routes.Articles -> True
-    routes.ArticleEdit(_), routes.Articles -> True
+    routes.Article(_), routes.Articles(_) -> True
+    routes.ArticleEdit(_), routes.Articles(_) -> True
     _, _ -> current == target
   }
 
@@ -872,7 +912,7 @@ fn view_header_link(
 // VIEW PAGES ------------------------------------------------------------------
 
 fn view_index() -> List(Element(msg)) {
-  let assert Ok(nats_uri) = uri.parse("/nats-all-the-way-down")
+  let assert Ok(nats_uri) = uri.parse("/article/nats-all-the-way-down")
   [
     view_title("Welcome to jst.dev!", "welcome"),
     view_subtitle(
@@ -1321,6 +1361,37 @@ fn view_article(article: Article) -> List(Element(msg)) {
     html.article([attr.class("with-transition")], content),
     html.p([attr.class("mt-14")], [view_link(nats_uri, "<- Go back?")]),
   ]
+}
+
+fn view_article_not_found(
+  available_articles: RemoteData(List(Article), HttpError),
+  slug: String,
+) -> List(Element(msg)) {
+  case available_articles {
+    Loaded(articles) -> {
+      [
+        view_title("Article not found", slug),
+        view_paragraph([
+          content.Text("The article you are looking for does not exist."),
+        ]),
+      ]
+    }
+    Errored(error) -> {
+      [
+        view_title("There was an error loading the article", slug),
+        view_paragraph([content.Text(error_string.http_error(error))]),
+      ]
+    }
+    Pending -> {
+      [
+        view_title("Loading article", slug),
+        view_paragraph([content.Text("Loading article...")]),
+      ]
+    }
+    NotInitialized -> {
+      todo as "NotInitialized should not happen as we look for articles on init"
+    }
+  }
 }
 
 fn view_about() -> List(Element(msg)) {
