@@ -3,6 +3,7 @@ import article/content.{
   Unknown,
 }
 import article/draft.{type Draft}
+import article/id.{type ArticleId}
 import gleam/dict.{type Dict}
 import gleam/dynamic/decode
 import gleam/http as gleam_http
@@ -18,7 +19,7 @@ import utils/remote_data.{type RemoteData}
 
 pub type Article {
   ArticleSummary(
-    id: String,
+    id: ArticleId,
     slug: String,
     revision: Int,
     title: String,
@@ -26,7 +27,7 @@ pub type Article {
     subtitle: String,
   )
   ArticleFull(
-    id: String,
+    id: ArticleId,
     slug: String,
     revision: Int,
     title: String,
@@ -35,7 +36,7 @@ pub type Article {
     content: List(Content),
   )
   ArticleWithError(
-    id: String,
+    id: ArticleId,
     slug: String,
     revision: Int,
     title: String,
@@ -44,7 +45,7 @@ pub type Article {
     error: String,
   )
   ArticleFullWithDraft(
-    id: String,
+    id: ArticleId,
     slug: String,
     revision: Int,
     title: String,
@@ -57,13 +58,13 @@ pub type Article {
 
 // Fetch ------------------------------------------------------------------------
 
-pub fn article_get(msg, id: String) -> Effect(a) {
+pub fn article_get(msg, id: ArticleId) -> Effect(a) {
   let request =
     request.new()
     |> request.set_method(gleam_http.Get)
     |> request.set_scheme(gleam_http.Http)
     |> request.set_host("localhost")
-    |> request.set_path("/api/article/" <> id <> "/")
+    |> request.set_path("/api/article/" <> id.to_string(id) <> "/")
     |> request.set_port(8080)
   http.send(request, http.expect_json(article_decoder(), msg))
 }
@@ -85,7 +86,7 @@ pub fn article_update(msg, article: Article) -> Effect(a) {
     |> request.set_method(gleam_http.Put)
     |> request.set_scheme(gleam_http.Http)
     |> request.set_host("localhost")
-    |> request.set_path("/api/article/" <> article.id <> "/")
+    |> request.set_path("/api/article/" <> id.to_string(article.id) <> "/")
     |> request.set_port(8080)
     |> request.set_body(article_encoder(article) |> json.to_string)
   http.send(request, http.expect_json(article_decoder(), msg))
@@ -197,7 +198,7 @@ pub fn article_decoder() -> decode.Decoder(Article) {
   let decode_full = fn() -> decode.Decoder(Article) {
     use content <- decode.field("content", decode.list(content_decoder()))
     decode.success(ArticleFull(
-      id:,
+      id: id.from_string(id),
       slug:,
       revision:,
       title:,
@@ -210,7 +211,7 @@ pub fn article_decoder() -> decode.Decoder(Article) {
   let decode_error = fn() -> decode.Decoder(Article) {
     use error <- decode.field("error", decode.string)
     decode.success(ArticleWithError(
-      id:,
+      id: id.from_string(id),
       slug:,
       revision:,
       title:,
@@ -222,7 +223,7 @@ pub fn article_decoder() -> decode.Decoder(Article) {
 
   let decode_summary = fn() -> decode.Decoder(Article) {
     decode.success(ArticleSummary(
-      id:,
+      id: id.from_string(id),
       slug:,
       revision:,
       title:,
@@ -241,7 +242,7 @@ pub fn article_encoder(article: Article) -> json.Json {
     ArticleSummary(id, slug, revision, title, leading, subtitle) -> {
       json.object([
         #("type", json.string("metadata_v1")),
-        #("id", json.string(id)),
+        #("id", json.string(id.to_string(id))),
         #("revision", json.int(revision)),
         #("slug", json.string(slug)),
         #("title", json.string(title)),
@@ -252,7 +253,7 @@ pub fn article_encoder(article: Article) -> json.Json {
     ArticleFull(id, slug, revision, title, leading, subtitle, content) -> {
       json.object([
         #("type", json.string("article_v1")),
-        #("id", json.string(id)),
+        #("id", json.string(id.to_string(id))),
         #("revision", json.int(revision)),
         #("slug", json.string(slug)),
         #("title", json.string(title)),
@@ -264,7 +265,7 @@ pub fn article_encoder(article: Article) -> json.Json {
     ArticleWithError(id, slug, revision, title, leading, subtitle, error) -> {
       json.object([
         #("type", json.string("with_error_v1")),
-        #("id", json.string(id)),
+        #("id", json.string(id.to_string(id))),
         #("revision", json.int(revision)),
         #("slug", json.string(slug)),
         #("title", json.string(title)),
@@ -285,7 +286,7 @@ pub fn article_encoder(article: Article) -> json.Json {
     ) -> {
       json.object([
         #("type", json.string("article_v1")),
-        #("id", json.string(id)),
+        #("id", json.string(id.to_string(id))),
         #("revision", json.int(revision)),
         #("slug", json.string(slug)),
         #("title", json.string(title)),
@@ -372,17 +373,17 @@ pub fn draft_update(article: Article, updater: fn(Draft) -> Draft) -> Article {
 
 // Utils -----------------------------------------------------------------------
 
-pub fn list_to_dict(articles: List(Article)) -> Dict(String, Article) {
-  articles
-  |> list.map(fn(article) { #(article.slug, article) })
-  |> dict.from_list
-}
+// pub fn list_to_dict(articles: List(Article)) -> Dict(ArticleId, Article) {
+//   articles
+//   |> list.map(fn(article) { #(article.id, article) })
+//   |> dict.from_list
+// }
 
 // Loading ---------------------------------------------------------------------
 
 pub fn loading_article() -> Article {
   ArticleWithError(
-    id: "-",
+    id: id.from_string("-"),
     slug: "placeholder_loading",
     revision: 0,
     title: "fetching articles..",

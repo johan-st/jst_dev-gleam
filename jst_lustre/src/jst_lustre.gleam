@@ -6,13 +6,12 @@ import article/article.{
 }
 import article/content.{type Content}
 import article/draft.{Draft}
-import chat/chat
+import article/id.{type ArticleId} as article_id
 import gleam/dict.{type Dict}
 import gleam/http/response.{type Response}
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/result
 import gleam/string
 import gleam/uri.{type Uri}
 import lustre
@@ -47,10 +46,10 @@ type Model {
   Model(
     // session: Session,
     route: Route,
-    articles: RemoteData(Dict(String, Article), HttpError),
+    articles: RemoteData(List(Article), HttpError),
     // user_messages: List(UserMessage),
-    chat: chat.Model,
-    saving_articles: List(String),
+    // chat: chat.Model,
+    // saving_articles: List(String),
   )
 }
 
@@ -63,20 +62,35 @@ type Model {
 type Route {
   Index
   Articles
-  ArticleBySlug(slug: String)
-  ArticleBySlugEdit(slug: String)
+  Article(article: Article)
+  ArticleEdit(article: Article)
+  // ArticleEdit(article: Article, editor: Editor)
   About
   /// It's good practice to store whatever `Uri` we failed to match in case we
   /// want to log it or hint to the user that maybe they made a typo.
   NotFound(uri: Uri)
 }
 
-fn parse_route(uri: Uri) -> Route {
+fn parse_route(uri: Uri, articles: List(Article)) -> Route {
   case uri.path_segments(uri.path) {
     [] | [""] -> Index
     ["articles"] -> Articles
-    ["article", slug] -> ArticleBySlug(slug)
-    ["article", slug, "edit"] -> ArticleBySlugEdit(slug)
+    ["article", slug] -> {
+      case list.find(articles, fn(article) { article.slug == slug }) {
+        Ok(article) -> Article(article)
+        Error(_) -> NotFound(uri:)
+      }
+    }
+    ["article", id, "edit"] -> {
+      case
+        list.find(articles, fn(article) {
+          article.id == article_id.from_string(id)
+        })
+      {
+        Ok(article) -> ArticleEdit(article)
+        Error(_) -> NotFound(uri:)
+      }
+    }
     ["about"] -> About
     _ -> NotFound(uri:)
   }
@@ -85,10 +99,11 @@ fn parse_route(uri: Uri) -> Route {
 fn route_url(route: Route) -> String {
   case route {
     Index -> "/"
-    About -> "/about"
-    Articles -> "/articles"
-    ArticleBySlug(slug) -> "/article/" <> slug
-    ArticleBySlugEdit(slug) -> "/article/" <> slug <> "/edit"
+    About -> "/about/"
+    Articles -> "/articles/"
+    Article(article) -> "/article/" <> article.slug <> "/"
+    ArticleEdit(article) ->
+      "/article/" <> article_id.to_string(article.id) <> "/edit"
     NotFound(_) -> "/404"
   }
 }
@@ -102,22 +117,22 @@ fn init(_) -> #(Model, Effect(Msg)) {
   // HTTP request, and let the app itself determine what to show. Modem stores
   // the first URL so we can parse it for the app's initial route.
   let route = case modem.initial_uri() {
-    Ok(uri) -> parse_route(uri)
+    Ok(uri) -> parse_route(uri, [])
     Error(_) -> Index
   }
-  let #(chat_model, chat_effect) = chat.init()
+  // let #(chat_model, chat_effect) = chat.init()
   let model =
     Model(
       route:,
       articles: Pending,
       // user_messages: [],
-      chat: chat_model,
-      saving_articles: [],
+    // chat: chat_model,
+    // saving_articles: [],
     )
   let effect_modem =
     modem.init(fn(uri) {
       uri
-      |> parse_route
+      |> parse_route([])
       |> UserNavigatedTo
     })
   let #(model_nav, effect_nav) = update_navigation(model, model.route)
@@ -126,7 +141,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
     effect.batch([
       effect_modem,
       effect_nav,
-      effect.map(chat_effect, ChatMsg),
+      // effect.map(chat_effect, ChatMsg),
       article.article_metadata_get(ArticleMetaGot),
       persist.localstorage_get(
         persist.model_localstorage_key,
@@ -154,7 +169,7 @@ type Msg {
   PersistGotModel(opt: Option(PersistentModel))
   // ARTICLES
   ArticleHovered(article: Article)
-  ArticleGot(slug: String, result: Result(Article, HttpError))
+  ArticleGot(id: ArticleId, result: Result(Article, HttpError))
   ArticleMetaGot(result: Result(List(Article), HttpError))
   // ARTICLE DRAFT
   ArticleDraftUpdatedSlug(article: Article, text: String)
@@ -168,7 +183,7 @@ type Msg {
   ArticleDraftContentUpdate(content_item: Content, index: Int, content: Content)
   // ARTICLE DRAFT SAVE & CREATE & DISCARD
   ArticleDraftSaveClicked(article: Article)
-  ArticleDraftSaveResponse(slug: String, result: Result(Article, HttpError))
+  ArticleDraftSaveResponse(id: ArticleId, result: Result(Article, HttpError))
   ArticleDraftDiscardClicked(article: Article)
   // AUTH
   AuthLoginClicked(username: String, password: String)
@@ -176,7 +191,7 @@ type Msg {
   AuthCheckClicked
   AuthCheckResponse(result: Result(#(Bool, String, List(String)), HttpError))
   // CHAT
-  ChatMsg(msg: chat.Msg)
+  // ChatMsg(msg: chat.Msg)
 }
 
 // fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -226,10 +241,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     PersistGotModel(opt:) -> {
       case opt {
         Some(PersistentModelV1(_, articles)) -> {
-          #(
-            Model(..model, articles: articles |> article.list_to_dict |> Loaded),
-            effect.none(),
-          )
+          #(Model(..model, articles: Loaded(articles)), effect.none())
         }
         Some(PersistentModelV0(_)) -> {
           #(model, effect.none())
@@ -250,23 +262,20 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               #(
                 Model(
                   ..model,
-                  articles: Loaded(dict.insert(articles, article.slug, article)),
+                  articles: Loaded(
+                    list.map(articles, fn(article_current) {
+                      case article.id == article_current.id {
+                        True -> article
+                        False -> article_current
+                      }
+                    }),
+                  ),
                 ),
                 effect.none(),
               )
             }
             _ -> {
-              #(
-                Model(
-                  ..model,
-                  articles: Loaded(dict.insert(
-                    dict.new(),
-                    article.slug,
-                    article,
-                  )),
-                ),
-                effect.none(),
-              )
+              #(Model(..model, articles: Loaded([article])), effect.none())
             }
           }
         }
@@ -275,10 +284,13 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     ArticleHovered(article:) -> {
       case article {
-        ArticleSummary(id, slug, _, _, _, _) -> {
+        ArticleSummary(_, _, _, _, _, _) -> {
           #(
             model,
-            article.article_get(fn(result) { ArticleGot(slug, result) }, id),
+            article.article_get(
+              fn(result) { ArticleGot(article.id, result) },
+              article.id,
+            ),
           )
         }
         _ -> #(model, effect.none())
@@ -289,7 +301,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       case article {
         ArticleFullWithDraft(
           _,
-          slug,
+          _slug,
           _revision,
           _title,
           _leading,
@@ -309,11 +321,15 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           #(
             Model(
               ..model,
-              articles: remote_data.try_update(model.articles, dict.insert(
-                _,
-                slug,
-                updated_article,
-              )),
+              articles: remote_data.try_update(
+                model.articles,
+                list.map(_, fn(article_current) {
+                  case article.id == article_current.id {
+                    True -> updated_article
+                    False -> article_current
+                  }
+                }),
+              ),
             ),
             effect.none(),
           )
@@ -331,18 +347,22 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           _leading,
           _subtitle,
           _content,
-          draft,
+          _draft,
         ) -> {
           let updated_article =
             article.draft_update(article, fn(draft) {
               Draft(..draft, title: text)
             })
           let updated_articles =
-            remote_data.try_update(model.articles, dict.insert(
-              _,
-              draft.slug,
-              updated_article,
-            ))
+            remote_data.try_update(
+              model.articles,
+              list.map(_, fn(article_current) {
+                case article.id == article_current.id {
+                  True -> updated_article
+                  False -> article_current
+                }
+              }),
+            )
           #(Model(..model, articles: updated_articles), effect.none())
         }
         _ -> #(model, effect.none())
@@ -351,25 +371,29 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ArticleDraftUpdatedLeading(article, text) -> {
       case article {
         ArticleFullWithDraft(
-          _id,
+          id,
           _slug,
           _revision,
           _title,
           _leading,
           _subtitle,
           _content,
-          draft,
+          _draft,
         ) -> {
           let updated_article =
             article.draft_update(article, fn(draft) {
               Draft(..draft, leading: text)
             })
           let updated_articles =
-            remote_data.try_update(model.articles, dict.insert(
-              _,
-              draft.slug,
-              updated_article,
-            ))
+            remote_data.try_update(
+              model.articles,
+              list.map(_, fn(article_current) {
+                case article.id == article_current.id {
+                  True -> updated_article
+                  False -> article_current
+                }
+              }),
+            )
           #(Model(..model, articles: updated_articles), effect.none())
         }
         _ -> #(model, effect.none())
@@ -378,25 +402,29 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ArticleDraftUpdatedSubtitle(article, text) -> {
       case article {
         ArticleFullWithDraft(
-          _id,
+          id,
           _slug,
           _revision,
           _title,
           _leading,
           _subtitle,
           _content,
-          draft,
+          _draft,
         ) -> {
           let updated_article =
             article.draft_update(article, fn(draft) {
               Draft(..draft, subtitle: text)
             })
           let updated_articles =
-            remote_data.try_update(model.articles, dict.insert(
-              _,
-              draft.slug,
-              updated_article,
-            ))
+            remote_data.try_update(
+              model.articles,
+              list.map(_, fn(article_current) {
+                case article.id == article_current.id {
+                  True -> updated_article
+                  False -> article_current
+                }
+              }),
+            )
           #(Model(..model, articles: updated_articles), effect.none())
         }
         _ -> #(model, effect.none())
@@ -411,11 +439,15 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(
         Model(
           ..model,
-          articles: remote_data.try_update(model.articles, dict.insert(
-            _,
-            updated_article.slug,
-            updated_article,
-          )),
+          articles: remote_data.try_update(
+            model.articles,
+            list.map(_, fn(article_current) {
+              case article.id == article_current.id {
+                True -> updated_article
+                False -> article_current
+              }
+            }),
+          ),
         ),
         effect.none(),
       )
@@ -452,14 +484,27 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           _draft,
         ) -> {
           let updated_articles =
-            remote_data.try_update(model.articles, dict.insert(
-              _,
-              slug,
-              ArticleFull(id, slug, revision, title, leading, subtitle, content),
-            ))
+            remote_data.try_update(
+              model.articles,
+              list.map(_, fn(article_current) {
+                case article.id == article_current.id {
+                  True ->
+                    ArticleFull(
+                      id,
+                      slug,
+                      revision,
+                      title,
+                      leading,
+                      subtitle,
+                      content,
+                    )
+                  False -> article_current
+                }
+              }),
+            )
           #(
             Model(..model, articles: updated_articles),
-            modem.push(route_url(ArticleBySlug(slug)), None, None),
+            modem.push(route_url(Article(article)), None, None),
           )
         }
         _ -> #(model, effect.none())
@@ -467,92 +512,10 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     // ARTICLE DRAFT SAVE
     ArticleDraftSaveClicked(article) -> {
-      echo "article draft save clicked"
-      let assert ArticleFullWithDraft(
-        id: id,
-        slug: slug,
-        revision: revision,
-        title: title,
-        leading: leading,
-        subtitle: subtitle,
-        content: content,
-        draft: draft,
-      ) = article
-      echo "asserted article"
-      let updated_article =
-        article.draft_update(article, fn(draft) { Draft(..draft, saving: True) })
-      remote_data.try_update(model.articles, dict.insert(
-        _,
-        draft.slug,
-        ArticleFullWithDraft(
-          id,
-          slug,
-          revision,
-          title,
-          leading,
-          subtitle,
-          content,
-          draft,
-        ),
-      ))
-
-      let article_draft =
-        ArticleFull(
-          id,
-          draft.slug,
-          0,
-          draft.title,
-          draft.leading,
-          draft.subtitle,
-          draft.content,
-        )
-      #(
-        model,
-        article.article_create(ArticleDraftSaveResponse(slug, _), article_draft),
-      )
-      // #(model, article.article_update(ArticleDraftSaveResponse(slug, _), article))
+      todo as "article draft save clicked"
     }
-    ArticleDraftSaveResponse(slug, result) -> {
-      echo "article draft save response"
-      let article = case model.articles {
-        Loaded(articles) -> articles |> dict.get(slug)
-        _ -> Error(Nil)
-      }
-      let articles_updated = case article {
-        Ok(article) -> {
-          model.articles
-          |> remote_data.try_update(dict.insert(
-            _,
-            article.slug,
-            article.draft_update(article, fn(draft) {
-              Draft(..draft, saving: False)
-            }),
-          ))
-        }
-        Error(Nil) -> {
-          echo "no article found for slug: " <> slug
-          model.articles
-        }
-      }
-      case result {
-        Ok(saved_article) -> {
-          let updated_articles =
-            remote_data.try_update(articles_updated, dict.insert(
-              _,
-              saved_article.slug,
-              saved_article,
-            ))
-          #(
-            Model(..model, articles: updated_articles),
-            modem.push(route_url(ArticleBySlug(saved_article.slug)), None, None),
-            // effect_navigation(model, ArticleBySlug(saved_article.slug)),
-          )
-        }
-
-        Error(err) -> {
-          todo as "what is the saving articles for?"
-        }
-      }
+    ArticleDraftSaveResponse(id, result) -> {
+      todo as "article draft save response"
     }
     // AUTH
     AuthLoginClicked(username, password) -> {
@@ -578,53 +541,38 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         }
       }
     }
-
     // CHAT
-    ChatMsg(msg) -> {
-      let #(chat_model, chat_effect) = chat.update(msg, model.chat)
-      #(Model(..model, chat: chat_model), effect.map(chat_effect, ChatMsg))
-    }
+    // ChatMsg(msg) -> {
+    //   let #(chat_model, chat_effect) = chat.update(msg, model.chat)
+    //   #(Model(..model, chat: chat_model), effect.map(chat_effect, ChatMsg))
+    // }
   }
 }
 
 fn update_navigation(model: Model, route: Route) -> #(Model, Effect(Msg)) {
   case route {
-    ArticleBySlug(slug) -> {
+    Article(article) -> {
       let articles = case model.articles {
         Loaded(articles) -> articles
-        _ -> dict.new()
+        _ -> []
       }
-      let article = dict.get(articles, slug)
       let effect_nav = case article {
-        Ok(article) -> {
-          case article {
-            ArticleSummary(id, slug, _, _, _, _) -> {
-              article.article_get(fn(result) { ArticleGot(slug, result) }, id)
-            }
-            ArticleWithError(id, slug, _, _, _, _, _) -> {
-              article.article_get(fn(result) { ArticleGot(slug, result) }, id)
-            }
-            _ -> effect.none()
-          }
+        ArticleSummary(id, _, _, _, _, _) -> {
+          article.article_get(fn(result) { ArticleGot(id, result) }, id)
         }
-        Error(Nil) -> {
-          echo "no article found for slug: " <> slug
-          effect.none()
+        ArticleWithError(id, _, _, _, _, _, _) -> {
+          article.article_get(fn(result) { ArticleGot(id, result) }, id)
         }
+        _ -> effect.none()
       }
       #(Model(..model, route:), effect_nav)
     }
-    ArticleBySlugEdit(slug) -> {
-      let article = case model.articles {
-        Loaded(articles) -> articles |> dict.get(slug)
-        _ -> Error(Nil)
-      }
-
+    ArticleEdit(article) -> {
       case article {
-        Ok(ArticleFullWithDraft(_, _, _, _, _, _, _, _)) -> {
+        ArticleFullWithDraft(_, _, _, _, _, _, _, _) -> {
           #(Model(..model, route:), effect.none())
         }
-        Ok(ArticleFull(id, slug, revision, title, leading, subtitle, content)) -> {
+        ArticleFull(id, slug, revision, title, leading, subtitle, content) -> {
           let updated_article =
             ArticleFullWithDraft(
               id,
@@ -638,24 +586,21 @@ fn update_navigation(model: Model, route: Route) -> #(Model, Effect(Msg)) {
             )
           let articles_updated =
             model.articles
-            |> remote_data.try_update(dict.insert(_, slug, updated_article))
+            |> remote_data.try_update(
+              list.map(_, fn(article_current) {
+                case article.id == article_current.id {
+                  True -> updated_article
+                  False -> article_current
+                }
+              }),
+            )
           #(Model(..model, route:, articles: articles_updated), effect.none())
         }
-        Ok(ArticleSummary(id, slug, _, _, _, _)) -> {
-          #(
-            Model(..model, route:),
-            article.article_get(ArticleGot(slug, _), id),
-          )
+        ArticleSummary(id, slug, _, _, _, _) -> {
+          #(Model(..model, route:), article.article_get(ArticleGot(id, _), id))
         }
-        Ok(ArticleWithError(id, slug, _, _, _, _, _)) -> {
-          #(
-            Model(..model, route:),
-            article.article_get(ArticleGot(slug, _), id),
-          )
-        }
-        Error(_) -> {
-          echo "no article found for slug: " <> slug
-          #(model, modem.push(route_url(Articles), None, None))
+        ArticleWithError(id, slug, _, _, _, _, _) -> {
+          #(Model(..model, route:), article.article_get(ArticleGot(id, _), id))
         }
       }
     }
@@ -663,129 +608,15 @@ fn update_navigation(model: Model, route: Route) -> #(Model, Effect(Msg)) {
   }
 }
 
-fn effect_navigation(model: Model, route: Route) -> Effect(Msg) {
-  case route {
-    ArticleBySlug(slug) -> {
-      let articles = case model.articles {
-        Loaded(articles) -> articles
-        _ -> dict.new()
-      }
-      let article = dict.get(articles, slug)
-      case article {
-        Ok(article) -> {
-          case article {
-            ArticleSummary(id, slug, _, _, _, _) -> {
-              article.article_get(fn(result) { ArticleGot(slug, result) }, id)
-            }
-            ArticleWithError(id, slug, _, _, _, _, _) -> {
-              article.article_get(fn(result) { ArticleGot(slug, result) }, id)
-            }
-            _ -> effect.none()
-          }
-        }
-        Error(Nil) -> {
-          echo "no article found for slug: " <> slug
-          echo "set up article not found route"
-          effect.none()
-        }
-      }
-    }
-    ArticleBySlugEdit(slug) -> {
-      let articles = case model.articles {
-        Loaded(articles) -> articles
-        _ -> dict.new()
-      }
-      let article = dict.get(articles, slug)
-      case article {
-        Ok(article) -> {
-          case article {
-            ArticleSummary(id, slug, _, _, _, _) -> {
-              article.article_get(fn(result) { ArticleGot(slug, result) }, id)
-            }
-            ArticleWithError(id, slug, _, _, _, _, _) -> {
-              article.article_get(fn(result) { ArticleGot(slug, result) }, id)
-            }
-            _ -> effect.none()
-          }
-        }
-        Error(Nil) -> {
-          echo "no article found for slug: " <> slug
-          echo "set up article not found route"
-          effect.none()
-        }
-      }
-    }
-    _ -> {
-      effect.none()
-    }
-  }
-}
-
-// fn update_websocket_on_message(
-//   model: Model,
-//   data: String,
-// ) -> #(Model, Effect(Msg)) {
-//   echo "message: " <> data
-//   #(model, effect.none())
-// }
-
-// fn update_websocket_on_close(
-//   model: Model,
-//   data: String,
-// ) -> #(Model, Effect(Msg)) {
-//   echo "close: " <> data
-//   #(model, effect.none())
-// }
-
-// fn update_websocket_on_error(
-//   model: Model,
-//   data: String,
-// ) -> #(Model, Effect(Msg)) {
-//   echo "error: " <> data
-//   #(model, effect.none())
-// }
-
-// fn update_websocket_on_open(model: Model, data: String) -> #(Model, Effect(Msg)) {
-//   echo "open: " <> data
-//   #(model, effect.none())
-// }
-
 fn update_got_articles_metadata(
   model: Model,
   result: Result(List(Article), HttpError),
 ) {
   case result {
     Ok(articles) -> {
-      let articles = article.list_to_dict(articles)
       let effect = case model.route {
-        ArticleBySlug(slug) -> {
-          let article = dict.get(articles, slug)
-          case article {
-            Ok(article) -> {
-              echo "loading article content for slug: " <> slug
-              article.article_get(ArticleGot(slug, _), article.id)
-            }
-            Error(_) -> {
-              echo "no article found for slug: " <> slug
-              effect.none()
-            }
-          }
-        }
-        ArticleBySlugEdit(slug) -> {
-          let article = dict.get(articles, slug)
-          case article {
-            Ok(article) -> {
-              echo "loading article content"
-              effect_navigation(
-                Model(..model, articles: Loaded(articles)),
-                model.route,
-              )
-            }
-            Error(_) -> {
-              echo "no article found for slug: " <> slug
-              effect.none()
-            }
-          }
+        Article(article) | ArticleEdit(article) -> {
+          article.article_get(ArticleGot(article.id, _), article.id)
         }
         _ -> {
           echo "no effect for route: " <> route_url(model.route)
@@ -795,12 +626,6 @@ fn update_got_articles_metadata(
       #(Model(..model, articles: Loaded(articles)), effect)
     }
     Error(err) -> {
-      // let error_string = error_string.http_error(err)
-      // let user_messages =
-      //   list.append(model.user_messages, [
-      //     UserError(user_message_id_next(model.user_messages), error_string),
-      //   ])
-      // #(Model(..model, user_messages:, articles: Errored(err)), effect.none())
       #(Model(..model, articles: Errored(err)), effect.none())
     }
   }
@@ -809,37 +634,38 @@ fn update_got_articles_metadata(
 fn update_got_article_error(
   model: Model,
   err: HttpError,
-  slug: String,
+  id: ArticleId,
 ) -> #(Model, Effect(Msg)) {
   let error_string =
-    "failed to load article (slug: "
-    <> slug
+    "failed to load article (id: "
+    <> article_id.to_string(id)
     <> "): "
     <> error_string.http_error(err)
   let articles = case model.articles {
     Loaded(articles) -> articles
-    _ -> dict.new()
+    _ -> []
   }
   case err {
     http.JsonError(json.UnexpectedByte(_)) -> {
-      case dict.get(articles, slug) {
+      case list.find(articles, fn(article) { article.id == id }) {
         Ok(article) -> {
-          let art =
-            articles_update(
-              [
-                ArticleWithError(
-                  article.id,
-                  article.slug,
-                  article.revision,
-                  article.title,
-                  article.leading,
-                  article.subtitle,
-                  error_string,
-                ),
-              ],
-              articles,
-            )
-          #(Model(..model, articles: Loaded(art)), effect.none())
+          let articles_updated =
+            list.map(articles, fn(article_current) {
+              case article_current.id == id {
+                True ->
+                  ArticleWithError(
+                    article_current.id,
+                    article_current.slug,
+                    article_current.revision,
+                    article_current.title,
+                    article_current.leading,
+                    article_current.subtitle,
+                    error_string,
+                  )
+                False -> article_current
+              }
+            })
+          #(Model(..model, articles: Loaded(articles_updated)), effect.none())
         }
         Error(_) -> {
           echo error_string.http_error(err)
@@ -849,7 +675,7 @@ fn update_got_article_error(
     }
 
     http.NotFound -> {
-      case dict.get(articles, slug) {
+      case list.find(articles, fn(article) { article.id == id }) {
         Ok(article) -> {
           let article =
             ArticleWithError(
@@ -862,10 +688,7 @@ fn update_got_article_error(
               error_string,
             )
           #(
-            Model(
-              ..model,
-              articles: Loaded(dict.insert(articles, slug, article)),
-            ),
+            Model(..model, articles: Loaded(list.append(articles, [article]))),
             effect.none(),
           )
         }
@@ -877,38 +700,10 @@ fn update_got_article_error(
     }
     _ -> {
       echo err
-      // let user_messages =
-      //   list.append(model.user_messages, [
-      //     UserError(
-      //       user_message_id_next(model.user_messages),
-      //       "UNHANDLED ERROR while loading article (slug:"
-      //         <> slug
-      //         <> "): "
-      //         <> error_string,
-      //     ),
-      //   ])
-      // #(Model(..model, user_messages:), effect.none())
       #(Model(..model, articles: Errored(err)), effect.none())
     }
   }
 }
-
-fn articles_update(
-  new_articles: List(Article),
-  old_articles: Dict(String, Article),
-) -> Dict(String, Article) {
-  new_articles
-  |> list.map(fn(article) { #(article.slug, article) })
-  |> dict.from_list
-  |> dict.merge(old_articles, _)
-}
-
-// fn user_message_id_next(user_messages: List(UserMessage)) -> Int {
-//   case list.last(user_messages) {
-//     Ok(msg) -> msg.id + 1
-//     Error(_) -> 0
-//   }
-// }
 
 // VIEW ------------------------------------------------------------------------
 
@@ -922,20 +717,30 @@ fn view(model: Model) -> Element(Msg) {
     ],
     [
       view_header(model),
-      // html.div(
-      //   [attr.class("fixed top-18 left-0 right-0 z-50")],
-      //   view_user_messages(model.user_messages),
-      // ),
-      html.main([attr.class("px-4 sm:px-6 md:px-10 py-4 max-w-screen-md mx-auto")], {
+      html.main([attr.class("px-10 py-4 max-w-screen-md mx-auto")], {
         // Just like we would show different HTML based on some other state in the
         // model, we can also pattern match on our Route value to show different
         // views based on the current page!
         case model.route {
-          Index -> view_index()
+          Index -> {
+            case model.articles {
+              Loaded(articles) -> {
+                case
+                  list.find(articles, fn(article) {
+                    article.slug == "nats-all-the-way-down"
+                  })
+                {
+                  Ok(article) -> view_index()
+                  Error(_) -> view_not_found()
+                }
+              }
+              _ -> view_not_found()
+            }
+          }
           Articles -> {
             case model.articles {
               Loaded(articles) -> {
-                case dict.is_empty(articles) {
+                case list.is_empty(articles) {
                   True -> [view_error("got no articles from server")]
                   False -> view_article_listing(articles)
                 }
@@ -994,107 +799,15 @@ fn view(model: Model) -> Element(Msg) {
               ]
             }
           }
-          ArticleBySlug(slug) -> {
-            case model.articles {
-              Loaded(articles) -> {
-                let article = dict.get(articles, slug)
-                case article {
-                  Ok(article) -> view_article(article)
-                  Error(_) -> view_not_found()
-                }
-              }
-              Errored(err) -> [
-                html.div([
-                  attr.class("bg-orange-900/20 border border-orange-800/30 rounded-lg p-6 mt-8"),
-                ], [
-                  html.div([attr.class("flex items-center gap-3 mb-4")], [
-                    html.span([attr.class("text-3xl text-orange-500")], [html.text("⚠")]),
-                    view_h2(error_string.http_error(err)),
-                  ]),
-                  view_paragraph([
-                    content.Text(
-                      "We encountered an error while loading this article. Try reloading the page.",
-                    ),
-                  ]),
-                  html.div([attr.class("mt-6 flex gap-4")], [
-                    html.button([
-                      attr.class("px-4 py-2 bg-orange-800/50 text-orange-200 rounded-md hover:bg-orange-700/50 transition-colors"),
-                      event.on_click(ArticleGot(slug, Error(err))),
-                    ], [
-                      html.text("Try Again")
-                    ]),
-                    view_link(Articles, "Back to Articles"),
-                  ]),
-                ]),
-              ]
-              Pending -> [
-                html.div([
-                  attr.class("mt-8 space-y-6 animate-pulse"),
-                ], [
-                  html.div([attr.class("flex justify-between")], [
-                    html.div([attr.class("h-10 bg-zinc-800 rounded-md w-3/4")], []),
-                    html.div([attr.class("h-8 bg-zinc-800 rounded-md w-16")], []),
-                  ]),
-                  html.div([attr.class("h-6 bg-zinc-800 rounded-md w-1/2 mt-2")], []),
-                  html.div([attr.class("h-24 bg-zinc-800 rounded-md mt-8")], []),
-                  html.div([attr.class("space-y-4 mt-6")], [
-                    html.div([attr.class("h-20 bg-zinc-800 rounded-md")], []),
-                    html.div([attr.class("h-20 bg-zinc-800 rounded-md")], []),
-                    html.div([attr.class("h-20 bg-zinc-800 rounded-md")], []),
-                  ]),
-                ]),
-              ]
-              NotInitialized -> [
-                html.div([
-                  attr.class("bg-red-900/20 border border-red-800/30 rounded-lg p-6 mt-8"),
-                ], [
-                  html.div([attr.class("flex items-center gap-3 mb-4")], [
-                    html.span([attr.class("text-3xl text-red-500")], [html.text("⚠")]),
-                    view_h2("Application Error"),
-                  ]),
-                  view_paragraph([
-                    content.Text("No attempt to load article was made. This is a bug in the application."),
-                  ]),
-                  html.div([attr.class("mt-6 flex gap-4")], [
-                    html.button([
-                      attr.class("px-4 py-2 bg-red-800/50 text-red-200 rounded-md hover:bg-red-700/50 transition-colors"),
-                      event.on_click(ArticleGot(slug, Error(http.NetworkError))),
-                    ], [
-                      html.text("Retry Loading Article")
-                    ]),
-                    view_link(Articles, "Back to Articles"),
-                  ]),
-                ]),
-              ]
-            }
+          Article(article) -> {
+            view_article(article)
           }
-          ArticleBySlugEdit(slug) -> {
-            case model.articles {
-              Loaded(articles) -> {
-                case dict.is_empty(articles) {
-                  True -> {
-                    echo "article by slug: no articles loaded"
-                    view_article(article.loading_article())
-                  }
-                  False -> {
-                    let article = dict.get(articles, slug)
-                    case article {
-                      Ok(article) -> {
-                        case article {
-                          ArticleFullWithDraft(_, _, _, _, _, _, _, _) -> {
-                            view_article_edit(model, article)
-                          }
-                          _ -> view_article(article)
-                        }
-                      }
-                      Error(_) -> view_not_found()
-                    }
-                  }
-                }
+          ArticleEdit(article) -> {
+            case article {
+              ArticleFullWithDraft(_, _, _, _, _, _, _, _) -> {
+                view_article_edit(model, article)
               }
-              Errored(err) -> [view_error(error_string.http_error(err))]
-              Pending -> [view_error("loading...")]
-              NotInitialized -> [view_error("no atempt to load articles made")]
+              _ -> view_article(article)
             }
           }
           About -> view_about()
@@ -1173,8 +886,8 @@ fn view_header_link(
   label text: String,
 ) -> Element(msg) {
   let is_active = case current, target {
-    ArticleBySlug(_), Articles -> True
-    ArticleBySlugEdit(_), Articles -> True
+    Article(_), Articles -> True
+    ArticleEdit(_), Articles -> True
     _, _ -> current == target
   }
 
@@ -1309,6 +1022,7 @@ fn view_header_link(
 // VIEW PAGES ------------------------------------------------------------------
 
 fn view_index() -> List(Element(msg)) {
+  let assert Ok(nats_uri) = uri.parse("/nats-all-the-way-down")
   [
     view_title("Welcome to jst.dev!", "welcome"),
     view_subtitle(
@@ -1329,10 +1043,7 @@ fn view_index() -> List(Element(msg)) {
         also share some of my thoughts and learnings here. Feel free to 
         check out my overview, ",
       ),
-      view_link(
-        ArticleBySlug("nats-all-the-way-down"),
-        "NATS all the way down ->",
-      ),
+      view_link(nats_uri, "NATS all the way down ->"),
     ]),
     view_paragraph([
       content.Text(
@@ -1350,10 +1061,9 @@ fn view_index() -> List(Element(msg)) {
   ]
 }
 
-fn view_article_listing(articles: Dict(String, Article)) -> List(Element(Msg)) {
+fn view_article_listing(articles: List(Article)) -> List(Element(Msg)) {
   let articles =
     articles
-    |> dict.values
     |> list.sort(fn(a, b) { string.compare(a.slug, b.slug) })
     |> list.index_map(fn(article, _index) {
       case article {
@@ -1366,8 +1076,7 @@ fn view_article_listing(articles: Dict(String, Article)) -> List(Element(Msg)) {
                 attr.class(
                   "group block border-l-2 border-zinc-700 pl-4 hover:border-pink-600 transition-all duration-300",
                 ),
-                attr.class("rounded-lg hover:bg-zinc-800/50 p-3"),
-                href(ArticleBySlug(slug)),
+                href(Article(article)),
                 event.on_mouse_enter(ArticleHovered(article)),
               ],
               [
@@ -1407,7 +1116,7 @@ fn view_article_listing(articles: Dict(String, Article)) -> List(Element(Msg)) {
             [
               html.a(
                 [
-                  href(ArticleBySlug(slug)),
+                  href(Article(article)),
                   attr.class(
                     "group block border-l-2 border-orange-700 pl-4 p-3 hover:border-orange-500 transition-colors",
                   ),
@@ -1709,6 +1418,7 @@ fn view_article_edit_input(
 }
 
 fn view_article(article: Article) -> List(Element(msg)) {
+  let assert Ok(nats_uri) = uri.parse("/nats-all-the-way-down")
   let content = case article {
     ArticleFull(_id, slug, _revision, title, leading, subtitle, content) -> [
       html.div([attr.class("flex justify-between mb-4 mt-8")], [
@@ -1758,19 +1468,8 @@ fn view_article(article: Article) -> List(Element(msg)) {
   }
 
   [
-    html.article([
-      attr.class("with-transition bg-zinc-900/30 rounded-lg p-4 md:p-6 shadow-lg")
-    ], content),
-    html.div([attr.class("mt-10 flex justify-between")], [
-      view_link(Articles, "← Back to Articles"),
-      html.a(
-        [
-          attr.href("#top"),
-          attr.class("text-zinc-500 hover:text-pink-500 transition-colors"),
-        ],
-        [html.text("↑ Top")]
-      ),
-    ]),
+    html.article([attr.class("with-transition")], content),
+    html.p([attr.class("mt-14")], [view_link(nats_uri, "<- Go back?")]),
   ]
 }
 
@@ -1815,8 +1514,7 @@ fn view_edit_link(article: Article, text: String) -> Element(msg) {
       attr.class(
         "text-zinc-500 px-3 py-1 rounded-md text-sm hover:text-teal-400 hover:bg-teal-900/30",
       ),
-      attr.class("transition-all duration-200 flex items-center gap-1"),
-      href(ArticleBySlugEdit(article.slug)),
+      href(ArticleEdit(article)),
     ],
     [
       html.span([attr.class("hidden sm:inline")], [html.text("✏")]),
@@ -1897,12 +1595,11 @@ fn view_error(error_string: String) -> Element(msg) {
   ])
 }
 
-fn view_link(target: Route, title: String) -> Element(msg) {
+fn view_link(url: Uri, title: String) -> Element(msg) {
   html.a(
     [
-      href(target), 
-      attr.class("text-pink-600 hover:text-pink-500 transition-colors"),
-      attr.class("hover:underline cursor-pointer inline-flex items-center gap-1"),
+      attr.href(uri.to_string(url)),
+      attr.class("text-pink-700 hover:underline cursor-pointer"),
     ],
     [html.text(title)],
   )
@@ -1961,15 +1658,7 @@ fn view_article_content(contents: List(Content)) -> List(Element(msg)) {
       content.Block(contents) -> view_block(contents)
       content.Heading(text) -> view_h2(text)
       content.Paragraph(contents) -> view_paragraph(contents)
-      content.Link(url, title) -> {
-        echo "url"
-        echo url
-        let route = parse_route(url)
-        case route {
-          NotFound(_) -> view_link_missing(url, title)
-          _ -> view_link(route, title)
-        }
-      }
+      content.Link(url, title) -> view_link(url, title)
       content.LinkExternal(url, title) -> view_link_external(url, title)
       content.Image(_, _) -> todo as "view content image"
       content.List(items) -> view_list(items)
@@ -2464,6 +2153,19 @@ fn update_article_content_blocks(
     }
   }
 }
+// fn list_set(list: List(a), index: Int, value: a) -> List(a) {
+//   list
+//   |> list.index_map(fn(item, i) {
+//     case i == index {
+//       True -> value
+//       False -> item
+//     }
+//   })
+// }
 
-// Add this helper function near your other helpers
-
+// fn list_at(list: List(a), index: Int) -> Result(a, Nil) {
+//   list
+//   |> list.index_map(fn(item, i) { #(item, i) })
+//   |> list.find(fn(pair) { pair.1 == index })
+//   |> result.map(fn(pair) { pair.0 })
+// }
