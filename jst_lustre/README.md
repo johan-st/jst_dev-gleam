@@ -24,12 +24,11 @@ gleam test
 
 ## TODO
 
-- article dict key should be slug
-- links to articles should be by slug?
-  - or presta way. id <>"-"<>slug where only the id is used for routing
+- article content should probably be RemoteData(List(Content), HttpError) to simplify states where we are loading or failed to load the content.
+- Consider: Route might need to be simplified to not contain the entire article. If the article does not yet exist we might be better off handling that in a page type or with the RemoteData(a,b) type.
 - try listening to nats for articles
 - add states for initial load of article meta and local storage data
-- article content should probably be RemoteData(List(Content), HttpError) to simplify states where we are loading or failed to load the content.
+
 
 ```gleam
 
