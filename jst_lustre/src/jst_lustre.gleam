@@ -22,6 +22,7 @@ import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
 import modem
+import routes/routes.{type Route}
 import utils/auth
 import utils/error_string
 import utils/http.{type HttpError}
@@ -59,57 +60,8 @@ type Model {
 //   UserInfo(id: Int, text: String)
 // }
 
-type Route {
-  Index
-  Articles
-  Article(article: Article)
-  ArticleEdit(article: Article)
-  // ArticleEdit(article: Article, editor: Editor)
-  About
-  /// It's good practice to store whatever `Uri` we failed to match in case we
-  /// want to log it or hint to the user that maybe they made a typo.
-  NotFound(uri: Uri)
-}
-
-fn parse_route(uri: Uri, articles: List(Article)) -> Route {
-  case uri.path_segments(uri.path) {
-    [] | [""] -> Index
-    ["articles"] -> Articles
-    ["article", slug] -> {
-      case list.find(articles, fn(article) { article.slug == slug }) {
-        Ok(article) -> Article(article)
-        Error(_) -> NotFound(uri:)
-      }
-    }
-    ["article", id, "edit"] -> {
-      case
-        list.find(articles, fn(article) {
-          article.id == article_id.from_string(id)
-        })
-      {
-        Ok(article) -> ArticleEdit(article)
-        Error(_) -> NotFound(uri:)
-      }
-    }
-    ["about"] -> About
-    _ -> NotFound(uri:)
-  }
-}
-
-fn route_url(route: Route) -> String {
-  case route {
-    Index -> "/"
-    About -> "/about/"
-    Articles -> "/articles/"
-    Article(article) -> "/article/" <> article.slug <> "/"
-    ArticleEdit(article) ->
-      "/article/" <> article_id.to_string(article.id) <> "/edit"
-    NotFound(_) -> "/404"
-  }
-}
-
 fn href(route: Route) -> Attribute(msg) {
-  attr.href(route_url(route))
+  attr.href(routes.to_string(route))
 }
 
 fn init(_) -> #(Model, Effect(Msg)) {
@@ -117,8 +69,8 @@ fn init(_) -> #(Model, Effect(Msg)) {
   // HTTP request, and let the app itself determine what to show. Modem stores
   // the first URL so we can parse it for the app's initial route.
   let route = case modem.initial_uri() {
-    Ok(uri) -> parse_route(uri, [])
-    Error(_) -> Index
+    Ok(uri) -> routes.from_uri(uri, [])
+    Error(_) -> routes.Index
   }
   // let #(chat_model, chat_effect) = chat.init()
   let model =
@@ -132,7 +84,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
   let effect_modem =
     modem.init(fn(uri) {
       uri
-      |> parse_route([])
+      |> routes.from_uri([])
       |> UserNavigatedTo
     })
   let #(model_nav, effect_nav) = update_navigation(model, model.route)
@@ -233,8 +185,14 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
     // NAVIGATION
     UserNavigatedTo(route:) -> {
-      echo "user navigated to"
-      echo route
+      case route {
+        routes.NotFound(uri) -> {
+          echo "url not found: " <> uri.to_string(uri)
+        }
+        _ -> {
+          echo "user navigated to: " <> routes.to_string(route)
+        }
+      }
       update_navigation(model, route)
     }
     // Browser Persistance
@@ -504,7 +462,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             )
           #(
             Model(..model, articles: updated_articles),
-            modem.push(route_url(Article(article)), None, None),
+            modem.push(routes.to_string(routes.Article(article)), None, None),
           )
         }
         _ -> #(model, effect.none())
@@ -551,7 +509,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
 fn update_navigation(model: Model, route: Route) -> #(Model, Effect(Msg)) {
   case route {
-    Article(article) -> {
+    routes.Article(article) -> {
       let articles = case model.articles {
         Loaded(articles) -> articles
         _ -> []
@@ -567,7 +525,7 @@ fn update_navigation(model: Model, route: Route) -> #(Model, Effect(Msg)) {
       }
       #(Model(..model, route:), effect_nav)
     }
-    ArticleEdit(article) -> {
+    routes.ArticleEdit(article) -> {
       case article {
         ArticleFullWithDraft(_, _, _, _, _, _, _, _) -> {
           #(Model(..model, route:), effect.none())
@@ -615,11 +573,11 @@ fn update_got_articles_metadata(
   case result {
     Ok(articles) -> {
       let effect = case model.route {
-        Article(article) | ArticleEdit(article) -> {
+        routes.Article(article) | routes.ArticleEdit(article) -> {
           article.article_get(ArticleGot(article.id, _), article.id)
         }
         _ -> {
-          echo "no effect for route: " <> route_url(model.route)
+          echo "no effect for route: " <> routes.to_string(model.route)
           effect.none()
         }
       }
@@ -722,7 +680,7 @@ fn view(model: Model) -> Element(Msg) {
         // model, we can also pattern match on our Route value to show different
         // views based on the current page!
         case model.route {
-          Index -> {
+          routes.Index -> {
             case model.articles {
               Loaded(articles) -> {
                 case
@@ -737,7 +695,7 @@ fn view(model: Model) -> Element(Msg) {
               _ -> view_not_found()
             }
           }
-          Articles -> {
+          routes.Articles -> {
             case model.articles {
               Loaded(articles) -> {
                 case list.is_empty(articles) {
@@ -799,10 +757,10 @@ fn view(model: Model) -> Element(Msg) {
               ]
             }
           }
-          Article(article) -> {
+          routes.Article(article) -> {
             view_article(article)
           }
-          ArticleEdit(article) -> {
+          routes.ArticleEdit(article) -> {
             case article {
               ArticleFullWithDraft(_, _, _, _, _, _, _, _) -> {
                 view_article_edit(model, article)
@@ -810,8 +768,8 @@ fn view(model: Model) -> Element(Msg) {
               _ -> view_article(article)
             }
           }
-          About -> view_about()
-          NotFound(_) -> view_not_found()
+          routes.About -> view_about()
+          routes.NotFound(_) -> view_not_found()
         }
       }),
       // ..chat.view(ChatMsg, model.chat)
@@ -832,10 +790,7 @@ fn view_header(model: Model) -> Element(Msg) {
         ],
         [
           html.div([], [
-            html.a([
-              attr.class("font-light text-xl text-pink-600 hover:text-pink-500 transition-colors"), 
-              href(Index)
-            ], [
+            html.a([attr.class("font-light"), href(routes.Index)], [
               html.text("jst.dev"),
             ]),
           ]),
@@ -869,10 +824,14 @@ fn view_header(model: Model) -> Element(Msg) {
             ]),
             view_header_link(
               current: model.route,
-              to: Articles,
+              to: routes.Articles,
               label: "Articles",
             ),
-            view_header_link(current: model.route, to: About, label: "About"),
+            view_header_link(
+              current: model.route,
+              to: routes.About,
+              label: "About",
+            ),
           ]),
         ],
       ),
@@ -886,8 +845,8 @@ fn view_header_link(
   label text: String,
 ) -> Element(msg) {
   let is_active = case current, target {
-    Article(_), Articles -> True
-    ArticleEdit(_), Articles -> True
+    routes.Article(_), routes.Articles -> True
+    routes.ArticleEdit(_), routes.Articles -> True
     _, _ -> current == target
   }
 
@@ -909,115 +868,6 @@ fn view_header_link(
     )],
   )
 }
-
-// VIEW MESSAGES ---------------------------------------------------------------
-
-// fn view_user_messages(msgs) {
-//   case msgs {
-//     [] -> []
-//     [msg, ..msgs] -> [view_user_message(msg), ..view_user_messages(msgs)]
-//   }
-// }
-
-// fn view_user_message(msg: UserMessage) -> Element(Msg) {
-//   case msg {
-//     UserError(id, msg_text) -> {
-//       html.div(
-//         [
-//           attr.class("rounded-md bg-red-50 p-4 absolute top-0 left-0 right-0"),
-//           attr.id("user-message-" <> int.to_string(id)),
-//         ],
-//         [
-//           html.div([attr.class("flex")], [
-//             html.div([attr.class("shrink-0")], [html.text("ERROR")]),
-//             html.div([attr.class("ml-3")], [
-//               html.p([attr.class("text-sm font-medium text-red-800")], [
-//                 html.text(msg_text),
-//               ]),
-//             ]),
-//             html.div([attr.class("ml-auto pl-3")], [
-//               html.div([attr.class("-mx-1.5 -my-1.5")], [
-//                 html.button(
-//                   [
-//                     attr.class(
-//                       "inline-flex rounded-md bg-red-50 p-1.5 text-red-500 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2 focus:ring-offset-orange-50",
-//                     ),
-//                     event.on_click(UserMessageDismissed(msg)),
-//                   ],
-//                   [html.text("Dismiss")],
-//                 ),
-//               ]),
-//             ]),
-//           ]),
-//         ],
-//       )
-//     }
-
-//     UserWarning(id, msg_text) -> {
-//       html.div(
-//         [
-//           attr.class("rounded-md bg-green-50 p-4 relative top-0 left-0 right-0"),
-//           attr.id("user-message-" <> int.to_string(id)),
-//         ],
-//         [
-//           html.div([attr.class("flex")], [
-//             html.div([attr.class("shrink-0")], [html.text("WARNING")]),
-//             html.div([attr.class("ml-3")], [
-//               html.p([attr.class("text-sm font-medium text-green-800")], [
-//                 html.text(msg_text),
-//               ]),
-//             ]),
-//             html.div([attr.class("ml-auto pl-3")], [
-//               html.div([attr.class("-mx-1.5 -my-1.5")], [
-//                 html.button(
-//                   [
-//                     attr.class(
-//                       "inline-flex rounded-md bg-green-50 p-1.5 text-green-500 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 focus:ring-offset-green-50",
-//                     ),
-//                     event.on_click(UserMessageDismissed(msg)),
-//                   ],
-//                   [html.text("Dismiss")],
-//                 ),
-//               ]),
-//             ]),
-//           ]),
-//         ],
-//       )
-//     }
-
-//     UserInfo(id, msg_text) -> {
-//       html.div(
-//         [
-//           attr.class("border-l-4 border-yellow-400 bg-yellow-50 p-4"),
-//           attr.id("user-message-" <> int.to_string(id)),
-//         ],
-//         [
-//           html.div([attr.class("flex")], [
-//             html.div([attr.class("shrink-0")], [html.text("INFO")]),
-//             html.div([attr.class("ml-3")], [
-//               html.p([attr.class("font-medium text-yellow-800")], [
-//                 html.text(msg_text),
-//               ]),
-//             ]),
-//             html.div([attr.class("ml-auto pl-3")], [
-//               html.div([attr.class("-mx-1.5 -my-1.5")], [
-//                 html.button(
-//                   [
-//                     attr.class(
-//                       "inline-flex rounded-md bg-yellow-50 p-1.5 text-yellow-500 hover:bg-yellow-100 focus:outline-none focus:ring-2 focus:ring-yellow-600 focus:ring-offset-2 focus:ring-offset-yellow-50",
-//                     ),
-//                     event.on_click(UserMessageDismissed(msg)),
-//                   ],
-//                   [html.text("Dismiss")],
-//                 ),
-//               ]),
-//             ]),
-//           ]),
-//         ],
-//       )
-//     }
-//   }
-// }
 
 // VIEW PAGES ------------------------------------------------------------------
 
@@ -1076,7 +926,7 @@ fn view_article_listing(articles: List(Article)) -> List(Element(Msg)) {
                 attr.class(
                   "group block border-l-2 border-zinc-700 pl-4 hover:border-pink-600 transition-all duration-300",
                 ),
-                href(Article(article)),
+                href(routes.Article(article)),
                 event.on_mouse_enter(ArticleHovered(article)),
               ],
               [
@@ -1116,7 +966,7 @@ fn view_article_listing(articles: List(Article)) -> List(Element(Msg)) {
             [
               html.a(
                 [
-                  href(Article(article)),
+                  href(routes.Article(article)),
                   attr.class(
                     "group block border-l-2 border-orange-700 pl-4 p-3 hover:border-orange-500 transition-colors",
                   ),
@@ -1514,7 +1364,7 @@ fn view_edit_link(article: Article, text: String) -> Element(msg) {
       attr.class(
         "text-zinc-500 px-3 py-1 rounded-md text-sm hover:text-teal-400 hover:bg-teal-900/30",
       ),
-      href(ArticleEdit(article)),
+      href(routes.ArticleEdit(article)),
     ],
     [
       html.span([attr.class("hidden sm:inline")], [html.text("✏")]),
