@@ -30,6 +30,7 @@ pub fn from_uri(
     [] | [""] -> Index
     ["articles"] -> Articles(loaded_articles)
     ["article", slug] -> {
+      echo "article " <> slug
       case loaded_articles {
         Loaded(articles) -> {
           case list.find(articles, fn(article) { article.slug == slug }) {
@@ -41,6 +42,7 @@ pub fn from_uri(
       }
     }
     ["article", id, "edit"] -> {
+      echo "edit " <> id
       case loaded_articles {
         Loaded(articles) -> {
           case

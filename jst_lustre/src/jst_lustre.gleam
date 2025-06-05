@@ -138,6 +138,8 @@ type Msg {
   // AUTH
   AuthLoginClicked(username: String, password: String)
   AuthLoginResponse(result: Result(Response(String), HttpError))
+  AuthLogoutClicked
+  AuthLogoutResponse(result: Result(Response(String), HttpError))
   AuthCheckClicked
   AuthCheckResponse(result: Result(#(Bool, String, List(String)), HttpError))
   // CHAT
@@ -218,19 +220,18 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             }
             _ -> Loaded([article])
           }
-          let route =
-            echo case model.route {
-              routes.ArticleNotFound(_, slug) -> {
-                case slug == article.slug {
-                  True -> echo routes.Article(article)
-                  False -> echo model.route
-                }
+          let route = case model.route {
+            routes.ArticleNotFound(_, slug) -> {
+              case slug == article.slug {
+                True -> echo routes.Article(article)
+                False -> echo model.route
               }
-              routes.Article(ArticleSummary(_, _, _, _, _, _)) -> {
-                echo routes.Article(article)
-              }
-              _ -> echo model.route
             }
+            routes.Article(ArticleSummary(_, _, _, _, _, _)) -> {
+              echo routes.Article(article)
+            }
+            _ -> model.route
+          }
           #(Model(route:, articles: articles_model), effect.none())
         }
         Error(err) -> update_got_article_error(model, err, id)
@@ -478,6 +479,12 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     AuthLoginResponse(result) -> {
       #(model, effect.none())
     }
+    AuthLogoutClicked -> {
+      #(model, auth.auth_logout(AuthLogoutResponse))
+    }
+    AuthLogoutResponse(result) -> {
+      #(model, effect.none())
+    }
     AuthCheckClicked -> {
       #(model, auth.auth_check(AuthCheckResponse))
     }
@@ -506,6 +513,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 fn update_navigation(model: Model, route: Route) -> #(Model, Effect(Msg)) {
   case route {
     routes.Article(article) -> {
+      echo "article"
       let effect_nav = case article {
         ArticleSummary(id, _, _, _, _, _) -> {
           article.article_get(fn(result) { ArticleGot(id, result) }, id)
@@ -518,11 +526,14 @@ fn update_navigation(model: Model, route: Route) -> #(Model, Effect(Msg)) {
       #(Model(..model, route:), effect_nav)
     }
     routes.ArticleEdit(article) -> {
+      echo "article edit"
       case article {
         ArticleFullWithDraft(_, _, _, _, _, _, _, _) -> {
+          echo "article edit full with draft"
           #(Model(..model, route:), effect.none())
         }
         ArticleFull(id, slug, revision, title, leading, subtitle, content) -> {
+          echo "article edit full"
           let updated_article =
             ArticleFullWithDraft(
               id,
@@ -544,19 +555,25 @@ fn update_navigation(model: Model, route: Route) -> #(Model, Effect(Msg)) {
                 }
               }),
             )
+          echo route
+          echo route
           #(Model(route:, articles: articles_updated), effect.none())
         }
         ArticleSummary(id, _, _, _, _, _) -> {
+          echo "article summary"
           #(Model(..model, route:), article.article_get(ArticleGot(id, _), id))
         }
         ArticleWithError(id, _, _, _, _, _, _) -> {
+          echo "article with error"
           #(Model(..model, route:), article.article_get(ArticleGot(id, _), id))
         }
       }
     }
     routes.Articles(articles) -> {
+      echo "articles"
       case articles {
         Errored(err) -> {
+          echo "articles errored"
           echo err
           #(
             Model(..model, route:),
@@ -564,6 +581,7 @@ fn update_navigation(model: Model, route: Route) -> #(Model, Effect(Msg)) {
           )
         }
         NotInitialized -> {
+          echo "articles not initialized"
           #(
             Model(..model, route:),
             article.article_metadata_get(ArticleMetaGot),
@@ -847,10 +865,19 @@ fn view_header(model: Model) -> Element(Msg) {
             html.li([], [
               html.button(
                 [
-                  event.on_click(AuthLoginClicked("jst_dev", "jst_dev")),
+                  event.on_click(AuthLoginClicked("johan-st", "password")),
                   attr.class("bg-pink-700 text-white px-2 rounded-md"),
                 ],
                 [html.text("Login")],
+              ),
+            ]),
+            html.li([], [
+              html.button(
+                [
+                  event.on_click(AuthLogoutClicked),
+                  attr.class("bg-pink-700 text-white px-2 rounded-md"),
+                ],
+                [html.text("Logout")],
               ),
             ]),
             html.li([], [

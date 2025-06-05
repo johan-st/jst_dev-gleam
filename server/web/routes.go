@@ -32,8 +32,9 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 	mux.Handle("GET /api/article/{id}/", handleArticle(l, repo))
 
 	// auth
-	mux.Handle("GET /api/auth", handleAuth(l, nc))
-	mux.Handle("GET /api/auth/check", handleAuthCheck(l, nc, jwtSecret))
+	mux.Handle("POST /api/auth", handleAuth(l, nc))
+	mux.Handle("GET /api/auth/logout", handleAuthLogout(l, nc))
+	mux.Handle("GET /api/auth", handleAuthCheck(l, nc, jwtSecret))
 
 	// Add catch-all route
 	// mux.Handle("/", http.NotFoundHandler())
@@ -130,41 +131,69 @@ func handleProxy(l *jst_log.Logger, targetUrl string) http.Handler {
 	})
 }
 
-func handleAuth(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+func 	handleAuth(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+
+	type Req struct {
+		Email    string `json:"email,omitempty"`
+		Username string `json:"username,omitempty"`
+		Password string `json:"password,omitempty"`
+		Token    string `json:"token,omitempty"`
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		l.Debug("cookies=%v\n", r.Cookies())
+		var (
+			err      error
+			req      Req
+			whoReq   whoApi.AuthRequest
+			whoBytes []byte
+			whoMsg   *nats.Msg
+			whoResp  whoApi.AuthResponse
+			cookie   *http.Cookie
+		)
 
-		req := whoApi.AuthRequest{
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			l.Warn("Failed to decode request", "error", err)
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+		if req.Token != "" {
+			l.Debug("token: %s\n", req.Token)
+		} else if req.Email != "" {
+			l.Debug("email: %s\n", req.Email)
+		} else if req.Username != "" {
+			l.Debug("username: %s\n", req.Username)
+		}
+
+		whoReq = whoApi.AuthRequest{
 			Username: "johan-st",
 			Password: "password",
 		}
-		reqBytes, err := json.Marshal(req)
+		whoBytes, err = json.Marshal(whoReq)
 		if err != nil {
 			l.Debug("error marshalling request: %s\n", err)
 			http.Error(w, "error marshalling request", http.StatusInternalServerError)
 			return
 		}
-		l.Debug("request: %s\n", string(reqBytes))
+		l.Debug("request: %s\n", string(whoBytes))
 		l.Debug("subject: %s\n", whoApi.Subj.AuthGroup+"."+whoApi.Subj.AuthLogin)
 
-		msg, err := nc.Request(fmt.Sprintf("%s.%s", whoApi.Subj.AuthGroup, whoApi.Subj.AuthLogin), reqBytes, 10*time.Second)
+		whoMsg, err = nc.Request(fmt.Sprintf("%s.%s", whoApi.Subj.AuthGroup, whoApi.Subj.AuthLogin), whoBytes, 10*time.Second)
 		if err != nil {
 			l.Debug("error requesting auth: %s\n", err)
 			http.Error(w, "error requesting auth", http.StatusInternalServerError)
 			return
 		}
-		l.Debug("msg.Data: %s\n", string(msg.Data))
-		resp := whoApi.AuthResponse{}
-		err = json.Unmarshal(msg.Data, &resp)
+		l.Debug("msg.Data: %s\n", string(whoMsg.Data))
+		err = json.Unmarshal(whoMsg.Data, &whoResp)
 		if err != nil {
 			l.Debug("error unmarshalling auth response: %s\n", err)
 			http.Error(w, "error unmarshalling auth response", http.StatusInternalServerError)
 			return
 		}
 
-		token := resp.Token
-		l.Debug("token: %s\n", token)
-		subject, permissions, err := whoApi.JwtVerify("jst_dev_secret", audience, token)
+		l.Debug("token: %s\n", whoResp.Token)
+		subject, permissions, err := whoApi.JwtVerify("jst_dev_secret", audience, whoResp.Token)
 		if err != nil {
 			l.Debug("error verifying jwt: %s\n", err)
 			http.Error(w, "error verifying jwt", http.StatusInternalServerError)
@@ -172,11 +201,11 @@ func handleAuth(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		}
 		l.Debug("subject: %s\n", subject)
 		l.Debug("permissions: %v\n", permissions)
-		l.Debug("token: %s\n", token)
+		l.Debug("token: %s\n", whoResp.Token)
 
-		cookie := &http.Cookie{
+		cookie = &http.Cookie{
 			Name:     cookieAuth,
-			Value:    resp.Token,
+			Value:    whoResp.Token,
 			MaxAge:   30 * 60,
 			Path:     "/",
 			HttpOnly: true,
@@ -192,7 +221,13 @@ func handleAuth(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		http.SetCookie(w, cookie)
 		l.Debug("setting cookie %s with value length %d\n", cookie.Name, len(cookie.Value))
 
-		respJson(w, resp, http.StatusOK)
+		respJson(w, whoResp, http.StatusOK)
+	})
+}
+
+func handleAuthLogout(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{Name: cookieAuth, MaxAge: -1, Path: "/"})
 	})
 }
 
