@@ -15,44 +15,18 @@ import gleam/uri
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import utils/http.{type HttpError}
-import utils/remote_data.{type RemoteData}
+import utils/remote_data.{type RemoteData, Loaded, NotInitialized}
 
 pub type Article {
-  ArticleSummary(
+  ArticleV1(
     id: ArticleId,
     slug: String,
     revision: Int,
     title: String,
     leading: String,
     subtitle: String,
-  )
-  ArticleFull(
-    id: ArticleId,
-    slug: String,
-    revision: Int,
-    title: String,
-    leading: String,
-    subtitle: String,
-    content: List(Content),
-  )
-  ArticleWithError(
-    id: ArticleId,
-    slug: String,
-    revision: Int,
-    title: String,
-    leading: String,
-    subtitle: String,
-    error: String,
-  )
-  ArticleFullWithDraft(
-    id: ArticleId,
-    slug: String,
-    revision: Int,
-    title: String,
-    leading: String,
-    subtitle: String,
-    content: List(Content),
-    draft: Draft,
+    content: RemoteData(List(Content), HttpError),
+    draft: Option(Draft),
   )
 }
 
@@ -187,105 +161,48 @@ fn metadata_decoder() -> decode.Decoder(List(Article)) {
 }
 
 pub fn article_decoder() -> decode.Decoder(Article) {
-  use article_type <- decode.optional_field("type", "not_set", decode.string)
+  use version <- decode.optional_field("version", 0, decode.int)
   use id <- decode.field("id", decode.string)
   use slug <- decode.field("slug", decode.string)
   use revision <- decode.field("revision", decode.int)
   use title <- decode.field("title", decode.string)
   use leading <- decode.field("leading", decode.string)
   use subtitle <- decode.field("subtitle", decode.string)
+  use content <- decode.field("content", decode.list(content_decoder()))
+  // use draft <- decode.optional_field("draft", None, draft_decoder())
 
-  let decode_full = fn() -> decode.Decoder(Article) {
-    use content <- decode.field("content", decode.list(content_decoder()))
-    decode.success(ArticleFull(
-      id: id.from_string(id),
-      slug:,
-      revision:,
-      title:,
-      leading:,
-      subtitle:,
-      content:,
-    ))
-  }
-
-  let decode_error = fn() -> decode.Decoder(Article) {
-    use error <- decode.field("error", decode.string)
-    decode.success(ArticleWithError(
-      id: id.from_string(id),
-      slug:,
-      revision:,
-      title:,
-      leading:,
-      subtitle:,
-      error:,
-    ))
-  }
-
-  let decode_summary = fn() -> decode.Decoder(Article) {
-    decode.success(ArticleSummary(
-      id: id.from_string(id),
-      slug:,
-      revision:,
-      title:,
-      leading:,
-      subtitle:,
-    ))
-  }
-
-  decode.one_of(decode_full(), [decode_error(), decode_summary()])
+  decode.success(ArticleV1(
+    id: id.from_string(id),
+    slug: slug,
+    revision: revision,
+    title: title,
+    leading: leading,
+    subtitle: subtitle,
+    content: Loaded(content),
+    draft: None,
+  ))
 }
 
 // ENCODE ----------------------------------------------------------------------
 
 pub fn article_encoder(article: Article) -> json.Json {
   case article {
-    ArticleSummary(id, slug, revision, title, leading, subtitle) -> {
-      json.object([
-        #("type", json.string("metadata_v1")),
-        #("id", json.string(id.to_string(id))),
-        #("revision", json.int(revision)),
-        #("slug", json.string(slug)),
-        #("title", json.string(title)),
-        #("leading", json.string(leading)),
-        #("subtitle", json.string(subtitle)),
-      ])
-    }
-    ArticleFull(id, slug, revision, title, leading, subtitle, content) -> {
-      json.object([
-        #("type", json.string("article_v1")),
-        #("id", json.string(id.to_string(id))),
-        #("revision", json.int(revision)),
-        #("slug", json.string(slug)),
-        #("title", json.string(title)),
-        #("leading", json.string(leading)),
-        #("subtitle", json.string(subtitle)),
-        #("content", json.array(content, of: content_encoder)),
-      ])
-    }
-    ArticleWithError(id, slug, revision, title, leading, subtitle, error) -> {
-      json.object([
-        #("type", json.string("with_error_v1")),
-        #("id", json.string(id.to_string(id))),
-        #("revision", json.int(revision)),
-        #("slug", json.string(slug)),
-        #("title", json.string(title)),
-        #("leading", json.string(leading)),
-        #("subtitle", json.string(subtitle)),
-        #("error", json.string(error)),
-      ])
-    }
-    ArticleFullWithDraft(
+    ArticleV1(
       id,
       slug,
       revision,
       title,
       leading,
       subtitle,
-      content,
+      remote_data_content,
       _draft,
     ) -> {
+      let content = case remote_data_content {
+        Loaded(content) -> content
+        _ -> []
+      }
       json.object([
-        #("type", json.string("article_v1")),
+        #("version", json.int(1)),
         #("id", json.string(id.to_string(id))),
         #("revision", json.int(revision)),
         #("slug", json.string(slug)),
@@ -293,6 +210,7 @@ pub fn article_encoder(article: Article) -> json.Json {
         #("leading", json.string(leading)),
         #("subtitle", json.string(subtitle)),
         #("content", json.array(content, of: content_encoder)),
+        // #("draft", draft |> draft_encoder),
       ])
     }
   }
@@ -361,10 +279,10 @@ pub fn content_encoder(content: Content) -> json.Json {
 
 pub fn draft_update(article: Article, updater: fn(Draft) -> Draft) -> Article {
   case article {
-    ArticleFullWithDraft(_, _, _, _, _, _, _, _) -> {
-      ArticleFullWithDraft(..article, draft: updater(article.draft))
+    ArticleV1(_, _, _, _, _, _, _, Some(draft)) -> {
+      ArticleV1(..article, draft: Some(updater(draft)))
     }
-    _ -> {
+    ArticleV1(_, _, _, _, _, _, _, None) -> {
       echo "draft_update: not an article with draft"
       article
     }
@@ -382,13 +300,14 @@ pub fn draft_update(article: Article, updater: fn(Draft) -> Draft) -> Article {
 // Loading ---------------------------------------------------------------------
 
 pub fn loading_article() -> Article {
-  ArticleWithError(
+  ArticleV1(
     id: id.from_string("-"),
     slug: "placeholder_loading",
     revision: 0,
     title: "fetching articles..",
     subtitle: "articles have not been fetched yet",
     leading: "This is a placeholder article. At the moment, the articles are being fetched from the server.. please wait.",
-    error: "replace me with something that is not an article",
+    content: NotInitialized,
+    draft: None,
   )
 }
