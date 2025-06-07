@@ -23,7 +23,7 @@ import lustre/element/html
 import lustre/event
 import modem
 import routes/routes.{type Route}
-import utils/auth
+import utils/session
 import utils/error_string
 import utils/http.{type HttpError}
 import utils/persist.{type PersistentModel, PersistentModelV0, PersistentModelV1}
@@ -474,30 +474,30 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     // AUTH
     AuthLoginClicked(username, password) -> {
-      #(model, auth.login(AuthLoginResponse, username, password))
+      #(model, session.login(AuthLoginResponse, username, password))
     }
     AuthLoginResponse(result) -> {
       #(model, effect.none())
     }
     AuthLogoutClicked -> {
-      #(model, auth.auth_logout(AuthLogoutResponse))
+      #(model, session.auth_logout(AuthLogoutResponse))
     }
     AuthLogoutResponse(result) -> {
       #(model, effect.none())
     }
     AuthCheckClicked -> {
-      #(model, auth.auth_check(AuthCheckResponse))
+      #(model, session.auth_check(AuthCheckResponse))
     }
     AuthCheckResponse(result) -> {
-      echo "auth check response"
+      echo "session check response"
       echo result
       case result {
         Ok(response) -> {
-          echo "auth check response ok"
+          echo "session check response ok"
           #(model, effect.none())
         }
         Error(err) -> {
-          echo "auth check response error"
+          echo "session check response error"
           #(model, effect.none())
         }
       }

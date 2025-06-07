@@ -1,22 +1,33 @@
-import article/content.{
-  type Content, Block, Heading, Image, Link, LinkExternal, List, Paragraph, Text,
-  Unknown,
-}
-import article/draft.{type Draft}
-import gleam/dict.{type Dict}
+import birl
 import gleam/dynamic/decode.{type Decoder}
 import gleam/http as gleam_http
 import gleam/http/request
 import gleam/json
-import gleam/list
-import gleam/option.{type Option, None, Some}
-import gleam/uri
 import lustre/effect.{type Effect}
-import lustre/element.{type Element}
-import utils/http.{type HttpError}
-import utils/remote_data.{type RemoteData}
+import utils/http
 
-pub fn login(msg, username: String, password: String) -> Effect(a) {
+pub type Session {
+  Unauthenticated
+  Authenticated(subject: String, token: String, expiry: Int)
+}
+
+pub type SessionError {
+  SessionError(message: String)
+}
+
+pub fn is_authenticated(session: Session) -> Bool {
+  case session {
+    Unauthenticated -> False
+    Authenticated(_, _, expiry) -> {
+      let current_time = birl.now() |> birl.to_unix_milli()
+      current_time < expiry
+    }
+  }
+}
+
+// EFFECTS ---------------------------------------------------------------------
+
+pub fn login(msg, username: String, password: String) -> Effect(msg) {
   let request =
     request.new()
     |> request.set_method(gleam_http.Post)
@@ -43,7 +54,7 @@ pub fn login(msg, username: String, password: String) -> Effect(a) {
   http.send(request, expect)
 }
 
-pub fn auth_check(msg) -> Effect(a) {
+pub fn auth_check(msg) -> Effect(msg) {
   let request =
     request.new()
     |> request.set_method(gleam_http.Get)
@@ -74,6 +85,8 @@ pub fn auth_logout(msg) -> Effect(a) {
   )
 }
 
+// DECODERS --------------------------------------------------------------------
+
 pub fn auth_check_decoder() -> Decoder(#(Bool, String, List(String))) {
   use valid <- decode.field("valid", decode.bool)
   use subject <- decode.field("subject", decode.string)
@@ -86,13 +99,9 @@ pub fn auth_logout_decoder() -> Decoder(String) {
   decode.success(result)
 }
 
-pub type Session {
-  Session(subject: String, token: String, expiry: Int)
-}
-
 pub fn session_decoder() -> Decoder(Session) {
   use subject <- decode.field("subject", decode.string)
   use token <- decode.field("token", decode.string)
   use expiry <- decode.field("expiry", decode.int)
-  decode.success(Session(subject, token, expiry))
+  decode.success(Authenticated(subject, token, expiry))
 }
