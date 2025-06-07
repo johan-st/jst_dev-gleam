@@ -16,6 +16,10 @@ pub type Route {
     slug: String,
   )
   ArticleEdit(article: Article)
+  ArticleEditNotFound(
+    available_articles: RemoteData(List(Article), HttpError),
+    id: ArticleId,
+  )
   About
   /// It's good practice to store whatever `Uri` we failed to match in case we
   /// want to log it or hint to the user that maybe they made a typo.
@@ -51,10 +55,11 @@ pub fn from_uri(
             })
           {
             Ok(article) -> ArticleEdit(article)
-            Error(Nil) -> ArticleNotFound(loaded_articles, id)
+            Error(Nil) ->
+              ArticleEditNotFound(loaded_articles, article_id.from_string(id))
           }
         }
-        _ -> ArticleNotFound(loaded_articles, id)
+        _ -> ArticleEditNotFound(loaded_articles, article_id.from_string(id))
       }
     }
     ["about"] -> About
@@ -71,6 +76,8 @@ pub fn to_string(route: Route) -> String {
     ArticleNotFound(_available_articles, slug) -> "/article/" <> slug
     ArticleEdit(article) ->
       "/article/" <> article_id.to_string(article.id) <> "/edit"
+    ArticleEditNotFound(_available_articles, id) ->
+      "/article/" <> article_id.to_string(id) <> "/edit"
     NotFound(uri) -> "/404?uri=" <> uri.to_string(uri)
   }
 }

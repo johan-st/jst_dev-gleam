@@ -23,13 +23,13 @@ import lustre/element/html
 import lustre/event
 import modem
 import routes/routes.{type Route}
-import utils/session
 import utils/error_string
 import utils/http.{type HttpError}
 import utils/persist.{type PersistentModel, PersistentModelV0, PersistentModelV1}
 import utils/remote_data.{
   type RemoteData, Errored, Loaded, NotInitialized, Pending,
 }
+import utils/session
 
 // MAIN ------------------------------------------------------------------------
 
@@ -182,6 +182,8 @@ type Msg {
 // }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
+  echo msg
+  echo model.route
   case msg {
     // NAVIGATION
     UserNavigatedTo(uri:) -> {
@@ -601,7 +603,10 @@ fn update_got_articles_metadata(
   case result {
     Ok(articles) -> {
       case model.route {
-        routes.ArticleNotFound(_available_articles, slug) -> {
+        routes.ArticleNotFound(available_articles, slug) -> {
+          echo slug
+          echo available_articles
+          echo articles |> list.map(fn(article) { article.slug })
           case list.find(articles, fn(article) { article.slug == slug }) {
             Ok(article) -> {
               case article {
@@ -632,6 +637,13 @@ fn update_got_articles_metadata(
               #(Model(..model, articles: Loaded(articles)), effect.none())
             }
           }
+        }
+        routes.ArticleEditNotFound(available_articles, id) -> {
+          echo "article edit not found"
+          echo id
+          echo available_articles
+          echo articles |> list.map(fn(article) { article.id })
+          #(Model(..model, articles: Loaded(articles)), effect.none())
         }
         _ -> {
           #(Model(..model, articles: Loaded(articles)), effect.none())
@@ -825,6 +837,9 @@ fn view(model: Model) -> Element(Msg) {
               }
               _ -> view_article(article)
             }
+          }
+          routes.ArticleEditNotFound(available_articles, id) -> {
+            view_article_edit_not_found(available_articles, id)
           }
           routes.About -> view_about()
           routes.NotFound(_) -> view_not_found()
@@ -1286,6 +1301,18 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
           ),
         ]),
       ]),
+    ]),
+  ]
+}
+
+fn view_article_edit_not_found(
+  available_articles: RemoteData(List(Article), HttpError),
+  id: ArticleId,
+) -> List(Element(msg)) {
+  [
+    view_title("Article not found", article_id.to_string(id)),
+    view_paragraph([
+      content.Text("The article you are looking for does not exist."),
     ]),
   ]
 }
