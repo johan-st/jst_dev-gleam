@@ -129,7 +129,7 @@ func (l *Logger) Fatal(msg string, args ...any) {
 }
 
 func (l *Logger) log(level Level, msg string, args ...any) {
-	msg = strings.TrimSuffix(msg, "\n") + "\n"
+	msg = strings.TrimSuffix(msg, "\n")
 
 	if l.nc == nil {
 		fmt.Printf("[local] %s\n", msg)
