@@ -5,6 +5,7 @@ import article/content.{
 import article/draft.{type Draft}
 import article/id.{type ArticleId}
 import gleam/dict.{type Dict}
+import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/http as gleam_http
 import gleam/http/request
@@ -14,8 +15,10 @@ import gleam/option.{type Option, None, Some}
 import gleam/uri
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
-import utils/http.{type HttpError}
-import utils/remote_data.{type RemoteData, Loaded, NotInitialized}
+import utils/http.{type HttpError, NotFound}
+import utils/remote_data.{
+  type RemoteData, Errored, Loaded, NotInitialized, Pending,
+}
 
 pub type Article {
   ArticleV1(
@@ -49,7 +52,7 @@ pub fn article_metadata_get(msg) -> Effect(a) {
     |> request.set_method(gleam_http.Get)
     |> request.set_scheme(gleam_http.Http)
     |> request.set_host("localhost")
-    |> request.set_path("/api/article")
+    |> request.set_path("/api/article/")
     |> request.set_port(8080)
   http.send(request, http.expect_json(metadata_decoder(), msg))
 }
@@ -72,11 +75,13 @@ pub fn article_create(msg, article: Article) -> Effect(a) {
     |> request.set_method(gleam_http.Post)
     |> request.set_scheme(gleam_http.Http)
     |> request.set_host("localhost")
-    |> request.set_path("/api/article")
+    |> request.set_path("/api/article/")
     |> request.set_port(8080)
     |> request.set_body(article_encoder(article) |> json.to_string)
   http.send(request, http.expect_json(article_decoder(), msg))
 }
+
+// DECODE ----------------------------------------------------------------------
 
 fn content_decoder() -> decode.Decoder(Content) {
   use content_type <- decode.field("type", decode.string)
@@ -168,8 +173,16 @@ pub fn article_decoder() -> decode.Decoder(Article) {
   use title <- decode.field("title", decode.string)
   use leading <- decode.field("leading", decode.string)
   use subtitle <- decode.field("subtitle", decode.string)
-  use content <- decode.field("content", decode.list(content_decoder()))
-  // use draft <- decode.optional_field("draft", None, draft_decoder())
+  use content_list <- decode.optional_field(
+    "content",
+    [],
+    decode.list(content_decoder()),
+  )
+
+  let content = case content_list {
+    [] -> NotInitialized
+    _ -> Loaded(content_list)
+  }
 
   decode.success(ArticleV1(
     id: id.from_string(id),
@@ -178,7 +191,7 @@ pub fn article_decoder() -> decode.Decoder(Article) {
     title: title,
     leading: leading,
     subtitle: subtitle,
-    content: Loaded(content),
+    content: content,
     draft: None,
   ))
 }
@@ -198,8 +211,8 @@ pub fn article_encoder(article: Article) -> json.Json {
       _draft,
     ) -> {
       let content = case remote_data_content {
-        Loaded(content) -> content
-        _ -> []
+        Loaded(content) -> json.array(content, of: content_encoder)
+        _ -> json.array([], of: content_encoder)
       }
       json.object([
         #("version", json.int(1)),
@@ -209,7 +222,7 @@ pub fn article_encoder(article: Article) -> json.Json {
         #("title", json.string(title)),
         #("leading", json.string(leading)),
         #("subtitle", json.string(subtitle)),
-        #("content", json.array(content, of: content_encoder)),
+        #("content", content),
         // #("draft", draft |> draft_encoder),
       ])
     }

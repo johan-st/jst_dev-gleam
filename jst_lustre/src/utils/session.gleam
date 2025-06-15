@@ -8,21 +8,11 @@ import utils/http
 
 pub type Session {
   Unauthenticated
-  Authenticated(subject: String, token: String, expiry: Int)
+  Authenticated(session: SessionAuthenticated)
 }
 
-pub type SessionError {
-  SessionError(message: String)
-}
-
-pub fn is_authenticated(session: Session) -> Bool {
-  case session {
-    Unauthenticated -> False
-    Authenticated(_, _, expiry) -> {
-      let current_time = birl.now() |> birl.to_unix_milli()
-      current_time < expiry
-    }
-  }
+pub opaque type SessionAuthenticated {
+  SessionAuthenticated(subject: String, token: String, expiry: Int)
 }
 
 // EFFECTS ---------------------------------------------------------------------
@@ -99,9 +89,9 @@ pub fn auth_logout_decoder() -> Decoder(String) {
   decode.success(result)
 }
 
-pub fn session_decoder() -> Decoder(Session) {
+pub fn session_decoder() -> Decoder(SessionAuthenticated) {
   use subject <- decode.field("subject", decode.string)
   use token <- decode.field("token", decode.string)
   use expiry <- decode.field("expiry", decode.int)
-  decode.success(Authenticated(subject, token, expiry))
+  decode.success(SessionAuthenticated(subject, token, expiry))
 }
