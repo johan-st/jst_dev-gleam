@@ -76,7 +76,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
     Model(
       session: session.Unauthenticated,
       route: route,
-      page: pages.from_route(route, session.Unauthenticated, Pending),
+      page: pages.from_route(route, session.Unauthenticated, NotInitialized),
       articles: Pending,
       // user_messages: [],
     // chat: chat_model,
@@ -183,8 +183,6 @@ type Msg {
 // }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
-  echo msg
-  echo model.route
   case msg {
     // NAVIGATION
     UserNavigatedTo(uri:) -> {
@@ -210,20 +208,22 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ArticleGot(id, result) -> {
       case result {
         Ok(article) -> {
-          let articles_model = case model.articles {
-            Loaded(articles) -> {
-              Loaded(
-                list.map(articles, fn(article_current) {
-                  case article.id == article_current.id {
-                    True -> article
-                    False -> article_current
-                  }
-                }),
-              )
-            }
-            _ -> Loaded([article])
-          }
-          #(Model(..model, articles: articles_model), effect.none())
+          let updated_articles =
+            remote_data.try_update(
+              model.articles,
+              list.map(_, fn(article_current) {
+                case article.id == article_current.id {
+                  True -> article
+                  False -> article_current
+                }
+              }),
+            )
+          let page_updated =
+            pages.from_route(model.route, model.session, updated_articles)
+          #(
+            Model(..model, articles: updated_articles, page: page_updated),
+            effect.none(),
+          )
         }
         Error(err) -> update_got_article_error(model, err, id)
       }
@@ -533,10 +533,15 @@ fn update_navigation(model: Model, route_new: Route) -> #(Model, Effect(Msg)) {
           case list.find(articles, fn(article) { article.slug == slug }) {
             Ok(ArticleV1(id, _, _, _, _, _, NotInitialized, _))
             | Ok(ArticleV1(id, _, _, _, _, _, Errored(_), _)) -> {
+              echo "update_navigation, article: content not initialized or errored"
               article.article_get(fn(result) { ArticleGot(id, result) }, id)
             }
             _ -> effect.none()
           }
+        }
+        NotInitialized -> {
+          echo "update_navigation, article: articles not initialized"
+          article.article_metadata_get(ArticleMetaGot)
         }
         _ -> effect.none()
       }
@@ -546,14 +551,19 @@ fn update_navigation(model: Model, route_new: Route) -> #(Model, Effect(Msg)) {
       echo "article edit"
       case model.articles {
         Loaded(articles) -> {
-          case list.find(articles, fn(article) { 
-            article_id.to_string(article.id) == id_string 
-          }) {
+          case
+            list.find(articles, fn(article) {
+              article_id.to_string(article.id) == id_string
+            })
+          {
             Ok(article) -> {
               case article {
                 ArticleV1(_, _, _, _, _, _, _, draft: Some(_)) -> {
                   echo "article edit full with draft"
-                  #(Model(..model, route: route_new, page: page_new), effect.none())
+                  #(
+                    Model(..model, route: route_new, page: page_new),
+                    effect.none(),
+                  )
                 }
                 ArticleV1(
                   id,
@@ -587,8 +597,17 @@ fn update_navigation(model: Model, route_new: Route) -> #(Model, Effect(Msg)) {
                         }
                       }),
                     )
-                  let page_updated = pages.from_route(route_new, model.session, articles_updated)
-                  #(Model(..model, route: route_new, page: page_updated, articles: articles_updated), effect.none())
+                  let page_updated =
+                    pages.from_route(route_new, model.session, articles_updated)
+                  #(
+                    Model(
+                      ..model,
+                      route: route_new,
+                      page: page_updated,
+                      articles: articles_updated,
+                    ),
+                    effect.none(),
+                  )
                 }
                 ArticleV1(id, _, _, _, _, _, NotInitialized, _)
                 | ArticleV1(id, _, _, _, _, _, Errored(_), _) -> {
@@ -597,7 +616,10 @@ fn update_navigation(model: Model, route_new: Route) -> #(Model, Effect(Msg)) {
                     article.article_get(ArticleGot(id, _), id),
                   )
                 }
-                _ -> #(Model(..model, route: route_new, page: page_new), effect.none())
+                _ -> #(
+                  Model(..model, route: route_new, page: page_new),
+                  effect.none(),
+                )
               }
             }
             Error(_) -> {
@@ -642,13 +664,42 @@ fn update_got_articles_metadata(
   case result {
     Ok(articles) -> {
       let articles_loaded = Loaded(articles)
-      let page_updated = pages.from_route(model.route, model.session, articles_loaded)
-      #(Model(..model, articles: articles_loaded, page: page_updated), effect.none())
+      let page_updated =
+        pages.from_route(model.route, model.session, articles_loaded)
+      let effect_nav = case model.route {
+        routes.Article(slug) -> {
+          case list.find(articles, fn(article) { article.slug == slug }) {
+            Ok(ArticleV1(id, _, _, _, _, _, NotInitialized, _))
+            | Ok(ArticleV1(id, _, _, _, _, _, Errored(_), _)) -> {
+              article.article_get(fn(result) { ArticleGot(id, result) }, id)
+            }
+            _ -> effect.none()
+          }
+        }
+        routes.ArticleEdit(id_string) -> {
+          case list.find(articles, fn(article) { article_id.to_string(article.id) == id_string }) {
+            Ok(ArticleV1(id, _, _, _, _, _, NotInitialized, _))
+            | Ok(ArticleV1(id, _, _, _, _, _, Errored(_), _)) -> {
+              article.article_get(fn(result) { ArticleGot(id, result) }, id)
+            }
+            _ -> effect.none()
+          }
+        }
+        _ -> effect.none()
+      }
+      #(
+        Model(..model, articles: articles_loaded, page: page_updated),
+        effect_nav,
+      )
     }
     Error(err) -> {
       let articles_errored = Errored(err)
-      let page_updated = pages.from_route(model.route, model.session, articles_errored)
-      #(Model(..model, articles: articles_errored, page: page_updated), effect.none())
+      let page_updated =
+        pages.from_route(model.route, model.session, articles_errored)
+      #(
+        Model(..model, articles: articles_errored, page: page_updated),
+        effect.none(),
+      )
     }
   }
 }
@@ -756,9 +807,7 @@ fn view(model: Model) -> Element(Msg) {
           pages.PageArticleListLoading -> [
             view_h2("loading..."),
             view_paragraph([
-              content.Text(
-                "We are loading the articles.. Give us a moment.",
-              ),
+              content.Text("We are loading the articles.. Give us a moment."),
             ]),
           ]
           pages.PageArticle(article, _permissions) -> {
@@ -769,15 +818,16 @@ fn view(model: Model) -> Element(Msg) {
           }
           pages.PageError(error) -> {
             case error {
-              pages.ArticleNotFound(slug, _available_slugs) -> 
+              pages.ArticleNotFound(slug, _available_slugs) ->
                 view_article_not_found(model.articles, slug)
-              pages.ArticleEditNotFound(id) -> 
-                view_article_edit_not_found(model.articles, article_id.from_string(id))
+              pages.ArticleEditNotFound(id) ->
+                view_article_edit_not_found(
+                  model.articles,
+                  article_id.from_string(id),
+                )
               pages.HttpError(err, context) -> [
                 view_h2("Error: " <> context),
-                view_paragraph([
-                  content.Text(error_string.http_error(err)),
-                ]),
+                view_paragraph([content.Text(error_string.http_error(err))]),
               ]
               pages.AuthenticationRequired(action) -> [
                 view_h2("Authentication Required"),
@@ -945,21 +995,12 @@ fn view_article_listing(articles: List(Article)) -> List(Element(Msg)) {
     |> list.sort(fn(a, b) { string.compare(a.slug, b.slug) })
     |> list.index_map(fn(article, _index) {
       case article {
-        ArticleV1(
-          _,
-          slug,
-          _,
-          title,
-          leading,
-          subtitle,
-          Loaded(_content),
-          _draft_option,
-        ) -> {
+        ArticleV1(_, slug, _, title, leading, subtitle, _content, _draft_option) -> {
           html.article([attr.class("mt-14")], [
             html.a(
               [
                 attr.class(
-                  "group block border-l-2 border-zinc-700 pl-4 hover:border-pink-600 transition-all duration-300",
+                  "group block border-l border-zinc-700 pl-4 hover:border-pink-700 transition-colors duration-25",
                 ),
                 href(routes.Article(article.slug)),
                 event.on_mouse_enter(ArticleHovered(article)),
@@ -983,54 +1024,6 @@ fn view_article_listing(articles: List(Article)) -> List(Element(Msg)) {
               ],
             ),
           ])
-        }
-        ArticleV1(
-          _id,
-          slug,
-          _revision,
-          title,
-          _leading,
-          _subtitle,
-          Errored(err),
-          _,
-        ) -> {
-          html.article(
-            [
-              attr.class("mt-8 md:mt-14 group"),
-              attr.class("animate-break bg-zinc-800/30 rounded-lg"),
-            ],
-            [
-              html.a(
-                [
-                  href(routes.Article(article.slug)),
-                  attr.class(
-                    "group block border-l-2 border-orange-700 pl-4 p-3 hover:border-orange-500 transition-colors",
-                  ),
-                ],
-                [
-                  html.h3(
-                    [
-                      attr.id("article-title-" <> slug),
-                      attr.class("article-title"),
-                      attr.class("text-xl font-light text-orange-600"),
-                      attr.class("animate-break--mirror hover:animate-break"),
-                    ],
-                    [html.text(title)],
-                  ),
-                  view_subtitle(error_string.http_error(err), slug),
-                  view_error(
-                    "there was an error loading this article. Click to try again.",
-                  ),
-                ],
-              ),
-            ],
-          )
-        }
-        ArticleV1(_, _, _, _, _, _, NotInitialized, _) -> {
-          html.article([attr.class("mt-14")], [html.text("not initialized")])
-        }
-        ArticleV1(_, _, _, _, _, _, Pending, _) -> {
-          html.article([attr.class("mt-14")], [html.text("pending")])
         }
       }
     })
@@ -1359,7 +1352,7 @@ fn view_article(article: Article) -> List(Element(msg)) {
     ]
 
     ArticleV1(_, _, _, _, _, _, NotInitialized, _) -> [
-      html.text("not initialized"),
+      html.text("view_article: not initialized"),
     ]
     ArticleV1(_, _, _, _, _, _, Pending, _) -> [html.text("pending")]
   }
