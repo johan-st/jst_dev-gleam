@@ -119,8 +119,9 @@ type PermissionsGrantRequest struct {
 	Permissions []Permission `json:"permissions"`
 }
 type PermissionsGrantResponse struct {
-	ID    string       `json:"id"`
-	Added []Permission `json:"added"`
+	ID      string       `json:"id"`
+	Added   []Permission `json:"added"`
+	Existed []Permission `json:"existed"`
 }
 
 type PermissionsRevokeRequest struct {
@@ -130,6 +131,7 @@ type PermissionsRevokeRequest struct {
 type PermissionsRevokeResponse struct {
 	ID      string       `json:"id"`
 	Removed []Permission `json:"removed"`
+	Missing []Permission `json:"missing"`
 }
 
 type PermissionsCheckRequest struct {
@@ -140,6 +142,8 @@ type PermissionsCheckResponse struct {
 	ID          string       `json:"id"`
 	Permissions []Permission `json:"permissions"`
 	AllGranted  bool         `json:"allGranted"`
+	Granted     []Permission `json:"granted"`
+	Missing     []Permission `json:"missing"`
 }
 
 // AUTH

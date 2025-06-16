@@ -176,7 +176,6 @@ func (w *Who) userWatcher() error {
 		err     error
 		kv      jetstream.KeyValueEntry
 		user    User
-		u       *User
 	)
 
 	// Store the context in the Who struct
@@ -202,13 +201,27 @@ func (w *Who) userWatcher() error {
 						w.l.Error("failed to unmarshal user: %s", err.Error())
 						continue
 					}
-					u = w.userGet(user.ID)
-					if u == nil {
+					found := false
+					for i, existingUser := range w.users {
+						if existingUser.ID == user.ID {
+							w.users[i] = user
+							found = true
+							w.l.Debug("updated user(%s). %d users loaded", user.ID, len(w.users))
+							break
+						}
+					}
+					if !found {
 						w.users = append(w.users, user)
 						w.l.Debug("new user(%s). %d users loaded", user.ID, len(w.users))
 					}
 				case jetstream.KeyValueDelete:
-					w.l.Debug("deleted user(%s). %d users loaded", kv.Key(), len(w.users))
+					for i, existingUser := range w.users {
+						if existingUser.ID == kv.Key() {
+							w.users = append(w.users[:i], w.users[i+1:]...)
+							w.l.Debug("deleted user(%s). %d users loaded", kv.Key(), len(w.users))
+							break
+						}
+					}
 				default:
 					w.l.Error("unknown operation: %s", kv.Operation())
 				}
@@ -476,10 +489,12 @@ func (w *Who) handlePermissionsGrant() micro.HandlerFunc {
 	l := w.l.WithBreadcrumb("permissions_grant")
 	return func(req micro.Request) {
 		var (
-			err      error
-			user     *User
-			reqData  api.PermissionsGrantRequest
-			respData api.PermissionsGrantResponse
+			err         error
+			user        *User
+			reqData     api.PermissionsGrantRequest
+			respData    api.PermissionsGrantResponse
+			permAdded   = []api.Permission{}
+			permExisted = []api.Permission{}
 		)
 		l.Debug("got request")
 		err = json.Unmarshal(req.Data(), &reqData)
@@ -495,16 +510,22 @@ func (w *Who) handlePermissionsGrant() micro.HandlerFunc {
 			return
 		}
 		for _, perm := range reqData.Permissions {
-			err = w.userAddPermission(user, perm)
+			updated, err := w.userAddPermission(user, perm)
 			if err != nil {
 				l.Warn(fmt.Sprintf("failed to add permission: %s", err.Error()))
 				req.Error("OPERATION_FAILED", "the operation failed to complete", []byte(err.Error()))
 				return
 			}
+			if updated {
+				permAdded = append(permAdded, perm)
+			} else {
+				permExisted = append(permExisted, perm)
+			}
 		}
 		respData = api.PermissionsGrantResponse{
-			ID:    user.ID,
-			Added: reqData.Permissions,
+			ID:      user.ID,
+			Added:   permAdded,
+			Existed: permExisted,
 		}
 		req.RespondJSON(respData)
 	}
@@ -514,10 +535,12 @@ func (w *Who) handlePermissionsRevoke() micro.HandlerFunc {
 	l := w.l.WithBreadcrumb("permissions_revoke")
 	return func(req micro.Request) {
 		var (
-			err      error
-			user     *User
-			reqData  api.PermissionsRevokeRequest
-			respData api.PermissionsRevokeResponse
+			err         error
+			user        *User
+			reqData     api.PermissionsRevokeRequest
+			respData    api.PermissionsRevokeResponse
+			permRemoved = []api.Permission{}
+			permMissing = []api.Permission{}
 		)
 		l.Debug("got request")
 		err = json.Unmarshal(req.Data(), &reqData)
@@ -533,16 +556,22 @@ func (w *Who) handlePermissionsRevoke() micro.HandlerFunc {
 			return
 		}
 		for _, perm := range reqData.Permissions {
-			err = w.userRemovePermission(user, perm)
+			removed, err := w.userRemovePermission(user, perm)
 			if err != nil {
 				l.Warn(fmt.Sprintf("failed to remove permission: %s", err.Error()))
 				req.Error("OPERATION_FAILED", "the operation failed to complete", []byte(err.Error()))
 				return
 			}
+			if removed {
+				permRemoved = append(permRemoved, perm)
+			} else {
+				permMissing = append(permMissing, perm)
+			}
 		}
 		respData = api.PermissionsRevokeResponse{
 			ID:      user.ID,
-			Removed: reqData.Permissions,
+			Removed: permRemoved,
+			Missing: permMissing,
 		}
 		req.RespondJSON(respData)
 	}
@@ -552,10 +581,12 @@ func (w *Who) handlePermissionsCheck() micro.HandlerFunc {
 	l := w.l.WithBreadcrumb("permissions_check")
 	return func(req micro.Request) {
 		var (
-			err      error
-			reqData  api.PermissionsCheckRequest
-			respData api.PermissionsCheckResponse
-			user     *User
+			err         error
+			reqData     api.PermissionsCheckRequest
+			respData    api.PermissionsCheckResponse
+			user        *User
+			permGranted = []api.Permission{}
+			permMissing = []api.Permission{}
 		)
 
 		l.Debug("got request")
@@ -571,10 +602,19 @@ func (w *Who) handlePermissionsCheck() micro.HandlerFunc {
 			req.Error("NOT_FOUND", "user not found", []byte(reqData.ID))
 			return
 		}
+		for _, perm := range reqData.Permissions {
+			if w.permGranted(user, []api.Permission{perm}) {
+				permGranted = append(permGranted, perm)
+			} else {
+				permMissing = append(permMissing, perm)
+			}
+		}
 		respData = api.PermissionsCheckResponse{
 			ID:          user.ID,
 			Permissions: reqData.Permissions,
-			AllGranted:  w.permGranted(user, reqData.Permissions),
+			AllGranted:  len(permMissing) == 0,
+			Granted:     permGranted,
+			Missing:     permMissing,
 		}
 		req.RespondJSON(respData)
 	}
@@ -705,22 +745,65 @@ func (w *Who) permGranted(user *User, perms []api.Permission) bool {
 	return true
 }
 
-func (w *Who) userAddPermission(user *User, perm api.Permission) error {
+func (w *Who) userAddPermission(user *User, perm api.Permission) (bool, error) {
+	var (
+		err       error
+		userBytes []byte
+		rev       uint64
+	)
+
 	if !slices.Contains(PermissionsAll, perm) {
-		return fmt.Errorf("permission %s is not a valid permission", perm)
+		return false, fmt.Errorf("permission %s is not a valid permission", perm)
 	}
 	if w.permGranted(user, []api.Permission{perm}) {
-		return fmt.Errorf("permission %s already exists", perm) // TODO: should this be an error?
+		return false, nil
 	}
 	user.Permissions = append(user.Permissions, perm)
-	return nil
+
+	// Persist the updated user to KV store
+	userBytes, err = json.Marshal(user)
+	if err != nil {
+		return false, fmt.Errorf("failed to marshal user: %w", err)
+	}
+	rev, err = w.usersKv.Put(w.ctx, user.ID, userBytes)
+	if err != nil {
+		return false, fmt.Errorf("failed to update user in KV store: %w", err)
+	}
+	user.revision = rev
+
+	return true, nil
 }
 
-func (w *Who) userRemovePermission(user *User, perm api.Permission) error {
+func (w *Who) userRemovePermission(user *User, perm api.Permission) (bool, error) {
+	var (
+		err       error
+		userBytes []byte
+		rev       uint64
+	)
+
+	if !slices.Contains(PermissionsAll, perm) {
+		return false, fmt.Errorf("permission %s is not a valid permission", perm)
+	}
+	if !w.permGranted(user, []api.Permission{perm}) {
+		return false, nil
+	}
+
 	user.Permissions = slices.DeleteFunc(user.Permissions, func(p api.Permission) bool {
 		return p == perm
 	})
-	return nil
+
+	// Persist the updated user to KV store
+	userBytes, err = json.Marshal(user)
+	if err != nil {
+		return false, fmt.Errorf("failed to marshal user: %w", err)
+	}
+	rev, err = w.usersKv.Put(w.ctx, user.ID, userBytes)
+	if err != nil {
+		return false, fmt.Errorf("failed to update user in KV store: %w", err)
+	}
+	user.revision = rev
+
+	return true, nil
 }
 
 // ----------- JWT -----------
