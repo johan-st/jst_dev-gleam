@@ -99,15 +99,16 @@ type Permission string
 
 const (
 	// post
-	PermissionPostViewAny   Permission = "post_view_any"
-	PermissionPostDeleteAny Permission = "post_delete_any"
+	PermissionPostEditAny Permission = "post_edit_any"
+	// PermissionPostViewAny   Permission = "post_view_any"
+	// PermissionPostDeleteAny Permission = "post_delete_any"
 
-	// user
-	PermissionUserViewAny    Permission = "user_view_any"
-	PermissionUserBlockAny   Permission = "user_block_any"
-	PermissionUserUnblockAny Permission = "user_unblock_any"
-	PermissionUserGrantAny   Permission = "user_grant_any"
-	PermissionUserRevokeAny  Permission = "user_revoke_any"
+	// // user
+	// PermissionUserViewAny    Permission = "user_view_any"
+	// PermissionUserBlockAny   Permission = "user_block_any"
+	// PermissionUserUnblockAny Permission = "user_unblock_any"
+	// PermissionUserGrantAny   Permission = "user_grant_any"
+	// PermissionUserRevokeAny  Permission = "user_revoke_any"
 )
 
 type PermissionsListResponse struct {

@@ -25,13 +25,7 @@ const hashSalt = "jst_dev_salt"
 const jwtExpiresAfterTime = time.Hour * 12
 
 var PermissionsAll = []api.Permission{
-	api.PermissionPostViewAny,
-	api.PermissionPostDeleteAny,
-	api.PermissionUserViewAny,
-	api.PermissionUserBlockAny,
-	api.PermissionUserUnblockAny,
-	api.PermissionUserGrantAny,
-	api.PermissionUserRevokeAny,
+	api.PermissionPostEditAny,
 }
 
 type Who struct {
@@ -465,13 +459,7 @@ func (w *Who) handleUserDelete() micro.HandlerFunc {
 func (w *Who) handlePermissionsList() micro.HandlerFunc {
 	l := w.l.WithBreadcrumb("permissions_list")
 	permissions := []api.Permission{
-		api.PermissionPostViewAny,
-		api.PermissionPostDeleteAny,
-		api.PermissionUserViewAny,
-		api.PermissionUserBlockAny,
-		api.PermissionUserUnblockAny,
-		api.PermissionUserGrantAny,
-		api.PermissionUserRevokeAny,
+		api.PermissionPostEditAny,
 	}
 	return func(req micro.Request) {
 		var (

@@ -1,12 +1,6 @@
 {
     "id": "3beb062a-8150-4fd8-98bc-0e6361ccf432",
     "permissions": [
-        "post_view_any",
-        "post_delete_any",
-        "user_view_any",
-        "user_block_any",
-        "user_unblock_any",
-        "user_grant_any",
-        "user_revoke_any"
+        "post_edit_any"
     ]
 }
