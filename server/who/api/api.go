@@ -155,8 +155,10 @@ type AuthRequest struct {
 }
 
 type AuthResponse struct {
-	Token     string `json:"token"`
-	ExpiresAt int64  `json:"expiresAt"`
+	Subject     string       `json:"subject"`
+	Token       string       `json:"token"`
+	ExpiresAt   int64         `json:"expiresAt"`
+	Permissions []Permission `json:"permissions"`
 }
 
 // JwtClaims is the claims for the JWT token.

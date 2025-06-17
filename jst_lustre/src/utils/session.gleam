@@ -12,19 +12,14 @@ pub type Session {
 }
 
 pub opaque type SessionAuthenticated {
-  SessionAuthenticated(
-    subject: String,
-    token: String,
-    expiry: Int,
-    permissions: List(String),
-  )
+  SessionAuthenticated(subject: String, expiry: Int, permissions: List(String))
 }
 
 // API -------------------------------------------------------------------------
 
 pub fn permissions(session: Session) -> List(String) {
   case session {
-    Authenticated(SessionAuthenticated(_, _, _, permissions)) -> permissions
+    Authenticated(SessionAuthenticated(_, _, permissions)) -> permissions
     Unauthenticated -> []
   }
 }
@@ -91,8 +86,7 @@ pub fn session_decoder() -> Decoder(Session) {
 
 pub fn authenticated_decoder() -> Decoder(SessionAuthenticated) {
   use subject <- decode.field("subject", decode.string)
-  use token <- decode.field("token", decode.string)
-  use expiry <- decode.field("expiry", decode.int)
+  use expires_at <- decode.field("expiresAt", decode.int)
   use permissions <- decode.field("permissions", decode.list(decode.string))
-  decode.success(SessionAuthenticated(subject, token, expiry, permissions))
+  decode.success(SessionAuthenticated(subject, expires_at, permissions))
 }

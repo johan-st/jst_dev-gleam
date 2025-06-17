@@ -70,9 +70,11 @@ func cors(next http.Handler) http.Handler {
 }
 
 func authJwt(jwtSecret string, next http.Handler) http.Handler {
-
 	if jwtSecret == "" {
-		return next
+		panic("no jwt secret specified")
+	}
+	if next == nil {
+		panic("next handler is nil")
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		jwtCookie, err := r.Cookie(cookieAuth)
@@ -131,13 +133,17 @@ func handleProxy(l *jst_log.Logger, targetUrl string) http.Handler {
 	})
 }
 
-func 	handleAuth(l *jst_log.Logger, nc *nats.Conn) http.Handler {
-
+func handleAuth(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 	type Req struct {
 		Email    string `json:"email,omitempty"`
 		Username string `json:"username,omitempty"`
 		Password string `json:"password,omitempty"`
 		Token    string `json:"token,omitempty"`
+	}
+	type Resp struct {
+		Subject     string              `json:"subject"`
+		ExpiresAt   int64               `json:"expiresAt"`
+		Permissions []whoApi.Permission `json:"permissions"`
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -145,6 +151,7 @@ func 	handleAuth(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		var (
 			err      error
 			req      Req
+			resp     Resp
 			whoReq   whoApi.AuthRequest
 			whoBytes []byte
 			whoMsg   *nats.Msg
@@ -221,7 +228,11 @@ func 	handleAuth(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		http.SetCookie(w, cookie)
 		l.Debug("setting cookie %s with value length %d\n", cookie.Name, len(cookie.Value))
 
-		respJson(w, whoResp, http.StatusOK)
+		resp.Subject = subject
+		resp.Permissions = permissions
+		resp.ExpiresAt = time.Now().Add(30 * time.Minute).Unix()
+
+		respJson(w, resp, http.StatusOK)
 	})
 }
 
@@ -232,37 +243,28 @@ func handleAuthLogout(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 }
 
 func handleAuthCheck(l *jst_log.Logger, nc *nats.Conn, jwtSecret string) http.Handler {
-
 	type Resp struct {
-		Valid       bool     `json:"valid"`
-		Subject     string   `json:"subject"`
-		Permissions []string `json:"permissions"`
+		Subject     string              `json:"subject"`
+		ExpiresAt   int64               `json:"expiresAt"`
+		Permissions []whoApi.Permission `json:"permissions"`
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
 		if !ok {
 			respJson(w, Resp{
-				Valid:       false,
 				Subject:     "",
+				ExpiresAt:   0,
 				Permissions: nil,
 			}, http.StatusUnauthorized)
 			return
 		}
 		l.Debug("user: %+v\n", user)
 
-		permissionsList := make([]string, len(user.Permissions))
-		for i, permission := range user.Permissions {
-			permissionsList[i] = string(permission)
-		}
-		respJson(w, struct {
-			Valid       bool     `json:"valid"`
-			Subject     string   `json:"subject"`
-			Permissions []string `json:"permissions"`
-		}{
-			Valid:       true,
+		respJson(w, Resp{
 			Subject:     user.ID,
-			Permissions: permissionsList,
+			ExpiresAt:   time.Now().Add(30 * time.Minute).Unix(), // Use int64
+			Permissions: user.Permissions,
 		}, http.StatusOK)
 	})
 }
