@@ -19,6 +19,7 @@ import utils/http.{type HttpError, NotFound}
 import utils/remote_data.{
   type RemoteData, Errored, Loaded, NotInitialized, Pending,
 }
+import utils/session.{type Session}
 
 pub type Article {
   ArticleV1(
@@ -31,6 +32,42 @@ pub type Article {
     content: RemoteData(List(Content), HttpError),
     draft: Option(Draft),
   )
+}
+
+pub fn get_draft(article) -> Option(Draft) {
+  case article {
+    ArticleV1(
+      id: _,
+      slug: _,
+      revision: _,
+      title: _,
+      leading: _,
+      subtitle: _,
+      content: _,
+      draft:,
+    ) -> draft
+  }
+}
+
+pub fn to_draft(article: Article) -> Draft {
+  case article {
+    ArticleV1(
+      id: _,
+      slug:,
+      revision: _,
+      title:,
+      leading:,
+      subtitle:,
+      content: remote_data.Loaded(content_loaded),
+      draft: _,
+    ) -> draft.new(slug, title, subtitle, leading, content_loaded)
+    _ -> todo as "trying to create a draft from article with no loaded content"
+  }
+}
+
+pub fn can_edit(article: Article, session: Session) {
+  session
+  |> session.permission_any(["post_edit_any"])
 }
 
 // Fetch ------------------------------------------------------------------------
