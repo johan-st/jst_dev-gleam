@@ -12,8 +12,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/string
 import gleam/uri.{type Uri}
 import lustre
-import lustre/attribute.{type Attribute}
-import lustre/attribute as attr
+import lustre/attribute.{type Attribute} as attr
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
@@ -43,9 +42,9 @@ pub fn main() {
 
 type Model {
   Model(
-    session: session.Session,
-    route: Route,
+    uri: Uri,
     page: Page,
+    session: session.Session,
     articles: RemoteData(List(Article), HttpError),
     // user_messages: List(UserMessage),
     // chat: chat.Model,
@@ -59,24 +58,15 @@ type Model {
 //   UserInfo(id: Int, text: String)
 // }
 
-fn href(route: Route) -> Attribute(msg) {
-  attr.href(routes.to_string(route))
-}
-
 fn init(_) -> #(Model, Effect(Msg)) {
-  // The server for a typical SPA will often serve the application to *any*
-  // HTTP request, and let the app itself determine what to show. Modem stores
-  // the first URL so we can parse it for the app's initial route.
-  let route = case modem.initial_uri() {
-    Ok(uri) -> routes.from_uri(uri)
-    Error(_) -> routes.Index
-  }
+  let assert Ok(uri) = modem.initial_uri()
+
   // let #(chat_model, chat_effect) = chat.init()
   let model =
     Model(
+      uri:,
+      page: pages.from_uri(uri, session.Unauthenticated, NotInitialized),
       session: session.Unauthenticated,
-      route: route,
-      page: pages.from_route(route, session.Unauthenticated, NotInitialized),
       articles: Pending,
       // user_messages: [],
     // chat: chat_model,
@@ -87,7 +77,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
       uri
       |> UserNavigatedTo
     })
-  let #(model_nav, effect_nav) = update_navigation(model, model.route)
+  let #(model_nav, effect_nav) = update_navigation(model, uri)
   #(
     model_nav,
     effect.batch([
@@ -186,7 +176,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
     // NAVIGATION
     UserNavigatedTo(uri:) -> {
-      update_navigation(model, routes.from_uri(uri))
+      update_navigation(model, uri)
     }
     // Browser Persistance
     PersistGotModel(opt:) -> {
@@ -218,12 +208,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                 }
               }),
             )
-          let page_updated =
-            pages.from_route(model.route, model.session, updated_articles)
-          #(
-            Model(..model, articles: updated_articles, page: page_updated),
-            effect.none(),
-          )
+          #(Model(..model, articles: updated_articles), effect.none())
         }
         Error(err) -> update_got_article_error(model, err, id)
       }
@@ -515,10 +500,10 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   }
 }
 
-fn update_navigation(model: Model, route_new: Route) -> #(Model, Effect(Msg)) {
-  let page_new = pages.from_route(route_new, model.session, model.articles)
-  case route_new {
-    routes.Article(slug) -> {
+fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
+  let page_new = pages.from_uri(uri, model.session, model.articles)
+  case uri.path_segments(uri.path) {
+    ["article", slug] -> {
       echo "article"
       let effect_nav = case model.articles {
         Loaded(articles) -> {
@@ -537,25 +522,22 @@ fn update_navigation(model: Model, route_new: Route) -> #(Model, Effect(Msg)) {
         }
         _ -> effect.none()
       }
-      #(Model(..model, route: route_new, page: page_new), effect_nav)
+      #(Model(..model, page: page_new), effect_nav)
     }
-    routes.ArticleEdit(id_string) -> {
+    ["article", id, "edit"] -> {
       echo "article edit"
       case model.articles {
         Loaded(articles) -> {
           case
             list.find(articles, fn(article) {
-              article_id.to_string(article.id) == id_string
+              article_id.to_string(article.id) == id
             })
           {
             Ok(article) -> {
               case article {
                 ArticleV1(_, _, _, _, _, _, _, draft: Some(_)) -> {
                   echo "article edit full with draft"
-                  #(
-                    Model(..model, route: route_new, page: page_new),
-                    effect.none(),
-                  )
+                  #(Model(..model, page: page_new), effect.none())
                 }
                 ArticleV1(_, _, _, _, _, _, content: Loaded(_), draft: None) -> {
                   echo "article edit full, no draft"
@@ -574,11 +556,10 @@ fn update_navigation(model: Model, route_new: Route) -> #(Model, Effect(Msg)) {
                       }),
                     )
                   let page_updated =
-                    pages.from_route(route_new, model.session, articles_updated)
+                    pages.from_uri(uri, model.session, articles_updated)
                   #(
                     Model(
                       ..model,
-                      route: route_new,
                       page: page_updated,
                       articles: articles_updated,
                     ),
@@ -588,48 +569,48 @@ fn update_navigation(model: Model, route_new: Route) -> #(Model, Effect(Msg)) {
                 ArticleV1(id, _, _, _, _, _, NotInitialized, _)
                 | ArticleV1(id, _, _, _, _, _, Errored(_), _) -> {
                   #(
-                    Model(..model, route: route_new, page: page_new),
+                    Model(..model, page: page_new),
                     article.article_get(ArticleGot(id, _), id),
                   )
                 }
                 ArticleV1(_, _, _, _, _, _, Pending, _) -> #(
-                  Model(..model, route: route_new, page: page_new),
+                  Model(..model, page: page_new),
                   effect.none(),
                 )
               }
             }
             Error(_) -> {
-              #(Model(..model, route: route_new, page: page_new), effect.none())
+              #(Model(..model, page: page_new), effect.none())
             }
           }
         }
         _ -> {
-          #(Model(..model, route: route_new, page: page_new), effect.none())
+          #(Model(..model, page: page_new), effect.none())
         }
       }
     }
-    routes.Articles -> {
+    ["articles"] -> {
       echo "articles"
       case model.articles {
         Errored(err) -> {
           echo "articles errored"
           echo err
           #(
-            Model(..model, route: route_new, page: page_new),
+            Model(..model, page: page_new),
             article.article_metadata_get(ArticleMetaGot),
           )
         }
         NotInitialized -> {
           echo "articles not initialized"
           #(
-            Model(..model, route: route_new, page: page_new),
+            Model(..model, page: page_new),
             article.article_metadata_get(ArticleMetaGot),
           )
         }
-        _ -> #(Model(..model, route: route_new, page: page_new), effect.none())
+        _ -> #(Model(..model, page: page_new), effect.none())
       }
     }
-    _ -> #(Model(..model, route: route_new, page: page_new), effect.none())
+    _ -> #(Model(..model, page: page_new), effect.none())
   }
 }
 
@@ -641,31 +622,35 @@ fn update_got_articles_metadata(
     Ok(articles) -> {
       let articles_loaded = Loaded(articles)
       let page_updated =
-        pages.from_route(model.route, model.session, articles_loaded)
-      let effect_nav = case model.route {
-        routes.Article(slug) -> {
-          case list.find(articles, fn(article) { article.slug == slug }) {
-            Ok(ArticleV1(id, _, _, _, _, _, NotInitialized, _))
-            | Ok(ArticleV1(id, _, _, _, _, _, Errored(_), _)) -> {
-              article.article_get(fn(result) { ArticleGot(id, result) }, id)
+        pages.from_uri(model.uri, model.session, model.articles)
+      let effect_nav = case uri.parse("/") {
+        Ok(uri) ->
+          case uri.path_segments(uri.path) {
+            ["article", slug] -> {
+              case list.find(articles, fn(article) { article.slug == slug }) {
+                Ok(ArticleV1(id, _, _, _, _, _, NotInitialized, _))
+                | Ok(ArticleV1(id, _, _, _, _, _, Errored(_), _)) -> {
+                  article.article_get(fn(result) { ArticleGot(id, result) }, id)
+                }
+                _ -> effect.none()
+              }
+            }
+            ["article", id, "edit"] -> {
+              case
+                list.find(articles, fn(article) {
+                  article_id.to_string(article.id) == id
+                })
+              {
+                Ok(ArticleV1(id, _, _, _, _, _, NotInitialized, _))
+                | Ok(ArticleV1(id, _, _, _, _, _, Errored(_), _)) -> {
+                  article.article_get(fn(result) { ArticleGot(id, result) }, id)
+                }
+                _ -> effect.none()
+              }
             }
             _ -> effect.none()
           }
-        }
-        routes.ArticleEdit(id_string) -> {
-          case
-            list.find(articles, fn(article) {
-              article_id.to_string(article.id) == id_string
-            })
-          {
-            Ok(ArticleV1(id, _, _, _, _, _, NotInitialized, _))
-            | Ok(ArticleV1(id, _, _, _, _, _, Errored(_), _)) -> {
-              article.article_get(fn(result) { ArticleGot(id, result) }, id)
-            }
-            _ -> effect.none()
-          }
-        }
-        _ -> effect.none()
+        Error(_) -> effect.none()
       }
       #(
         Model(..model, articles: articles_loaded, page: page_updated),
@@ -675,7 +660,7 @@ fn update_got_articles_metadata(
     Error(err) -> {
       let articles_errored = Errored(err)
       let page_updated =
-        pages.from_route(model.route, model.session, articles_errored)
+        pages.from_uri(model.uri, model.session, articles_errored)
       #(
         Model(..model, articles: articles_errored, page: page_updated),
         effect.none(),
@@ -763,71 +748,41 @@ fn update_got_article_error(
 // VIEW ------------------------------------------------------------------------
 
 fn view(model: Model) -> Element(Msg) {
-  html.div(
-    [
-      attr.class("text-zinc-400 min-h-screen w-full text-base md:text-lg font-thin mx-auto"),
-      attr.class(
-        "focus:outline-none focus:ring-2 focus:ring-red-600 focus:ring-offset-2 focus:ring-offset-orange-50",
-      ),
-    ],
-    [
-      view_header(model),
-      html.main([attr.class("px-10 py-4 max-w-screen-md mx-auto")], {
-        // Just like we would show different HTML based on some other state in the
-        // model, we can also pattern match on our Page value to show different
-        // views based on the current page!
-        case model.page {
-          pages.PageIndex -> view_index()
-          pages.PageArticleList(articles, _session) -> {
-            case list.is_empty(articles) {
-              True -> [view_error("got no articles from server")]
-              False -> view_article_listing(articles, model.session)
-            }
+  html.div([attr.class("min-h-screen bg-zinc-900 text-zinc-100")], [
+    view_header(model),
+    html.main(
+      [attr.class("max-w-screen-md mx-auto px-10 py-10")],
+      case model.page {
+        pages.PageIndex -> view_index()
+        pages.PageArticleList(articles, session) ->
+          view_article_listing(articles, session)
+        pages.PageArticleListLoading -> view_article_listing_loading()
+        pages.PageArticle(article, session) ->
+          view_article(article, article.can_edit(article, session))
+        pages.PageArticleEdit(article) -> view_article_edit(model, article)
+        pages.PageError(error) -> {
+          case error {
+            pages.ArticleNotFound(slug, _) ->
+              view_article_not_found(model.articles, slug)
+            pages.ArticleEditNotFound(id) ->
+              view_article_edit_not_found(
+                model.articles,
+                article_id.from_string(id),
+              )
+            pages.HttpError(error, _) -> [
+              view_error(error_string.http_error(error)),
+            ]
+            pages.AuthenticationRequired(action) -> [
+              view_error("Authentication required: " <> action),
+            ]
+            pages.Other(msg) -> [view_error(msg)]
           }
-          pages.PageArticleListLoading -> [
-            view_h2("loading..."),
-            view_paragraph([
-              content.Text("We are loading the articles.. Give us a moment."),
-            ]),
-          ]
-          pages.PageArticle(article, session) -> {
-            view_article(article, article.can_edit(article, session))
-          }
-          pages.PageArticleEdit(article, _draft) -> {
-            view_article_edit(model, article)
-          }
-          pages.PageError(error) -> {
-            case error {
-              pages.ArticleNotFound(slug, _available_slugs) ->
-                view_article_not_found(model.articles, slug)
-              pages.ArticleEditNotFound(id) ->
-                view_article_edit_not_found(
-                  model.articles,
-                  article_id.from_string(id),
-                )
-              pages.HttpError(err, context) -> [
-                view_h2("Error: " <> context),
-                view_paragraph([content.Text(error_string.http_error(err))]),
-              ]
-              pages.AuthenticationRequired(action) -> [
-                view_h2("Authentication Required"),
-                view_paragraph([
-                  content.Text("You need to be logged in to " <> action),
-                ]),
-              ]
-              pages.Other(msg) -> [
-                view_h2("Other error"),
-                view_paragraph([content.Text(msg)]),
-              ]
-            }
-          }
-          pages.PageAbout -> view_about()
-          pages.PageNotFound(_path) -> view_not_found()
         }
-      }),
-      // ..chat.view(ChatMsg, model.chat)
-    ],
-  )
+        pages.PageAbout -> view_about()
+        pages.PageNotFound(uri) -> view_not_found(uri)
+      },
+    ),
+  ])
 }
 
 // VIEW HEADER ----------------------------------------------------------------
@@ -843,19 +798,10 @@ fn view_header(model: Model) -> Element(Msg) {
         ],
         [
           html.div([], [
-            html.a([attr.class("font-light"), href(routes.Index)], [
+            view_internal_link(pages.to_uri(pages.PageAbout), [
               html.text("jst.dev"),
             ]),
           ]),
-          // html.div([], [
-          //   html.text(case model.user_messages {
-          //     [] -> ""
-          //     _ -> {
-          //       let num = list.length(model.user_messages)
-          //       "got " <> int.to_string(num) <> " messages"
-          //     }
-          //   }),
-          // ]),
           html.ul([attr.class("flex space-x-8 pr-2")], [
             html.li([], [
               html.button(
@@ -885,13 +831,13 @@ fn view_header(model: Model) -> Element(Msg) {
               ),
             ]),
             view_header_link(
-              current: model.route,
-              to: routes.Articles,
+              to: pages.PageArticleList([], model.session),
+              current: model.uri,
               label: "Articles",
             ),
             view_header_link(
-              current: model.route,
-              to: routes.About,
+              to: pages.PageAbout,
+              current: model.uri,
               label: "About",
             ),
           ]),
@@ -902,14 +848,18 @@ fn view_header(model: Model) -> Element(Msg) {
 }
 
 fn view_header_link(
-  to target: Route,
-  current current: Route,
+  to target: pages.Page,
+  current current: Uri,
   label text: String,
-) -> Element(msg) {
-  let is_active = case current, target {
-    routes.Article(_), routes.Articles -> True
-    routes.ArticleEdit(_), routes.Articles -> True
-    _, _ -> current == target
+) -> Element(Msg) {
+  let to_uri = pages.to_uri(target)
+  let is_active = case
+    uri.path_segments(current.path),
+    uri.path_segments(to_uri.path)
+  {
+    ["article", _], ["articles"] -> True
+    ["article", _, "edit"], ["articles"] -> True
+    _, _ -> current.path == to_uri.path
   }
 
   html.li(
@@ -921,13 +871,7 @@ fn view_header_link(
         #("after:w-full text-pink-600", is_active),
       ]),
     ],
-    [html.a(
-      [
-        href(target), 
-        attr.class("px-1 py-2 block transition-colors hover:text-pink-500")
-      ], 
-      [html.text(text)]
-    )],
+    [view_internal_link(to_uri, [html.text(text)])],
   )
 }
 
@@ -989,7 +933,7 @@ fn view_article_listing(
                 attr.class(
                   "group block border-l border-zinc-700 pl-4 hover:border-pink-700 transition-colors duration-25",
                 ),
-                href(routes.Article(article.slug)),
+                attr.href("article/" <> article.slug <> "/"),
                 event.on_mouse_enter(ArticleHovered(article)),
               ],
               [
@@ -1352,13 +1296,13 @@ fn view_about() -> List(Element(msg)) {
   ]
 }
 
-fn view_not_found() -> List(Element(msg)) {
+fn view_not_found(requested_uri: Uri) -> List(Element(Msg)) {
   [
-    view_title("Not found", "not-found"),
+    view_title("404 - Page Not Found", "not-found"),
+    view_subtitle("The page you're looking for doesn't exist.", "not-found"),
     view_paragraph([
       content.Text(
-        "You glimpse into the void and see -- nothing?
-       Well that was somewhat expected.",
+        "The page at " <> uri.to_string(requested_uri) <> " could not be found.",
       ),
     ]),
   ]
@@ -1372,7 +1316,7 @@ fn view_edit_link(article: Article, text: String) -> Element(msg) {
       attr.class(
         "text-zinc-500 px-3 py-1 rounded-md text-sm hover:text-teal-400 hover:bg-teal-900/30",
       ),
-      href(routes.ArticleEdit(article_id.to_string(article.id))),
+      attr.href("ariticle/" <> article_id.to_string(article.id) <> "/edit"),
     ],
     [
       html.span([attr.class("hidden sm:inline")], [html.text("✏")]),
@@ -1987,4 +1931,22 @@ fn content_type_label(content: Content) -> String {
     content.Paragraph(_) -> "Paragraph"
     content.Unknown(type_) -> "Unknown: " <> type_
   }
+}
+
+fn view_article_listing_loading() -> List(Element(Msg)) {
+  [
+    view_title("Articles", "articles"),
+    view_paragraph([content.Text("Loading articles...")]),
+  ]
+}
+
+fn view_internal_link(uri: Uri, content: List(Element(Msg))) -> Element(Msg) {
+  html.a([attr.class(""), attr.href(uri.to_string(uri))], content)
+}
+
+fn view_authentication_required(action: String) -> List(Element(Msg)) {
+  [
+    view_title("Authentication Required", "auth-required"),
+    view_paragraph([content.Text("You need to be logged in to " <> action)]),
+  ]
 }

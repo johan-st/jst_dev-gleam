@@ -1,10 +1,8 @@
 import article/article.{type Article}
-import article/draft.{type Draft}
 import article/id
 import gleam/list
 import gleam/option.{None, Some}
-import gleam/uri
-import routes/routes.{type Route}
+import gleam/uri.{type Uri}
 import utils/http.{type HttpError}
 import utils/remote_data.{type RemoteData}
 import utils/session.{type Session}
@@ -16,7 +14,7 @@ pub type Page {
 
   // Article-related pages
   PageArticle(article: Article, session: Session)
-  PageArticleEdit(article: Article, draft: Draft)
+  PageArticleEdit(article: Article)
   PageArticleList(articles: List(Article), session: Session)
   PageArticleListLoading
 
@@ -25,7 +23,7 @@ pub type Page {
 
   // Static pages
   PageAbout
-  PageNotFound(requested_path: String)
+  PageNotFound(requested_uri: Uri)
 }
 
 // Consolidated error types
@@ -37,15 +35,81 @@ pub type PageError {
   Other(msg: String)
 }
 
-pub fn from_route(
-  route: Route,
+pub fn to_uri(page: Page) -> Uri {
+  case page {
+    PageIndex -> {
+      let assert Ok(uri) = uri.parse("/")
+      uri
+    }
+    PageArticleList(_, _) -> {
+      let assert Ok(uri) = uri.parse("/articles")
+      uri
+    }
+    PageArticleListLoading -> {
+      let assert Ok(uri) = uri.parse("/articles")
+      uri
+    }
+    PageArticle(article, _) -> {
+      let assert Ok(uri) = uri.parse("/article/" <> article.slug)
+      uri
+    }
+    PageArticleEdit(article) -> {
+      let assert Ok(uri) =
+        uri.parse("/article/" <> id.to_string(article.id) <> "/edit")
+      uri
+    }
+    PageError(error) -> {
+      case error {
+        ArticleNotFound(slug, _) -> {
+          let assert Ok(uri) = uri.parse("/article/" <> slug)
+          uri
+        }
+        ArticleEditNotFound(id) -> {
+          let assert Ok(uri) = uri.parse("/article/" <> id <> "/edit")
+          uri
+        }
+        HttpError(_, _) -> {
+          let assert Ok(uri) = uri.parse("/")
+          uri
+        }
+        AuthenticationRequired(_) -> {
+          let assert Ok(uri) = uri.parse("/")
+          uri
+        }
+        Other(_) -> {
+          let assert Ok(uri) = uri.parse("/")
+          uri
+        }
+      }
+    }
+    PageAbout -> {
+      let assert Ok(uri) = uri.parse("/about")
+      uri
+    }
+    PageNotFound(uri) -> {
+      uri
+    }
+  }
+}
+
+pub fn from_uri(
+  uri: Uri,
   session: Session,
   articles: RemoteData(List(Article), HttpError),
 ) -> Page {
-  case route {
-    routes.Index -> PageIndex
-
-    routes.Article(slug) -> {
+  case uri.path_segments(uri.path) {
+    [] | [""] -> PageIndex
+    ["articles"] -> {
+      case articles {
+        remote_data.Pending -> PageArticleListLoading
+        remote_data.NotInitialized -> PageArticleListLoading
+        remote_data.Errored(error) ->
+          PageError(HttpError(error, "Failed to load article list"))
+        remote_data.Loaded(articles_list) ->
+          PageArticleList(articles_list, session)
+      }
+    }
+    ["article", slug] -> {
       case articles {
         remote_data.Pending -> PageArticleListLoading
         remote_data.NotInitialized ->
@@ -64,8 +128,7 @@ pub fn from_route(
         }
       }
     }
-
-    routes.ArticleEdit(id) -> {
+    ["article", id, "edit"] -> {
       case articles {
         remote_data.Pending -> PageArticleListLoading
         remote_data.NotInitialized ->
@@ -75,13 +138,18 @@ pub fn from_route(
         remote_data.Loaded(articles_list) -> {
           case find_article_by_id(articles_list, id) {
             Ok(article) -> {
-              case
+              let article_updated = case
                 article.can_edit(article, session),
                 article.get_draft(article)
               {
-                True, Some(draft) -> PageArticleEdit(article, draft)
+                True, Some(draft) -> PageArticleEdit(article)
                 True, None ->
-                  PageArticleEdit(article, article.to_draft(article))
+                  PageArticleEdit(
+                    article.ArticleV1(
+                      ..article,
+                      draft: Some(article.to_draft(article)),
+                    ),
+                  )
                 False, _ -> PageError(AuthenticationRequired("edit article"))
               }
             }
@@ -90,20 +158,8 @@ pub fn from_route(
         }
       }
     }
-
-    routes.Articles -> {
-      case articles {
-        remote_data.Pending -> PageArticleListLoading
-        remote_data.NotInitialized -> PageArticleListLoading
-        remote_data.Errored(error) ->
-          PageError(HttpError(error, "Failed to load article list"))
-        remote_data.Loaded(articles_list) ->
-          PageArticleList(articles_list, session)
-      }
-    }
-
-    routes.About -> PageAbout
-    routes.NotFound(uri) -> PageNotFound(uri.to_string(uri))
+    ["about"] -> PageAbout
+    _ -> PageNotFound(uri)
   }
 }
 
