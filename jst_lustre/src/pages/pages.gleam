@@ -142,7 +142,7 @@ pub fn from_uri(
                   PageArticleEdit(
                     article.ArticleV1(
                       ..article,
-                      draft: Some(article.to_draft(article)),
+                      draft: article.to_draft(article),
                     ),
                   )
                 False, _ -> PageError(AuthenticationRequired("edit article"))

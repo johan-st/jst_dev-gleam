@@ -57,7 +57,7 @@ pub fn get_draft(article) -> Option(Draft) {
   }
 }
 
-pub fn to_draft(article: Article) -> Draft {
+pub fn to_draft(article: Article) -> Option(Draft) {
   case article {
     ArticleV1(
       id: _,
@@ -68,8 +68,8 @@ pub fn to_draft(article: Article) -> Draft {
       subtitle:,
       content: remote_data.Loaded(content_loaded),
       draft: _,
-    ) -> draft.new(slug, title, subtitle, leading, content_loaded)
-    _ -> todo as "trying to create a draft from article with no loaded content"
+    ) -> draft.new(slug, title, subtitle, leading, content_loaded) |> Some
+    _ -> None
   }
 }
 
