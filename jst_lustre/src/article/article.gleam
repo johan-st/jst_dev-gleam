@@ -4,7 +4,6 @@ import article/content.{
 }
 import article/draft.{type Draft}
 import article/id.{type ArticleId}
-import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/http as gleam_http
@@ -32,6 +31,21 @@ pub type Article {
     content: RemoteData(List(Content), HttpError),
     draft: Option(Draft),
   )
+}
+
+pub fn content(article) {
+  case article {
+    ArticleV1(
+      id: _,
+      slug: _,
+      revision: _,
+      title: _,
+      leading: _,
+      subtitle: _,
+      content:,
+      draft: _,
+    ) -> content
+  }
 }
 
 pub fn get_draft(article) -> Option(Draft) {

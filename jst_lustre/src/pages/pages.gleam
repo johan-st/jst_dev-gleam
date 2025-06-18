@@ -138,11 +138,11 @@ pub fn from_uri(
         remote_data.Loaded(articles_list) -> {
           case find_article_by_id(articles_list, id) {
             Ok(article) -> {
-              let article_updated = case
+              case
                 article.can_edit(article, session),
-                article.get_draft(article)
+                article.draft
               {
-                True, Some(draft) -> PageArticleEdit(article)
+                True, Some(_) -> PageArticleEdit(article)
                 True, None ->
                   PageArticleEdit(
                     article.ArticleV1(
