@@ -2,23 +2,19 @@
 
 import article/article.{type Article, ArticleV1}
 import article/content.{type Content}
-import article/draft.{type Draft}
-import article/id.{type ArticleId} as article_id
-import gleam/dict.{type Dict}
-import gleam/http/response.{type Response}
-import gleam/json
+import article/draft
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import gleam/uri.{type Uri}
 import lustre
-import lustre/attribute.{type Attribute} as attr
+import lustre/attribute as attr
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
 import modem
-import pages/pages.{type Page}
+import pages/pages
 import routes/routes.{type Route}
 import utils/error_string
 import utils/http.{type HttpError}
@@ -110,7 +106,7 @@ type Msg {
   ArticleDraftContentUpdate(content_item: Content, index: Int, content: Content)
   // ARTICLE DRAFT SAVE & CREATE & DISCARD
   ArticleDraftSaveClicked(article: Article)
-  ArticleDraftSaveResponse(id: ArticleId, result: Result(Article, HttpError))
+  ArticleDraftSaveResponse(id: String, result: Result(Article, HttpError))
   ArticleDraftDiscardClicked(article: Article)
   // AUTH
   AuthLoginClicked(username: String, password: String)
@@ -161,7 +157,7 @@ type Msg {
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
     // NAVIGATION
-    UserNavigatedTo(uri:) -> {
+    UserNavigatedTo(_uri) -> {
       #(model, effect.none())
       // update_navigation(model, uri)
     }
@@ -191,7 +187,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                 article.article_get(ArticleGot(id, _), id),
               )
             }
-            Ok(_) -> todo
+            Ok(_) -> todo as "article exists. content is pending or loading."
             Error(Nil) -> #(
               model,
               modem.push(
@@ -373,29 +369,26 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ArticleDraftUpdatedSubtitle(article, text) -> {
       case article {
         ArticleV1(
-          id,
+          _id,
           _slug,
           _revision,
           _title,
           _leading,
           _subtitle,
           _content,
-          Some(draft),
+          Some(_draft),
         ) -> {
           let updated_article =
             article.draft_update(article, fn(draft) {
               draft.set_subtitle(draft, text)
             })
           let updated_articles =
-            remote_data.try_update(
-              model.articles,
-              list.map(_, fn(article_current) {
-                case article.id == article_current.id {
-                  True -> updated_article
-                  False -> article_current
-                }
-              }),
-            )
+            remote_data.map_loaded(model.articles, fn(article_current) {
+              case article.id == article_current.id {
+                True -> updated_article
+                False -> article_current
+              }
+            })
           #(Model(..model, articles: updated_articles), effect.none())
         }
         _ -> #(model, effect.none())
@@ -411,7 +404,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           _leading,
           _subtitle,
           _content,
-          Some(draft),
+          Some(_draft),
         ) -> {
           let updated_article =
             article.draft_update(article, fn(draft) {
@@ -439,19 +432,19 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         _ -> #(model, effect.none())
       }
     }
-    ArticleDraftContentMoveUp(content_item, index) -> {
+    ArticleDraftContentMoveUp(_content_item, _index) -> {
       todo as "move up"
       #(model, effect.none())
     }
-    ArticleDraftContentMoveDown(content_item, index) -> {
+    ArticleDraftContentMoveDown(_content_item, _index) -> {
       todo as "move down"
       #(model, effect.none())
     }
-    ArticleDraftContentRemove(content_item, index) -> {
+    ArticleDraftContentRemove(_content_item, _index) -> {
       todo as "remove"
       #(model, effect.none())
     }
-    ArticleDraftContentUpdate(content_item, index, text) -> {
+    ArticleDraftContentUpdate(_content_item, _index, _text) -> {
       todo as "update"
       #(model, effect.none())
     }
@@ -459,40 +452,25 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     // ARTICLE DRAFT DISCARD
     ArticleDraftDiscardClicked(article) -> {
       echo "article draft discard clicked"
-      case article {
-        ArticleV1(id, slug, revision, title, leading, subtitle, content, _draft) -> {
-          let updated_articles =
-            remote_data.try_update(
-              model.articles,
-              list.map(_, fn(article_current) {
-                case article.id == article_current.id {
-                  True ->
-                    ArticleV1(
-                      id,
-                      slug,
-                      revision,
-                      title,
-                      leading,
-                      subtitle,
-                      content,
-                      None,
-                    )
-                  False -> article_current
-                }
-              }),
-            )
-          #(
-            Model(..model, articles: updated_articles),
-            modem.push(
-              pages.to_uri(pages.PageArticle(article, model.session))
-                |> uri.to_string,
-              None,
-              None,
-            ),
-          )
-        }
-        _ -> #(model, effect.none())
-      }
+      let updated_articles =
+        remote_data.try_update(
+          model.articles,
+          list.map(_, fn(article_current) {
+            case article.id == article_current.id {
+              True -> ArticleV1(..article, draft: None)
+              False -> article_current
+            }
+          }),
+        )
+      #(
+        Model(..model, articles: updated_articles),
+        modem.push(
+          pages.to_uri(pages.PageArticle(article, model.session))
+            |> uri.to_string,
+          None,
+          None,
+        ),
+      )
     }
     // ARTICLE DRAFT SAVE
     ArticleDraftSaveClicked(article) -> {
@@ -520,7 +498,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         session.auth_logout(AuthLogoutResponse),
       )
     }
-    AuthLogoutResponse(result) -> {
+    AuthLogoutResponse(_result) -> {
       #(Model(..model, session: session.Unauthenticated), effect.none())
     }
     AuthCheckClicked -> {
@@ -807,10 +785,7 @@ fn view(model: Model) -> Element(Msg) {
             pages.ArticleNotFound(slug, _) ->
               view_article_not_found(model.articles, slug)
             pages.ArticleEditNotFound(id) ->
-              view_article_edit_not_found(
-                model.articles,
-                article_id.from_string(id),
-              )
+              view_article_edit_not_found(model.articles, id)
             pages.HttpError(error, _) -> [
               view_error(error_string.http_error(error)),
             ]
@@ -1065,7 +1040,7 @@ fn view_article_listing(
   [view_title("Articles", "articles"), ..articles_elements]
 }
 
-fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
+fn view_article_edit(_model: Model, article: Article) -> List(Element(Msg)) {
   let assert Ok(index_uri) = uri.parse("/")
   echo "asserting ArticleFullWithDraft"
   let assert ArticleV1(
@@ -1274,11 +1249,11 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
 }
 
 fn view_article_edit_not_found(
-  available_articles: RemoteData(List(Article), HttpError),
-  id: ArticleId,
+  _available_articles: RemoteData(List(Article), HttpError),
+  id: String,
 ) -> List(Element(msg)) {
   [
-    view_title("Article not found", article_id.to_string(id)),
+    view_title("Article not found", id),
     view_paragraph([
       content.Text("The article you are looking for does not exist."),
     ]),
@@ -1355,7 +1330,7 @@ fn view_article_not_found(
   slug: String,
 ) -> List(Element(msg)) {
   case available_articles {
-    Loaded(articles) -> [
+    Loaded(_articles) -> [
       view_title("Article not found", slug),
       view_paragraph([
         content.Text("The article you are looking for does not exist."),

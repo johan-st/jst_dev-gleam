@@ -1,13 +1,12 @@
 // In test/yourapp_test.gleam
 import article/article.{ArticleV1}
 import article/content.{Heading, Paragraph, Text}
-import article/id
 import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/option.{None}
 import gleeunit
 import gleeunit/should
-import utils/http.{type HttpError, NotFound}
+import utils/http.{NotFound}
 import utils/persist.{PersistentModelV0, PersistentModelV1}
 import utils/remote_data.{Errored, Loaded, NotInitialized, Pending}
 
@@ -24,7 +23,7 @@ pub fn hello_world_test() {
 pub fn article_encoder_and_decoder_test() {
   let a_loaded =
     ArticleV1(
-      id: id.from_string("1"),
+      id: "1",
       slug: "test",
       revision: 1,
       leading: "leading",
@@ -35,7 +34,7 @@ pub fn article_encoder_and_decoder_test() {
     )
   let a_errored =
     ArticleV1(
-      id: id.from_string("2"),
+      id: "2",
       slug: "test2",
       revision: 1,
       leading: "leading",
@@ -46,7 +45,7 @@ pub fn article_encoder_and_decoder_test() {
     )
   let a_pending =
     ArticleV1(
-      id: id.from_string("3"),
+      id: "3",
       slug: "test3",
       revision: 1,
       leading: "leading",
@@ -57,7 +56,7 @@ pub fn article_encoder_and_decoder_test() {
     )
   let a_not_initialized =
     ArticleV1(
-      id: id.from_string("4"),
+      id: "4",
       slug: "test4",
       revision: 1,
       leading: "leading",
@@ -163,7 +162,7 @@ pub fn model_encoder_and_decoder_test() {
   let model_v1 =
     PersistentModelV1(version: 1, articles: [
       ArticleV1(
-        id: id.from_string("1"),
+        id: "1",
         slug: "test",
         revision: 1,
         leading: "leading",
@@ -173,7 +172,7 @@ pub fn model_encoder_and_decoder_test() {
         draft: None,
       ),
       ArticleV1(
-        id: id.from_string("2"),
+        id: "2",
         slug: "test2",
         revision: 1,
         leading: "leading",
@@ -183,7 +182,7 @@ pub fn model_encoder_and_decoder_test() {
         draft: None,
       ),
       ArticleV1(
-        id: id.from_string("3"),
+        id: "3",
         slug: "test3",
         revision: 1,
         leading: "leading",
@@ -193,7 +192,7 @@ pub fn model_encoder_and_decoder_test() {
         draft: None,
       ),
       ArticleV1(
-        id: id.from_string("4"),
+        id: "4",
         slug: "test4",
         revision: 1,
         leading: "leading",
@@ -243,7 +242,7 @@ pub fn model_encoder_and_decoder_test() {
               content,
               draft,
             ) -> {
-              id |> should.equal(id.from_string("1"))
+              id |> should.equal("1")
               slug |> should.equal("test")
               revision |> should.equal(1)
               title |> should.equal("test")
@@ -272,7 +271,7 @@ pub fn model_encoder_and_decoder_test() {
               content,
               draft,
             ) -> {
-              id |> should.equal(id.from_string("2"))
+              id |> should.equal("2")
               slug |> should.equal("test2")
               revision |> should.equal(1)
               title |> should.equal("test2")
@@ -295,7 +294,7 @@ pub fn model_encoder_and_decoder_test() {
               content,
               draft,
             ) -> {
-              id |> should.equal(id.from_string("3"))
+              id |> should.equal("3")
               slug |> should.equal("test3")
               revision |> should.equal(1)
               title |> should.equal("test3")
@@ -318,7 +317,7 @@ pub fn model_encoder_and_decoder_test() {
               content,
               draft,
             ) -> {
-              id |> should.equal(id.from_string("4"))
+              id |> should.equal("4")
               slug |> should.equal("test4")
               revision |> should.equal(1)
               title |> should.equal("test4")

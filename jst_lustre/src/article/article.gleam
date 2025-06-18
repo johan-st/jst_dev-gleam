@@ -3,21 +3,15 @@ import article/content.{
   Unknown,
 }
 import article/draft.{type Draft}
-import article/id.{type ArticleId}
-import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/http as gleam_http
 import gleam/http/request
 import gleam/json
-import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/uri
 import lustre/effect.{type Effect}
-import lustre/element.{type Element}
-import utils/http.{type HttpError, NotFound}
-import utils/remote_data.{
-  type RemoteData, Errored, Loaded, NotInitialized, Pending,
-}
+import utils/http.{type HttpError}
+import utils/remote_data.{type RemoteData, Loaded, NotInitialized}
 import utils/session.{type Session}
 
 pub type Article {
@@ -79,7 +73,7 @@ pub fn to_draft(article: Article) -> Draft {
   }
 }
 
-pub fn can_edit(article: Article, session: Session) {
+pub fn can_edit(_article: Article, session: Session) {
   session
   |> session.permission_any(["post_edit_any"])
 }
@@ -217,7 +211,7 @@ fn metadata_decoder() -> decode.Decoder(List(Article)) {
 }
 
 pub fn article_decoder() -> decode.Decoder(Article) {
-  use version <- decode.optional_field("version", 0, decode.int)
+  use _version <- decode.optional_field("version", 0, decode.int)
   use id <- decode.field("id", decode.string)
   use slug <- decode.field("slug", decode.string)
   use revision <- decode.field("revision", decode.int)

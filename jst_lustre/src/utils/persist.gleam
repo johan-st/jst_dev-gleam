@@ -2,7 +2,7 @@ import article/article.{type Article}
 import gleam/dynamic/decode.{type Decoder, type Dynamic}
 import gleam/json
 import gleam/option.{type Option, None, Some}
-import lustre/effect.{type Effect}
+import lustre/effect
 
 pub const model_localstorage_key = "jst_lustre_state"
 

@@ -1,18 +1,16 @@
 import article/article.{ArticleV1}
 import article/content.{Heading, Paragraph, Text}
-import article/id
+import gleam/option.{None}
 import gleam/uri
-import gleeunit
 import gleeunit/should
 import routes/routes
 import utils/remote_data.{Loaded}
-import gleam/option.{None}
 
 pub fn route_url_test() {
   let article_id = "test-id"
   let article =
     ArticleV1(
-      id: id.from_string(article_id),
+      id: article_id,
       slug: "test",
       revision: 12,
       leading: "l",
@@ -31,5 +29,3 @@ pub fn route_url_test() {
   url
   |> should.equal("/article/" <> article_id <> "/edit")
 }
-
-

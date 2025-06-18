@@ -1,5 +1,4 @@
 import article/article.{type Article}
-import article/id
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/uri.{type Uri}
