@@ -54,8 +54,7 @@ pub fn to_uri(page: Page) -> Uri {
       uri
     }
     PageArticleEdit(article) -> {
-      let assert Ok(uri) =
-        uri.parse("/article/" <> id.to_string(article.id) <> "/edit")
+      let assert Ok(uri) = uri.parse("/article/" <> article.id <> "/edit")
       uri
     }
     PageError(error) -> {
@@ -138,10 +137,7 @@ pub fn from_uri(
         remote_data.Loaded(articles_list) -> {
           case find_article_by_id(articles_list, id) {
             Ok(article) -> {
-              case
-                article.can_edit(article, session),
-                article.draft
-              {
+              case article.can_edit(article, session), article.draft {
                 True, Some(_) -> PageArticleEdit(article)
                 True, None ->
                   PageArticleEdit(
@@ -163,7 +159,7 @@ pub fn from_uri(
   }
 }
 
-fn get_available_slugs(articles: List(Article)) -> List(String) {
+pub fn get_available_slugs(articles: List(Article)) -> List(String) {
   list.map(articles, fn(article) {
     case article {
       article.ArticleV1(_, slug, _, _, _, _, _, _) -> slug
@@ -192,7 +188,7 @@ fn find_article_by_id(
   list.find(articles, fn(article) {
     case article {
       article.ArticleV1(article_id, _, _, _, _, _, _, _) ->
-        id.to_string(article_id) == id_string
+        article_id == id_string
     }
   })
 }

@@ -1,11 +1,4 @@
-import article/article
-import article/id.{type ArticleId} as article_id
-import gleam/list
 import gleam/uri.{type Uri}
-import utils/http.{type HttpError}
-import utils/remote_data.{
-  type RemoteData, Errored, Loaded, NotInitialized, Pending,
-}
 
 pub type Route {
   Index
@@ -13,6 +6,7 @@ pub type Route {
   Article(slug: String)
   ArticleEdit(id: String)
   About
+
   /// It's good practice to store whatever `Uri` we failed to match in case we
   /// want to log it or hint to the user that maybe they made a typo.
   NotFound(uri: Uri)
@@ -41,5 +35,32 @@ pub fn to_string(route: Route) -> String {
     Article(slug) -> "/article/" <> slug
     ArticleEdit(id) -> "/article/" <> id <> "/edit"
     NotFound(uri) -> "/404?uri=" <> uri.to_string(uri)
+  }
+}
+
+pub fn to_uri(route: Route) -> Uri {
+  echo "Dangerous assert triggered"
+  let assert Ok(uri) = route |> to_string |> uri.parse
+  uri
+}
+
+pub fn is_sub(route route: Route, maybe_sub sub: Route) -> Bool {
+  let route_segs = route |> to_string |> uri.path_segments
+  let maybe_sub_segs = sub |> to_string |> uri.path_segments
+
+  do_is_sub(route_segs, maybe_sub_segs)
+}
+
+fn do_is_sub(main, sub) {
+  case main, sub {
+    [], [] -> True
+    [], _ -> False
+    _, [] -> False
+    [a, ..aa], [b, ..bb] -> {
+      case a == b {
+        True -> do_is_sub(aa, bb)
+        False -> False
+      }
+    }
   }
 }

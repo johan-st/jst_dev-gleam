@@ -19,6 +19,7 @@ import lustre/element/html
 import lustre/event
 import modem
 import pages/pages.{type Page}
+import routes/routes.{type Route}
 import utils/error_string
 import utils/http.{type HttpError}
 import utils/persist.{type PersistentModel, PersistentModelV0, PersistentModelV1}
@@ -41,55 +42,41 @@ pub fn main() {
 
 type Model {
   Model(
-    uri: Uri,
-    page: Page,
+    route: Route,
     session: session.Session,
     articles: RemoteData(List(Article), HttpError),
-    // user_messages: List(UserMessage),
-    // chat: chat.Model,
-    // saving_articles: List(String),
   )
 }
 
-// type UserMessage {
-//   UserError(id: Int, text: String)
-//   UserWarning(id: Int, text: String)
-//   UserInfo(id: Int, text: String)
-// }
-
 fn init(_) -> #(Model, Effect(Msg)) {
+  // if this failes we have no app to run..
   let assert Ok(uri) = modem.initial_uri()
 
-  // let #(chat_model, chat_effect) = chat.init()
   let model =
     Model(
-      uri:,
-      page: pages.from_uri(uri, session.Unauthenticated, NotInitialized),
+      route: routes.from_uri(uri),
       session: session.Unauthenticated,
-      articles: Pending,
-      // user_messages: [],
-    // chat: chat_model,
-    // saving_articles: [],
+      articles: NotInitialized,
     )
   let effect_modem =
     modem.init(fn(uri) {
       uri
       |> UserNavigatedTo
     })
-  let #(model_nav, effect_nav) = update_navigation(model, uri)
+  // let #(model_nav, effect_nav) = update_navigation(model, uri)
   #(
-    model_nav,
-    effect.batch([
-      effect_modem,
-      effect_nav,
-      // effect.map(chat_effect, ChatMsg),
-      article.article_metadata_get(ArticleMetaGot),
-      persist.localstorage_get(
-        persist.model_localstorage_key,
-        persist.decoder(),
-        PersistGotModel,
-      ),
-    ]),
+    model,
+    // effect.batch([
+    effect_modem,
+    // effect_nav,
+  // effect.map(chat_effect, ChatMsg),
+  // article.article_metadata_get(ArticleMetaGot),
+  // persist.localstorage_get(
+  //   persist.model_localstorage_key,
+  //   persist.decoder(),
+  //   PersistGotModel,
+  // ),
+  // ]),
   )
 }
 
@@ -109,7 +96,7 @@ type Msg {
   PersistGotModel(opt: Option(PersistentModel))
   // ARTICLES
   ArticleHovered(article: Article)
-  ArticleGot(id: ArticleId, result: Result(Article, HttpError))
+  ArticleGot(id: String, result: Result(Article, HttpError))
   ArticleMetaGot(result: Result(List(Article), HttpError))
   // ARTICLE DRAFT
   ArticleDraftUpdatedSlug(article: Article, text: String)
@@ -175,7 +162,8 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
     // NAVIGATION
     UserNavigatedTo(uri:) -> {
-      update_navigation(model, uri)
+      #(model, effect.none())
+      // update_navigation(model, uri)
     }
     // Browser Persistance
     PersistGotModel(opt:) -> {
@@ -192,69 +180,94 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       }
     }
     ArticleMetaGot(result:) -> {
-      update_got_articles_metadata(model, result)
+      // case ok, update articles, if on article page, load content
+      case result, model.route {
+        Ok(articles), routes.Article(slug) -> {
+          case list.find(articles, fn(article) { article.slug == slug }) {
+            Ok(ArticleV1(id, _, _, _, _, _, NotInitialized, _))
+            | Ok(ArticleV1(id, _, _, _, _, _, Errored(_), _)) -> {
+              #(
+                Model(..model, articles: Loaded(articles)),
+                article.article_get(ArticleGot(id, _), id),
+              )
+            }
+            Ok(_) -> todo
+            Error(Nil) -> #(
+              model,
+              modem.push(
+                model.route
+                  |> routes.to_uri
+                  |> routes.NotFound
+                  |> routes.to_string,
+                None,
+                None,
+              ),
+            )
+          }
+        }
+        Ok(articles), routes.ArticleEdit(id) -> #(
+          Model(..model, articles: Loaded(articles)),
+          article.article_get(ArticleGot(id, _), id),
+        )
+
+        Ok(articles), _ -> #(
+          Model(..model, articles: Loaded(articles)),
+          effect.none(),
+        )
+        Error(err), _ -> #(
+          Model(..model, articles: Errored(err)),
+          effect.none(),
+        )
+      }
     }
     ArticleGot(id, result) -> {
       case result {
         Ok(article) -> {
+          let assert True = id == article.id
           let updated_articles =
-            remote_data.try_update(
-              model.articles,
-              list.map(_, fn(article_current) {
-                case article.id == article_current.id {
-                  True -> article
-                  False -> article_current
-                }
-              }),
-            )
-          #(
-            Model(
-              ..model,
-              articles: updated_articles,
-              page: pages.from_uri(model.uri, model.session, updated_articles),
-            ),
-            effect.none(),
-          )
+            model.articles
+            |> remote_data.map_loaded(with: fn(article_current) {
+              case id == article_current.id {
+                True -> article
+                False -> article_current
+              }
+            })
+          #(Model(..model, articles: updated_articles), effect.none())
         }
-        Error(err) -> update_got_article_error(model, err, id)
+        Error(err) -> {
+          let updated_articles =
+            model.articles
+            |> remote_data.map_loaded(with: fn(article_current) {
+              case id == article_current.id {
+                True -> ArticleV1(..article_current, content: Errored(err))
+                False -> article_current
+              }
+            })
+          #(Model(..model, articles: updated_articles), effect.none())
+        }
       }
     }
     ArticleHovered(article:) -> {
       case article.content {
         NotInitialized -> {
-          echo "article not initialized"
-          let articles_updated =
+          let updated_articles =
             model.articles
-            |> remote_data.try_update(fn(articles) {
-              articles
-              |> list.map(with: fn(art) {
-                case art.id == article.id {
-                  True -> ArticleV1(..art, content: Pending)
-                  False -> art
-                }
-              })
+            |> remote_data.map_loaded(with: fn(article_current) {
+              case article.id == article_current.id {
+                True -> ArticleV1(..article_current, content: Pending)
+                False -> article_current
+              }
             })
           #(
-            Model(
-              ..model,
-              page: pages.from_uri(model.uri, model.session, articles_updated),
-            ),
-            article.article_get(
-              fn(result) { ArticleGot(article.id, result) },
-              article.id,
-            ),
+            Model(..model, articles: updated_articles),
+            article.article_get(ArticleGot(article.id, _), article.id),
           )
         }
-        Pending -> {
-          echo "article pending"
-          #(model, effect.none())
-        }
-        Errored(err) -> {
-          echo err
-          #(model, effect.none())
-        }
-        Loaded(_) -> {
-          echo "already loaded"
+        Errored(_) -> #(
+          model,
+          article.article_get(ArticleGot(article.id, _), article.id),
+        )
+        Pending | Loaded(_) -> {
           #(model, effect.none())
         }
       }
@@ -533,321 +546,246 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   }
 }
 
-fn update_navigation(model: Model, new_uri: Uri) -> #(Model, Effect(Msg)) {
-  case uri.path_segments(new_uri.path) {
-    ["article", slug] -> {
-      echo "article"
-      case model.articles {
-        NotInitialized | Errored(_) -> {
-          echo "update_navigation, article: articles not initialized"
-          #(
-            Model(
-              ..model,
-              uri: new_uri,
-              page: pages.from_uri(new_uri, model.session, Pending),
-              articles: Pending,
-            ),
-            article.article_metadata_get(ArticleMetaGot),
-          )
-        }
-        Loaded(articles) -> {
-          case list.find(articles, fn(article) { article.slug == slug }) {
-            Ok(ArticleV1(id, _, _, _, _, _, NotInitialized, _))
-            | Ok(ArticleV1(id, _, _, _, _, _, Errored(_), _)) -> {
-              echo "update_navigation, article: content not initialized or errored"
-              let articles_updated =
-                list.map(articles, fn(art) {
-                  case art.slug == slug {
-                    True -> ArticleV1(..art, content: Pending)
-                    False -> art
-                  }
-                })
-                |> Loaded
-              #(
-                Model(
-                  ..model,
-                  uri: new_uri,
-                  articles: articles_updated,
-                  page: pages.from_uri(new_uri, model.session, articles_updated),
-                ),
-                article.article_get(fn(result) { ArticleGot(id, result) }, id),
-              )
-            }
-            _ -> #(
-              Model(
-                ..model,
-                uri: new_uri,
-                page: pages.from_uri(new_uri, model.session, model.articles),
-              ),
-              effect.none(),
-            )
-          }
-        }
-        _ -> #(
-          Model(
-            ..model,
-            uri: new_uri,
-            page: pages.from_uri(new_uri, model.session, model.articles),
-          ),
-          effect.none(),
-        )
-      }
-    }
-    ["article", id, "edit"] -> {
-      echo "article edit"
-      case model.articles {
-        Loaded(articles) -> {
-          case
-            list.find(articles, fn(article) {
-              article_id.to_string(article.id) == id
-            })
-          {
-            Error(_) -> {
-              #(
-                Model(
-                  ..model,
-                  uri: new_uri,
-                  page: pages.from_uri(new_uri, model.session, model.articles),
-                ),
-                effect.none(),
-              )
-            }
-            Ok(article) -> {
-              case article {
-                ArticleV1(_, _, _, _, _, _, _, draft: Some(_)) -> #(
-                  Model(
-                    ..model,
-                    uri: new_uri,
-                    page: pages.from_uri(new_uri, model.session, model.articles),
-                  ),
-                  effect.none(),
-                )
-                ArticleV1(_, _, _, _, _, _, content: Loaded(_), draft: None) -> {
-                  echo "article edit full, no draft"
-                  let articles_updated =
-                    remote_data.try_update(
-                      model.articles,
-                      list.map(_, fn(article_current) {
-                        case article.id == article_current.id {
-                          True ->
-                            ArticleV1(
-                              ..article,
-                              draft: Some(article.to_draft(article)),
-                            )
-                          False -> article_current
-                        }
-                      }),
-                    )
-                  #(
-                    Model(
-                      ..model,
-                      uri: new_uri,
-                      articles: articles_updated,
-                      page: pages.from_uri(
-                        new_uri,
-                        model.session,
-                        articles_updated,
-                      ),
-                    ),
-                    effect.none(),
-                  )
-                }
-                ArticleV1(id, _, _, _, _, _, NotInitialized, _) -> {
-                  let articles_updated =
-                    remote_data.try_update(
-                      model.articles,
-                      list.map(_, fn(article_current) {
-                        case article.id == article_current.id {
-                          True -> ArticleV1(..article, content: Pending)
-                          False -> article_current
-                        }
-                      }),
-                    )
-                  #(
-                    Model(
-                      ..model,
-                      uri: new_uri,
-                      articles: articles_updated,
-                      page: pages.from_uri(
-                        new_uri,
-                        model.session,
-                        articles_updated,
-                      ),
-                    ),
-                    article.article_get(ArticleGot(id, _), id),
-                  )
-                }
-                ArticleV1(id, _, _, _, _, _, Errored(_), _) -> {
-                  let articles_updated =
-                    remote_data.try_update(
-                      model.articles,
-                      list.map(_, fn(article_current) {
-                        case article.id == article_current.id {
-                          True -> ArticleV1(..article, content: Pending)
-                          False -> article_current
-                        }
-                      }),
-                    )
-                  #(
-                    Model(
-                      ..model,
-                      uri: new_uri,
-                      articles: articles_updated,
-                      page: pages.from_uri(
-                        new_uri,
-                        model.session,
-                        articles_updated,
-                      ),
-                    ),
-                    article.article_get(ArticleGot(id, _), id),
-                  )
-                }
-                ArticleV1(_, _, _, _, _, _, Pending, _) -> #(
-                  Model(
-                    ..model,
-                    uri: new_uri,
-                    page: pages.from_uri(new_uri, model.session, model.articles),
-                  ),
-                  effect.none(),
-                )
-              }
-            }
-          }
-        }
-        _ -> {
-          #(
-            Model(
-              ..model,
-              uri: new_uri,
-              page: pages.from_uri(new_uri, model.session, model.articles),
-            ),
-            effect.none(),
-          )
-        }
-      }
-    }
-    ["articles"] -> {
-      echo "articles"
-      case model.articles {
-        Errored(err) -> {
-          echo "articles errored"
-          echo err
-          #(
-            Model(
-              ..model,
-              uri: new_uri,
-              articles: Pending,
-              page: pages.from_uri(new_uri, model.session, model.articles),
-            ),
-            article.article_metadata_get(ArticleMetaGot),
-          )
-        }
-        NotInitialized -> {
-          echo "articles not initialized"
-          #(
-            Model(
-              ..model,
-              uri: new_uri,
-              articles: Pending,
-              page: pages.from_uri(new_uri, model.session, model.articles),
-            ),
-            article.article_metadata_get(ArticleMetaGot),
-          )
-        }
-        _ -> #(
-          Model(
-            ..model,
-            uri: new_uri,
-            page: pages.from_uri(new_uri, model.session, model.articles),
-          ),
-          effect.none(),
-        )
-      }
-    }
-    _ -> #(
-      Model(
-        ..model,
-        uri: new_uri,
-        page: pages.from_uri(new_uri, model.session, model.articles),
-      ),
-      effect.none(),
-    )
-  }
-}
-
-fn update_got_articles_metadata(
-  model: Model,
-  result: Result(List(Article), HttpError),
-) {
-  case result {
-    Ok(articles) -> {
-      let articles_loaded = Loaded(articles)
-      let page_updated =
-        pages.from_uri(model.uri, model.session, articles_loaded)
-      let effect_nav = case uri.path_segments(model.uri.path) {
-        ["article", slug] -> {
-          case list.find(articles, fn(article) { article.slug == slug }) {
-            Ok(ArticleV1(id, _, _, _, _, _, NotInitialized, _))
-            | Ok(ArticleV1(id, _, _, _, _, _, Errored(_), _)) -> {
-              article.article_get(fn(result) { ArticleGot(id, result) }, id)
-            }
-            _ -> effect.none()
-          }
-        }
-        ["article", id, "edit"] -> {
-          case
-            list.find(articles, fn(article) {
-              article_id.to_string(article.id) == id
-            })
-          {
-            Ok(ArticleV1(id, _, _, _, _, _, NotInitialized, _))
-            | Ok(ArticleV1(id, _, _, _, _, _, Errored(_), _)) -> {
-              article.article_get(fn(result) { ArticleGot(id, result) }, id)
-            }
-            _ -> effect.none()
-          }
-        }
-        _ -> effect.none()
-      }
-      #(
-        Model(..model, articles: articles_loaded, page: page_updated),
-        effect_nav,
-      )
-    }
-    Error(err) -> {
-      let articles_errored = Errored(err)
-      let page_updated =
-        pages.from_uri(model.uri, model.session, articles_errored)
-      #(
-        Model(..model, articles: articles_errored, page: page_updated),
-        effect.none(),
-      )
-    }
-  }
-}
-
-fn update_got_article_error(
-  model: Model,
-  err: HttpError,
-  id: ArticleId,
-) -> #(Model, Effect(Msg)) {
-  echo "failed to load article (id: "
-  <> article_id.to_string(id)
-  <> "): "
-  <> error_string.http_error(err)
-  let articles = case model.articles {
-    Loaded(articles) -> articles
-    _ -> []
-  }
-  let articles_updated =
-    list.map(articles, fn(article_current) {
-      case article_current.id == id {
-        True -> ArticleV1(..article_current, content: Errored(err), draft: None)
-        False -> article_current
-      }
-    })
-  #(Model(..model, articles: Loaded(articles_updated)), effect.none())
-}
+// fn update_navigation(model: Model, new_uri: Uri) -> #(Model, Effect(Msg)) {
+//   case uri.path_segments(new_uri.path) {
+//     ["article", slug] -> {
+//       echo "article"
+//       case model.articles {
+//         NotInitialized | Errored(_) -> {
+//           echo "update_navigation, article: articles not initialized"
+//           #(
+//             Model(
+//               ..model,
+//               page: pages.from_uri(new_uri, model.session, Pending),
+//               articles: Pending,
+//             ),
+//             article.article_metadata_get(ArticleMetaGot),
+//           )
+//         }
+//         Loaded(articles) -> {
+//           case list.find(articles, fn(article) { article.slug == slug }) {
+//             Ok(ArticleV1(id, _, _, _, _, _, NotInitialized, _))
+//             | Ok(ArticleV1(id, _, _, _, _, _, Errored(_), _)) -> {
+//               echo "update_navigation, article: content not initialized or errored"
+//               let articles_updated =
+//                 list.map(articles, fn(art) {
+//                   case art.slug == slug {
+//                     True -> ArticleV1(..art, content: Pending)
+//                     False -> art
+//                   }
+//                 })
+//                 |> Loaded
+//               #(
+//                 Model(
+//                   ..model,
+//                   uri: new_uri,
+//                   articles: articles_updated,
+//                   page: pages.from_uri(new_uri, model.session, articles_updated),
+//                 ),
+//                 article.article_get(fn(result) { ArticleGot(id, result) }, id),
+//               )
+//             }
+//             _ -> #(
+//               Model(
+//                 ..model,
+//                 uri: new_uri,
+//                 page: pages.from_uri(new_uri, model.session, model.articles),
+//               ),
+//               effect.none(),
+//             )
+//           }
+//         }
+//         _ -> #(
+//           Model(
+//             ..model,
+//             uri: new_uri,
+//             page: pages.from_uri(new_uri, model.session, model.articles),
+//           ),
+//           effect.none(),
+//         )
+//       }
+//     }
+//     ["article", id, "edit"] -> {
+//       echo "article edit"
+//       case model.articles {
+//         Loaded(articles) -> {
+//           case
+//             list.find(articles, fn(article) {
+//               article_id.to_string(article.id) == id
+//             })
+//           {
+//             Error(_) -> {
+//               #(
+//                 Model(
+//                   ..model,
+//                   uri: new_uri,
+//                   page: pages.from_uri(new_uri, model.session, model.articles),
+//                 ),
+//                 effect.none(),
+//               )
+//             }
+//             Ok(article) -> {
+//               case article {
+//                 ArticleV1(_, _, _, _, _, _, _, draft: Some(_)) -> #(
+//                   Model(
+//                     ..model,
+//                     uri: new_uri,
+//                     page: pages.from_uri(new_uri, model.session, model.articles),
+//                   ),
+//                   effect.none(),
+//                 )
+//                 ArticleV1(_, _, _, _, _, _, content: Loaded(_), draft: None) -> {
+//                   echo "article edit full, no draft"
+//                   let articles_updated =
+//                     remote_data.try_update(
+//                       model.articles,
+//                       list.map(_, fn(article_current) {
+//                         case article.id == article_current.id {
+//                           True ->
+//                             ArticleV1(
+//                               ..article,
+//                               draft: Some(article.to_draft(article)),
+//                             )
+//                           False -> article_current
+//                         }
+//                       }),
+//                     )
+//                   #(
+//                     Model(
+//                       ..model,
+//                       uri: new_uri,
+//                       articles: articles_updated,
+//                       page: pages.from_uri(
+//                         new_uri,
+//                         model.session,
+//                         articles_updated,
+//                       ),
+//                     ),
+//                     effect.none(),
+//                   )
+//                 }
+//                 ArticleV1(id, _, _, _, _, _, NotInitialized, _) -> {
+//                   let articles_updated =
+//                     remote_data.try_update(
+//                       model.articles,
+//                       list.map(_, fn(article_current) {
+//                         case article.id == article_current.id {
+//                           True -> ArticleV1(..article, content: Pending)
+//                           False -> article_current
+//                         }
+//                       }),
+//                     )
+//                   #(
+//                     Model(
+//                       ..model,
+//                       uri: new_uri,
+//                       articles: articles_updated,
+//                       page: pages.from_uri(
+//                         new_uri,
+//                         model.session,
+//                         articles_updated,
+//                       ),
+//                     ),
+//                     article.article_get(ArticleGot(id, _), id),
+//                   )
+//                 }
+//                 ArticleV1(id, _, _, _, _, _, Errored(_), _) -> {
+//                   let articles_updated =
+//                     remote_data.try_update(
+//                       model.articles,
+//                       list.map(_, fn(article_current) {
+//                         case article.id == article_current.id {
+//                           True -> ArticleV1(..article, content: Pending)
+//                           False -> article_current
+//                         }
+//                       }),
+//                     )
+//                   #(
+//                     Model(
+//                       ..model,
+//                       uri: new_uri,
+//                       articles: articles_updated,
+//                       page: pages.from_uri(
+//                         new_uri,
+//                         model.session,
+//                         articles_updated,
+//                       ),
+//                     ),
+//                     article.article_get(ArticleGot(id, _), id),
+//                   )
+//                 }
+//                 ArticleV1(_, _, _, _, _, _, Pending, _) -> #(
+//                   Model(
+//                     ..model,
+//                     uri: new_uri,
+//                     page: pages.from_uri(new_uri, model.session, model.articles),
+//                   ),
+//                   effect.none(),
+//                 )
+//               }
+//             }
+//           }
+//         }
+//         _ -> {
+//           #(
+//             Model(
+//               ..model,
+//               uri: new_uri,
+//               page: pages.from_uri(new_uri, model.session, model.articles),
+//             ),
+//             effect.none(),
+//           )
+//         }
+//       }
+//     }
+//     ["articles"] -> {
+//       echo "articles"
+//       case model.articles {
+//         Errored(err) -> {
+//           echo "articles errored"
+//           echo err
+//           #(
+//             Model(
+//               ..model,
+//               uri: new_uri,
+//               articles: Pending,
+//               page: pages.from_uri(new_uri, model.session, model.articles),
+//             ),
+//             article.article_metadata_get(ArticleMetaGot),
+//           )
+//         }
+//         NotInitialized -> {
+//           echo "articles not initialized"
+//           #(
+//             Model(
+//               ..model,
+//               uri: new_uri,
+//               articles: Pending,
+//               page: pages.from_uri(new_uri, model.session, model.articles),
+//             ),
+//             article.article_metadata_get(ArticleMetaGot),
+//           )
+//         }
+//         _ -> #(
+//           Model(
+//             ..model,
+//             uri: new_uri,
+//             page: pages.from_uri(new_uri, model.session, model.articles),
+//           ),
+//           effect.none(),
+//         )
+//       }
+//     }
+//     _ -> #(
+//       Model(
+//         ..model,
+//         uri: new_uri,
+//         page: pages.from_uri(new_uri, model.session, model.articles),
+//       ),
+//       effect.none(),
+//     )
+//   }
+// }
 
 // VIEW ------------------------------------------------------------------------
 
@@ -856,7 +794,7 @@ fn view(model: Model) -> Element(Msg) {
     view_header(model),
     html.main(
       [attr.class("max-w-screen-md mx-auto px-10 py-10")],
-      case model.page {
+      case page_from_model(model) {
         pages.PageIndex -> view_index()
         pages.PageArticleList(articles, session) ->
           view_article_listing(articles, session)
@@ -887,6 +825,76 @@ fn view(model: Model) -> Element(Msg) {
       },
     ),
   ])
+}
+
+fn page_from_model(model: Model) -> pages.Page {
+  case model.route {
+    routes.Index -> pages.PageIndex
+    routes.Articles -> {
+      case model.articles {
+        remote_data.Pending -> pages.PageArticleListLoading
+        remote_data.NotInitialized ->
+          pages.PageError(pages.Other("articles not initialized"))
+        remote_data.Errored(error) ->
+          pages.PageError(pages.HttpError(error, "Failed to load article list"))
+        remote_data.Loaded(articles_list) ->
+          pages.PageArticleList(articles_list, model.session)
+      }
+    }
+    routes.Article(slug) -> {
+      case model.articles {
+        remote_data.Pending -> pages.PageArticleListLoading
+        remote_data.NotInitialized ->
+          pages.PageError(pages.Other("articles not initialized"))
+        remote_data.Errored(error) ->
+          pages.PageError(pages.HttpError(error, "Failed to load articles"))
+        remote_data.Loaded(articles_list) -> {
+          case list.find(articles_list, fn(art) { art.slug == slug }) {
+            Ok(article) -> pages.PageArticle(article, model.session)
+            Error(_) ->
+              pages.PageError(pages.ArticleNotFound(
+                slug,
+                pages.get_available_slugs(articles_list),
+              ))
+          }
+        }
+      }
+    }
+    routes.ArticleEdit(id) -> {
+      case model.articles {
+        remote_data.Pending -> pages.PageArticleListLoading
+        remote_data.NotInitialized ->
+          pages.PageError(pages.Other("articles not initialized"))
+        remote_data.Errored(error) ->
+          pages.PageError(pages.HttpError(
+            error,
+            "Failed to load articles for editing",
+          ))
+        remote_data.Loaded(articles_list) -> {
+          case list.find(articles_list, fn(art) { art.id == id }) {
+            Ok(article) -> {
+              case article.can_edit(article, model.session), article.draft {
+                // TODO: this should be refactored.. the draft should be on the actual article and not on the one in the Page
+                True, Some(_) -> pages.PageArticleEdit(article)
+                True, None ->
+                  pages.PageArticleEdit(
+                    article.ArticleV1(
+                      ..article,
+                      draft: Some(article.to_draft(article)),
+                    ),
+                  )
+                False, _ ->
+                  pages.PageError(pages.AuthenticationRequired("edit article"))
+              }
+            }
+            Error(_) -> pages.PageError(pages.ArticleEditNotFound(id))
+          }
+        }
+      }
+    }
+    routes.About -> pages.PageAbout
+    routes.NotFound(uri) -> pages.PageNotFound(uri)
+  }
 }
 
 // VIEW HEADER ----------------------------------------------------------------
@@ -935,13 +943,14 @@ fn view_header(model: Model) -> Element(Msg) {
               ),
             ]),
             view_header_link(
-              to: pages.PageArticleList([], model.session),
-              current: model.uri,
+              // target: pages.PageArticleList([], model.session),
+              target: routes.Articles,
+              current: model.route,
               label: "Articles",
             ),
             view_header_link(
-              to: pages.PageAbout,
-              current: model.uri,
+              target: routes.About,
+              current: model.route,
               label: "About",
             ),
           ]),
@@ -952,30 +961,18 @@ fn view_header(model: Model) -> Element(Msg) {
 }
 
 fn view_header_link(
-  to target: pages.Page,
-  current current: Uri,
+  target to: Route,
+  current curr: Route,
   label text: String,
 ) -> Element(Msg) {
-  let to_uri = pages.to_uri(target)
-  let is_active = case
-    uri.path_segments(current.path),
-    uri.path_segments(to_uri.path)
-  {
-    ["article", _], ["articles"] -> True
-    ["article", _, "edit"], ["articles"] -> True
-    _, _ -> current.path == to_uri.path
-  }
-
   html.li(
     [
       attr.classes([
-        #("relative py-1", True),
-        #("after:absolute after:bottom-0 after:left-0 after:h-0.5 after:bg-pink-700 after:transition-all after:duration-300", True),
-        #("after:w-0 hover:after:w-full", !is_active),
-        #("after:w-full text-pink-600", is_active),
+        #("border-transparent border-b-2 hover:border-pink-700", True),
+        #("text-pink-700", routes.is_sub(route: to, maybe_sub: curr)),
       ]),
     ],
-    [view_internal_link(to_uri, [html.text(text)])],
+    [view_internal_link(to |> routes.to_uri, [html.text(text)])],
   )
 }
 
@@ -1420,7 +1417,7 @@ fn view_edit_link(article: Article, text: String) -> Element(msg) {
       attr.class(
         "text-zinc-500 px-3 py-1 rounded-md text-sm hover:text-teal-400 hover:bg-teal-900/30",
       ),
-      attr.href("ariticle/" <> article_id.to_string(article.id) <> "/edit"),
+      attr.href("ariticle/" <> article.id <> "/edit"),
     ],
     [
       html.span([attr.class("hidden sm:inline")], [html.text("✏")]),

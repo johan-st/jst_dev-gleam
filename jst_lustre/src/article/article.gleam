@@ -22,7 +22,7 @@ import utils/session.{type Session}
 
 pub type Article {
   ArticleV1(
-    id: ArticleId,
+    id: String,
     slug: String,
     revision: Int,
     title: String,
@@ -86,13 +86,13 @@ pub fn can_edit(article: Article, session: Session) {
 
 // Fetch ------------------------------------------------------------------------
 
-pub fn article_get(msg, id: ArticleId) -> Effect(a) {
+pub fn article_get(msg, id: String) -> Effect(a) {
   let request =
     request.new()
     |> request.set_method(gleam_http.Get)
     |> request.set_scheme(gleam_http.Http)
     |> request.set_host("localhost")
-    |> request.set_path("/api/article/" <> id.to_string(id) <> "/")
+    |> request.set_path("/api/article/" <> id <> "/")
     |> request.set_port(8080)
   http.send(request, http.expect_json(article_decoder(), msg))
 }
@@ -114,7 +114,7 @@ pub fn article_update(msg, article: Article) -> Effect(a) {
     |> request.set_method(gleam_http.Put)
     |> request.set_scheme(gleam_http.Http)
     |> request.set_host("localhost")
-    |> request.set_path("/api/article/" <> id.to_string(article.id) <> "/")
+    |> request.set_path("/api/article/" <> article.id <> "/")
     |> request.set_port(8080)
     |> request.set_body(article_encoder(article) |> json.to_string)
   http.send(request, http.expect_json(article_decoder(), msg))
@@ -236,7 +236,7 @@ pub fn article_decoder() -> decode.Decoder(Article) {
   }
 
   decode.success(ArticleV1(
-    id: id.from_string(id),
+    id: id,
     slug: slug,
     revision: revision,
     title: title,
@@ -267,7 +267,7 @@ pub fn article_encoder(article: Article) -> json.Json {
       }
       json.object([
         #("version", json.int(1)),
-        #("id", json.string(id.to_string(id))),
+        #("id", json.string(id)),
         #("revision", json.int(revision)),
         #("slug", json.string(slug)),
         #("title", json.string(title)),
@@ -365,7 +365,7 @@ pub fn draft_update(article: Article, updater: fn(Draft) -> Draft) -> Article {
 
 pub fn loading_article() -> Article {
   ArticleV1(
-    id: id.from_string("-"),
+    id: "-",
     slug: "placeholder_loading",
     revision: 0,
     title: "fetching articles..",
