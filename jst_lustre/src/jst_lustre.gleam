@@ -87,6 +87,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
 type Msg {
   // NAVIGATION
   UserNavigatedTo(uri: Uri)
+  UserMouseDownNavigation(uri: Uri)
   // MESSAGES
   // UserMessageDismissed(msg: UserMessage)
   // LOCALSTORAGE
@@ -161,6 +162,11 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     UserNavigatedTo(uri) -> {
       update_navigation(model, uri)
     }
+    UserMouseDownNavigation(uri) -> {
+      echo "user mouse down navigation"
+      echo uri
+      #(model, modem.push(uri.to_string(uri), None, None))
+    }
     // Browser Persistance
     PersistGotModel(opt:) -> {
       case opt {
@@ -182,8 +188,15 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           case list.find(articles, fn(article) { article.slug == slug }) {
             Ok(ArticleV1(id, _, _, _, _, _, NotInitialized, _))
             | Ok(ArticleV1(id, _, _, _, _, _, Errored(_), _)) -> {
+              let articles_with_pending_content =
+                list.map(articles, fn(article) {
+                  case article.slug == slug {
+                    True -> ArticleV1(..article, content: Pending)
+                    False -> article
+                  }
+                })
               #(
-                Model(..model, articles: Loaded(articles)),
+                Model(..model, articles: Loaded(articles_with_pending_content)),
                 article.article_get(ArticleGot(id, _), id),
               )
             }
@@ -978,7 +991,7 @@ fn view_header(model: Model) -> Element(Msg) {
             html.li([], [
               html.button(
                 [
-                  event.on_click(AuthLoginClicked("johan-st", "password")),
+                  event.on_mouse_down(AuthLoginClicked("johan-st", "password")),
                   attr.class("bg-pink-700 text-white px-2 rounded-md"),
                 ],
                 [html.text("Login")],
@@ -987,7 +1000,7 @@ fn view_header(model: Model) -> Element(Msg) {
             html.li([], [
               html.button(
                 [
-                  event.on_click(AuthLogoutClicked),
+                  event.on_mouse_down(AuthLogoutClicked),
                   attr.class("bg-pink-700 text-white px-2 rounded-md"),
                 ],
                 [html.text("Logout")],
@@ -996,7 +1009,7 @@ fn view_header(model: Model) -> Element(Msg) {
             html.li([], [
               html.button(
                 [
-                  event.on_click(AuthCheckClicked),
+                  event.on_mouse_down(AuthCheckClicked),
                   attr.class("bg-teal-700 text-white px-2 rounded-md"),
                 ],
                 [html.text("Check")],
@@ -1038,7 +1051,7 @@ fn view_header_link(
 
 // VIEW PAGES ------------------------------------------------------------------
 
-fn view_index() -> List(Element(msg)) {
+fn view_index() -> List(Element(Msg)) {
   let assert Ok(nats_uri) = uri.parse("/article/nats-all-the-way-down")
   [
     view_title("Welcome to jst.dev!", "welcome"),
@@ -1088,14 +1101,16 @@ fn view_article_listing(
     |> list.map(fn(article) {
       case article {
         ArticleV1(_, slug, _, title, leading, subtitle, _content, _draft_option) -> {
+          let article_uri = routes.Article(article.slug) |> routes.to_uri
           html.article([attr.class("mt-14")], [
             html.a(
               [
                 attr.class(
                   "group block border-l border-zinc-700 pl-4 hover:border-pink-700 transition-colors duration-25",
                 ),
-                attr.href("article/" <> article.slug <> "/"),
+                attr.href(uri.to_string(article_uri)),
                 event.on_mouse_enter(ArticleHovered(article)),
+                event.on_mouse_down(UserMouseDownNavigation(article_uri)),
               ],
               [
                 html.div([attr.class("flex justify-between gap-4 h-6")], [
@@ -1220,7 +1235,7 @@ fn view_article_edit(_model: Model, article: Article) -> List(Element(Msg)) {
                 attr.class(
                   "px-4 py-2 bg-pink-700 text-white rounded-md hover:bg-pink-600",
                 ),
-                event.on_click(ArticleDraftDiscardClicked(article)),
+                event.on_mouse_down(ArticleDraftDiscardClicked(article)),
                 attr.disabled(draft.is_saving(draft)),
               ],
               [html.text("Discard")],
@@ -1230,7 +1245,7 @@ fn view_article_edit(_model: Model, article: Article) -> List(Element(Msg)) {
                 attr.class(
                   "px-4 py-2 bg-teal-700 text-white rounded-md hover:bg-teal-600",
                 ),
-                event.on_click(ArticleDraftSaveClicked(article)),
+                event.on_mouse_down(ArticleDraftSaveClicked(article)),
                 attr.disabled(draft.is_saving(draft)),
               ],
               [
@@ -1250,7 +1265,7 @@ fn view_article_edit(_model: Model, article: Article) -> List(Element(Msg)) {
 fn view_article_edit_not_found(
   _available_articles: RemoteData(List(Article), HttpError),
   id: String,
-) -> List(Element(msg)) {
+) -> List(Element(Msg)) {
   [
     view_title("Article not found", id),
     view_paragraph([
@@ -1330,7 +1345,7 @@ fn view_article(article: Article, can_edit: Bool) -> List(Element(Msg)) {
 fn view_article_not_found(
   available_articles: RemoteData(List(Article), HttpError),
   slug: String,
-) -> List(Element(msg)) {
+) -> List(Element(Msg)) {
   case available_articles {
     Loaded(_articles) -> [
       view_title("Article not found", slug),
@@ -1353,7 +1368,7 @@ fn view_article_not_found(
   }
 }
 
-fn view_about() -> List(Element(msg)) {
+fn view_about() -> List(Element(Msg)) {
   [
     view_title("About", "about"),
     view_paragraph([
@@ -1460,32 +1475,26 @@ fn view_h2(title: String) -> Element(msg) {
 //   )
 // }
 
-fn view_paragraph(contents: List(Content)) -> Element(msg) {
-  html.p([
-    attr.class("pt-4 md:pt-6 leading-relaxed"),
-  ], view_article_content(contents))
+fn view_paragraph(contents: List(Content)) -> Element(Msg) {
+  html.p([attr.class("pt-8")], view_article_content(contents))
 }
 
-fn view_error(error_string: String) -> Element(msg) {
-  html.div([
-    attr.class("flex items-center gap-3 text-orange-500"),
-  ], [
-    html.span([attr.class("text-xl")], [html.text("⚠")]),
-    html.p([attr.class("leading-relaxed")], [html.text(error_string)]),
-  ])
+fn view_error(error_string: String) -> Element(Msg) {
+  html.p([attr.class("pt-8 text-orange-500")], [html.text(error_string)])
 }
 
-fn view_link(url: Uri, title: String) -> Element(msg) {
+fn view_link(url: Uri, title: String) -> Element(Msg) {
   html.a(
     [
       attr.href(uri.to_string(url)),
       attr.class("text-pink-700 hover:underline cursor-pointer"),
+      event.on_mouse_down(UserMouseDownNavigation(url)),
     ],
     [html.text(title)],
   )
 }
 
-fn view_link_external(url: Uri, title: String) -> Element(msg) {
+fn view_link_external(url: Uri, title: String) -> Element(Msg) {
   html.a(
     [
       attr.href(uri.to_string(url)),
@@ -1496,9 +1505,10 @@ fn view_link_external(url: Uri, title: String) -> Element(msg) {
   )
 }
 
-fn view_link_missing(url: Uri, title: String) -> Element(msg) {
+fn view_link_missing(url: Uri, title: String) -> Element(Msg) {
   html.a(
     [
+      event.on_mouse_down(UserMouseDownNavigation(url)),
       attr.href(uri.to_string(url)),
       attr.class("hover:underline cursor-pointer"),
     ],
@@ -1509,11 +1519,11 @@ fn view_link_missing(url: Uri, title: String) -> Element(msg) {
   )
 }
 
-fn view_block(contents: List(Content)) -> Element(msg) {
+fn view_block(contents: List(Content)) -> Element(Msg) {
   html.div([attr.class("pt-8")], view_article_content(contents))
 }
 
-fn view_list(items: List(Content)) -> Element(msg) {
+fn view_list(items: List(Content)) -> Element(Msg) {
   html.ul(
     [attr.class("pt-8 list-disc list-inside")],
     items
@@ -1523,7 +1533,7 @@ fn view_list(items: List(Content)) -> Element(msg) {
   )
 }
 
-fn view_unknown(content_type: String) -> Element(msg) {
+fn view_unknown(content_type: String) -> Element(Msg) {
   html.span([attr.class("text-orange-500")], [
     html.text("<unknown: " <> content_type <> ">"),
   ])
@@ -1531,8 +1541,8 @@ fn view_unknown(content_type: String) -> Element(msg) {
 
 // VIEW ARTICLE CONTENT --------------------------------------------------------
 
-fn view_article_content(contents: List(Content)) -> List(Element(msg)) {
-  let view_content = fn(content: Content) -> Element(msg) {
+fn view_article_content(contents: List(Content)) -> List(Element(Msg)) {
+  let view_content = fn(content: Content) -> Element(Msg) {
     case content {
       content.Text(text) -> html.text(text)
       content.Block(contents) -> view_block(contents)
@@ -1555,8 +1565,7 @@ fn view_add_content_button(label: String, click_message: Msg) -> Element(Msg) {
       attr.class(
         "px-3 py-2 bg-zinc-700 text-zinc-300 rounded-md hover:bg-zinc-600 text-sm transition-colors",
       ),
-      attr.class("flex items-center gap-1"),
-      event.on_click(click_message),
+      event.on_mouse_down(click_message),
     ],
     [
       html.span([attr.class("text-teal-400")], [html.text("+")]),
@@ -1591,8 +1600,7 @@ fn view_content_editor_block(content_item: Content, index: Int) -> Element(Msg) 
             attr.class(
               "text-xs px-2 py-1 bg-zinc-700 rounded hover:bg-zinc-600 transition-colors",
             ),
-            attr.title("Move Up"),
-            event.on_click(ArticleDraftContentMoveUp(content_item, index)),
+            event.on_mouse_down(ArticleDraftContentMoveUp(content_item, index)),
             attr.disabled(index == 0),
           ],
           [html.text("↑")],
@@ -1603,17 +1611,15 @@ fn view_content_editor_block(content_item: Content, index: Int) -> Element(Msg) 
             attr.class(
               "text-xs px-2 py-1 bg-zinc-700 rounded hover:bg-zinc-600 transition-colors",
             ),
-            attr.title("Move Down"),
-            event.on_click(ArticleDraftContentMoveDown(content_item, index)),
+            event.on_mouse_down(ArticleDraftContentMoveDown(content_item, index)),
           ],
           [html.text("↓")],
         ),
         // Delete button
         html.button(
           [
-            attr.class("text-xs px-2 py-1 bg-red-900/70 rounded hover:bg-red-800 transition-colors"),
-            attr.title("Delete Block"),
-            event.on_click(ArticleDraftContentRemove(content_item, index)),
+            attr.class("text-xs px-2 py-1 bg-red-900 rounded hover:bg-red-800"),
+            event.on_mouse_down(ArticleDraftContentRemove(content_item, index)),
           ],
           [html.text("×")],
         ),
@@ -1874,118 +1880,6 @@ fn view_content_editor_block(content_item: Content, index: Int) -> Element(Msg) 
             ]),
           ]),
         ])
-
-      // content.List(items) ->
-      //   html.div(
-      //     [attr.class("space-y-2")],
-      //     list.append(
-      //       list.index_map(items, fn(item, item_index) {
-      //         html.div([attr.class("flex gap-2")], [
-      //           html.input([
-      //             attr.class(
-      //               "w-full bg-zinc-900 border border-zinc-700 rounded-md p-2",
-      //             ),
-      //             attr.value(content_to_string([item])),
-      //             event.on_input(fn(new_text) {
-      //               let updated_items =
-      //                 list_set(items, item_index, content.Text(new_text))
-      //               ArticleDraftContentUpdate(
-      //                 content_item,
-      //                 index,
-      //                 content.List(updated_items),
-      //               )
-      //             }),
-      //           ]),
-      //           html.button(
-      //             [
-      //               attr.class("px-2 bg-zinc-700 rounded hover:bg-zinc-600"),
-      //               event.on_click(ArticleDraftContentListItemRemove(
-      //                 content_item,
-      //                 index,
-      //                 item_index,
-      //               )),
-      //             ],
-      //             [html.text("×")],
-      //           ),
-      //         ])
-      //       }),
-      //       [
-      //         html.button(
-      //           [
-      //             attr.class(
-      //               "w-full mt-2 px-2 py-1 bg-zinc-700 text-zinc-300 rounded hover:bg-zinc-600 text-sm",
-      //             ),
-      //             event.on_click(ArticleDraftContentListItemAdd(
-      //               content_item,
-      //               index,
-      //             )),
-      //           ],
-      //           [html.text("+ Add Item")],
-      //         ),
-      //       ],
-      //     ),
-      //   )
-      // content.Block(contents) ->
-      //   html.div([attr.class("space-y-2")], [
-      //     html.div(
-      //       [attr.class("bg-zinc-900 border border-zinc-700 rounded-md p-3")],
-      //       [
-      //         html.div([attr.class("mb-2 text-xs text-zinc-500")], [
-      //           html.text("Block Contents"),
-      //         ]),
-      //         // Nested content blocks
-      //         html.div(
-      //           [attr.class("space-y-3")],
-      //           list.index_map(contents, fn(nested_content, nested_index) {
-      //             html.div([attr.class("flex gap-2")], [
-      //               html.textarea(
-      //                 [
-      //                   attr.class(
-      //                     "w-full bg-zinc-950 border border-zinc-700 rounded-md p-2",
-      //                   ),
-      //                   attr.rows(2),
-      //                   attr.value(content_to_string([nested_content])),
-      //                   event.on_input(fn(new_text) {
-      //                     let updated_contents =
-      //                       list_set(
-      //                         contents,
-      //                         nested_index,
-      //                         content.Text(new_text),
-      //                       )
-      //                     ArticleDraftContentUpdate(
-      //                       content_item,
-      //                       index,
-      //                       content.Block(updated_contents),
-      //                     )
-      //                   }),
-      //                 ],
-      //                 content_to_string([nested_content]),
-      //               ),
-      //               html.button(
-      //                 [
-      //                   attr.class("px-2 bg-zinc-700 rounded hover:bg-zinc-600"),
-      //                   event.on_click(ArticleDraftContentListItemRemove(
-      //                     index,
-      //                     nested_index,
-      //                   )),
-      //                 ],
-      //                 [html.text("×")],
-      //               ),
-      //             ])
-      //           }),
-      //         ),
-      //         html.button(
-      //           [
-      //             attr.class(
-      //               "w-full mt-2 px-2 py-1 bg-zinc-700 text-zinc-300 rounded hover:bg-zinc-600 text-sm",
-      //             ),
-      //             event.on_click(ArticleDraftContentListItemAdd(index)),
-      //           ],
-      //           [html.text("+ Add Block Item")],
-      //         ),
-      //       ],
-      //     ),
-      //   ])
       _ ->
         html.div([], [
           html.text(
@@ -2019,7 +1913,14 @@ fn view_article_listing_loading() -> List(Element(Msg)) {
 }
 
 fn view_internal_link(uri: Uri, content: List(Element(Msg))) -> Element(Msg) {
-  html.a([attr.class(""), attr.href(uri.to_string(uri))], content)
+  html.a(
+    [
+      attr.class(""),
+      attr.href(uri.to_string(uri)),
+      event.on_mouse_down(UserMouseDownNavigation(uri)),
+    ],
+    content,
+  )
 }
 
 fn view_authentication_required(action: String) -> List(Element(Msg)) {
