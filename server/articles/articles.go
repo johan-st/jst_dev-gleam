@@ -284,7 +284,7 @@ func (r *articleRepo) Update(art Article) (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("marshal article: %w", err)
 	}
-	rev, err = r.kv.Update(r.ctx, art.Slug, data, uint64(art.Rev))
+	rev, err = r.kv.Update(r.ctx, art.Id.String(), data, uint64(art.Rev))
 	if err != nil {
 		return 0, fmt.Errorf("update article: %w", err)
 	}

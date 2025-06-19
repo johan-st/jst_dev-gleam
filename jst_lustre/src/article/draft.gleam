@@ -11,7 +11,13 @@ pub opaque type Draft {
   )
 }
 
-pub fn new(slug, title, subtitle, leading, content) {
+pub fn new(
+  slug: String,
+  title: String,
+  subtitle: String,
+  leading: String,
+  content: List(Content),
+) -> Draft {
   DraftV1(saving: False, slug:, title:, subtitle:, leading:, content:)
 }
 

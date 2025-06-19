@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"time"
 
+	"slices"
+
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 )
@@ -30,6 +32,7 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 	mux.Handle("POST /api/article/", handleArticleNew(l, repo))
 	mux.Handle("PUT /api/article/{id}/", handleArticleUpdate(l, repo))
 	mux.Handle("GET /api/article/{id}/", handleArticle(l, repo))
+	mux.Handle("POST /api/article/{id}/save", handleArticleSave(l, repo))
 
 	// auth
 	mux.Handle("POST /api/auth", handleAuth(l, nc))
@@ -421,6 +424,94 @@ func handleArticleUpdate(l *jst_log.Logger, repo articles.ArticleRepo) http.Hand
 			return
 		}
 		respJson(w, fmt.Sprintf("%s (rev: %d)", req.Slug, rev), http.StatusOK)
+	})
+}
+
+// handleArticleSave creates a handler for saving an existing article
+func handleArticleSave(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
+	type ReqSave struct {
+		Rev      int                `json:"revision"`
+		Slug     string             `json:"slug"`
+		Title    string             `json:"title"`
+		Subtitle string             `json:"subtitle"`
+		Leading  string             `json:"leading"`
+		Content  []articles.Content `json:"content"`
+	}
+
+	logger := l.WithBreadcrumb("article").WithBreadcrumb("save")
+	logger.Debug("ready")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Get article ID from path
+		id := r.PathValue("id")
+		idUuid, err := uuid.Parse(id)
+		if err != nil {
+			logger.Error("failed to parse id: %s", err.Error())
+			http.Error(w, "failed to parse id", http.StatusBadRequest)
+			return
+		}
+
+		// Check user permissions
+		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		hasPermission := slices.Contains(user.Permissions, whoApi.PermissionPostEditAny)
+		if !hasPermission {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+
+		// Get current article to verify it exists
+		currentArticle, err := repo.Get(idUuid)
+		if err != nil {
+			logger.Error("failed to get current article: %s", err.Error())
+			http.Error(w, "failed to get current article", http.StatusInternalServerError)
+			return
+		}
+		if currentArticle == nil {
+			logger.Error("article not found: %s", id)
+			http.Error(w, "article not found", http.StatusNotFound)
+			return
+		}
+
+		// Decode request body
+		var req ReqSave
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			logger.Warn("Failed to decode request", "error", err)
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		// Update article using client's revision
+		rev, err := repo.Update(articles.Article{
+			Id:            idUuid,
+			StructVersion: 1,
+			Rev:           uint64(req.Rev),  // Use client's revision, NATS will handle CAS
+			Slug:          req.Slug,
+			Title:         req.Title,
+			Subtitle:      req.Subtitle,
+			Leading:       req.Leading,
+			Content:       req.Content,
+		})
+		if err != nil {
+			logger.Error("failed to save article in repo: %v", err)
+			http.Error(w, fmt.Sprintf("failed to save article in repo: %s", err.Error()), http.StatusInternalServerError)
+			return
+		}
+
+		// Return the new revision number
+		respJson(w, articles.Article{
+			Id:            idUuid,
+			StructVersion: 1,
+			Rev:           rev,
+			Slug:          req.Slug,
+			Title:         req.Title,
+			Subtitle:      req.Subtitle,
+			Leading:       req.Leading,
+			Content:       req.Content,
+		}, http.StatusOK)
 	})
 }
 

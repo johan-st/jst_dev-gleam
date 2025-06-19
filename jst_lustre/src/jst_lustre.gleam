@@ -490,10 +490,71 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     // ARTICLE DRAFT SAVE
     ArticleDraftSaveClicked(article) -> {
-      todo as "article draft save clicked"
+      case article.draft {
+        Some(draft) -> {
+          let updated_article =
+            ArticleV1(
+              ..article,
+              slug: draft.slug(draft),
+              title: draft.title(draft),
+              leading: draft.leading(draft),
+              subtitle: draft.subtitle(draft),
+              content: Loaded(draft.content(draft)),
+              draft: None,
+            )
+          let updated_articles =
+            remote_data.try_update(
+              model.articles,
+              list.map(_, fn(article_current) {
+                case article.id == article_current.id {
+                  True -> updated_article
+                  False -> article_current
+                }
+              }),
+            )
+          #(
+            Model(..model, articles: updated_articles),
+            effect.batch([
+              article.article_save(
+                ArticleDraftSaveResponse(article.id, _),
+                article.id,
+                draft,
+                article.revision + 1,
+                model.base_uri,
+              ),
+              modem.push(
+                pages.to_uri(pages.PageArticle(updated_article, model.session))
+                  |> uri.to_string,
+                None,
+                None,
+              ),
+            ]),
+          )
+        }
+        None -> #(model, effect.none())
+      }
     }
     ArticleDraftSaveResponse(id, result) -> {
-      todo as "article draft save response"
+      case result {
+        Ok(saved_article) -> {
+          let updated_articles =
+            remote_data.try_update(
+              model.articles,
+              list.map(_, fn(article_current) {
+                case id == article_current.id {
+                  True -> saved_article
+                  False -> article_current
+                }
+              }),
+            )
+          #(Model(..model, articles: updated_articles), effect.none())
+        }
+        Error(err) -> {
+          echo "article draft save response error"
+          echo err
+          #(model, effect.none())
+        }
+      }
     }
     // AUTH
     AuthLoginClicked(username, password) -> {
@@ -1333,12 +1394,20 @@ fn view_article_content(contents: List(Content)) -> List(Element(Msg)) {
       content.Paragraph(contents) -> view_paragraph(contents)
       content.Link(url, title) -> view_link(url, title)
       content.LinkExternal(url, title) -> view_link_external(url, title)
-      content.Image(_, _) -> todo as "view content image"
+      content.Image(uri, alt) -> view_image(uri, alt)
       content.List(items) -> view_list(items)
       content.Unknown(type_) -> view_unknown(type_)
     }
   }
   list.map(contents, view_content)
+}
+
+fn view_image(uri: Uri, alt: String) -> Element(Msg) {
+  html.img([
+    attr.src(uri.to_string(uri)),
+    attr.alt(alt),
+    attr.class("max-w-full h-auto rounded-lg shadow-lg mt-8"),
+  ])
 }
 
 // Helper function to create add content buttons

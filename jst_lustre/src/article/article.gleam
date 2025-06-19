@@ -78,7 +78,7 @@ pub fn can_edit(_article: Article, session: Session) {
   |> session.permission_any(["post_edit_any"])
 }
 
-// Fetch ------------------------------------------------------------------------
+// HTTP -------------------------------------------------------------------------
 
 pub fn article_get(msg, id: String, base_uri: Uri) -> Effect(a) {
   let scheme = case base_uri.scheme {
@@ -176,6 +176,28 @@ pub fn article_create(msg, article: Article, base_uri: Uri) -> Effect(a) {
     |> request.set_port(port)
     |> request.set_body(article_encoder(article) |> json.to_string)
   http.send(request, http.expect_json(article_decoder(), msg))
+}
+
+pub fn article_save(
+  msg: fn(Result(Article, HttpError)) -> msg,
+  id: String,
+  draft: Draft,
+  revision: Int,
+  base_uri: Uri,
+) -> Effect(msg) {
+  let assert Ok(url) = uri.parse("/api/article/" <> id <> "/save/")
+  let assert Ok(url) = uri.merge(base_uri, url)
+  let body =
+    json.object([
+      #("revision", json.int(revision)),
+      #("slug", json.string(draft.slug(draft))),
+      #("title", json.string(draft.title(draft))),
+      #("subtitle", json.string(draft.subtitle(draft))),
+      #("leading", json.string(draft.leading(draft))),
+      #("content", json.array(draft.content(draft), content_encoder)),
+    ])
+
+  http.post(uri.to_string(url), body, http.expect_json(article_decoder(), msg))
 }
 
 // DECODE ----------------------------------------------------------------------
@@ -353,14 +375,14 @@ pub fn content_encoder(content: Content) -> json.Json {
       json.object([
         #("type", json.string("link")),
         #("url", json.string(uri.to_string(url))),
-        #("title", json.string(title)),
+        #("text", json.string(title)),
       ])
     }
     LinkExternal(url, title) -> {
       json.object([
         #("type", json.string("link_external")),
         #("url", json.string(uri.to_string(url))),
-        #("title", json.string(title)),
+        #("text", json.string(title)),
       ])
     }
     Image(url, alt) -> {
