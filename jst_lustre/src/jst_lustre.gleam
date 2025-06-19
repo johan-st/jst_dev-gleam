@@ -41,6 +41,7 @@ type Model {
     route: Route,
     session: session.Session,
     articles: RemoteData(List(Article), HttpError),
+    base_uri: Uri,
   )
 }
 
@@ -53,6 +54,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
       route: routes.from_uri(uri),
       session: session.Unauthenticated,
       articles: NotInitialized,
+      base_uri: uri,
     )
   let effect_modem =
     modem.init(fn(uri) {
@@ -65,14 +67,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
     effect.batch([
       effect_modem,
       effect_nav,
-      session.auth_check(AuthCheckResponse),
-      // effect.map(chat_effect, ChatMsg),
-    // article.article_metadata_get(ArticleMetaGot),
-    // persist.localstorage_get(
-    //   persist.model_localstorage_key,
-    //   persist.decoder(),
-    //   PersistGotModel,
-    // ),
+      session.auth_check(AuthCheckResponse, model.base_uri),
     ]),
   )
 }
@@ -197,7 +192,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                 })
               #(
                 Model(..model, articles: Loaded(articles_with_pending_content)),
-                article.article_get(ArticleGot(id, _), id),
+                article.article_get(ArticleGot(id, _), id, model.base_uri),
               )
             }
             Ok(_) -> todo as "article exists. content is pending or loading."
@@ -216,7 +211,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         }
         Ok(articles), routes.ArticleEdit(id) -> #(
           Model(..model, articles: Loaded(articles)),
-          article.article_get(ArticleGot(id, _), id),
+          article.article_get(ArticleGot(id, _), id, model.base_uri),
         )
 
         Ok(articles), _ -> #(
@@ -269,12 +264,12 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             })
           #(
             Model(..model, articles: updated_articles),
-            article.article_get(ArticleGot(article.id, _), article.id),
+            article.article_get(ArticleGot(article.id, _), article.id, model.base_uri),
           )
         }
         Errored(_) -> #(
           model,
-          article.article_get(ArticleGot(article.id, _), article.id),
+          article.article_get(ArticleGot(article.id, _), article.id, model.base_uri),
         )
         Pending | Loaded(_) -> {
           #(model, effect.none())
@@ -494,7 +489,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     // AUTH
     AuthLoginClicked(username, password) -> {
-      #(model, session.login(AuthLoginResponse, username, password))
+      #(model, session.login(AuthLoginResponse, username, password, model.base_uri))
     }
     AuthLoginResponse(session_result) -> {
       case session_result {
@@ -508,14 +503,14 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     AuthLogoutClicked -> {
       #(
         Model(..model, session: session.Unauthenticated),
-        session.auth_logout(AuthLogoutResponse),
+        session.auth_logout(AuthLogoutResponse, model.base_uri),
       )
     }
     AuthLogoutResponse(_result) -> {
       #(Model(..model, session: session.Unauthenticated), effect.none())
     }
     AuthCheckClicked -> {
-      #(model, session.auth_check(AuthCheckResponse))
+      #(model, session.auth_check(AuthCheckResponse, model.base_uri))
     }
     AuthCheckResponse(result) -> {
       case result {
@@ -545,7 +540,7 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
       case model.articles {
         NotInitialized -> #(
           Model(..model, route:, articles: Pending),
-          article.article_metadata_get(ArticleMetaGot),
+          article.article_metadata_get(ArticleMetaGot, model.base_uri),
         )
         Loaded(articles) -> {
           let #(effect, articles_updated) =
@@ -557,7 +552,7 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
                   True, NotInitialized -> #(
                     effect.batch([
                       eff,
-                      article.article_get(ArticleGot(art.id, _), art.id),
+                      article.article_get(ArticleGot(art.id, _), art.id, model.base_uri),
                     ]),
                     ArticleV1(..art, content: Pending),
                   )
@@ -574,7 +569,7 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
       case model.articles {
         NotInitialized -> #(
           Model(..model, route:, articles: Pending),
-          article.article_metadata_get(ArticleMetaGot),
+          article.article_metadata_get(ArticleMetaGot, model.base_uri),
         )
         Loaded(articles) -> {
           let #(effect, articles_updated) =
@@ -590,7 +585,7 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
                   True, NotInitialized -> #(
                     effect.batch([
                       eff,
-                      article.article_get(ArticleGot(art.id, _), art.id),
+                      article.article_get(ArticleGot(art.id, _), art.id, model.base_uri),
                     ]),
                     ArticleV1(
                       ..art,
@@ -598,7 +593,6 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
                       content: Pending,
                     ),
                   )
-                  // True, _, None -> #(
                   _, _ -> #(eff, art)
                 }
               },
@@ -612,7 +606,7 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
       case model.articles {
         NotInitialized -> #(
           Model(..model, route:, articles: Pending),
-          article.article_metadata_get(ArticleMetaGot),
+          article.article_metadata_get(ArticleMetaGot, model.base_uri),
         )
         _ -> #(Model(..model, route:), effect.none())
       }

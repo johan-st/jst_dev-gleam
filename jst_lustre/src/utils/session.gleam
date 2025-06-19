@@ -3,6 +3,8 @@ import gleam/http as gleam_http
 import gleam/http/request
 import gleam/json
 import gleam/list
+import gleam/option.{type Option, None, Some}
+import gleam/uri.{type Uri}
 import lustre/effect.{type Effect}
 import utils/http
 
@@ -32,7 +34,21 @@ pub fn permission_any(session: Session, any: List(String)) -> Bool {
 
 // EFFECTS ---------------------------------------------------------------------
 
-pub fn login(msg, username: String, password: String) -> Effect(msg) {
+pub fn login(msg, username: String, password: String, base_uri: Uri) -> Effect(msg) {
+  let scheme = case base_uri.scheme {
+    Some("http") -> gleam_http.Http
+    Some("https") -> gleam_http.Https
+    _ -> gleam_http.Http
+  }
+  let host = case base_uri.host {
+    Some(h) -> h
+    None -> "localhost"
+  }
+  let port = case base_uri.port {
+    Some(p) -> p
+    None -> 8080
+  }
+
   let body =
     json.object([
       #("username", json.string(username)),
@@ -42,32 +58,60 @@ pub fn login(msg, username: String, password: String) -> Effect(msg) {
 
   request.new()
   |> request.set_method(gleam_http.Post)
-  |> request.set_scheme(gleam_http.Http)
-  |> request.set_host("localhost")
+  |> request.set_scheme(scheme)
+  |> request.set_host(host)
   |> request.set_path("/api/auth")
-  |> request.set_port(8080)
+  |> request.set_port(port)
   |> request.set_body(body)
   |> http.send(http.expect_json(session_decoder(), msg))
 }
 
-pub fn auth_check(msg) -> Effect(msg) {
+pub fn auth_check(msg, base_uri: Uri) -> Effect(msg) {
+  let scheme = case base_uri.scheme {
+    Some("http") -> gleam_http.Http
+    Some("https") -> gleam_http.Https
+    _ -> gleam_http.Http
+  }
+  let host = case base_uri.host {
+    Some(h) -> h
+    None -> "localhost"
+  }
+  let port = case base_uri.port {
+    Some(p) -> p
+    None -> 8080
+  }
+
   request.new()
   |> request.set_method(gleam_http.Get)
-  |> request.set_scheme(gleam_http.Http)
-  |> request.set_host("localhost")
+  |> request.set_scheme(scheme)
+  |> request.set_host(host)
   |> request.set_path("/api/auth")
-  |> request.set_port(8080)
+  |> request.set_port(port)
   |> request.set_header("credentials", "include")
   |> http.send(http.expect_json(session_decoder(), msg))
 }
 
-pub fn auth_logout(msg) -> Effect(a) {
+pub fn auth_logout(msg, base_uri: Uri) -> Effect(a) {
+  let scheme = case base_uri.scheme {
+    Some("http") -> gleam_http.Http
+    Some("https") -> gleam_http.Https
+    _ -> gleam_http.Http
+  }
+  let host = case base_uri.host {
+    Some(h) -> h
+    None -> "localhost"
+  }
+  let port = case base_uri.port {
+    Some(p) -> p
+    None -> 8080
+  }
+
   request.new()
   |> request.set_method(gleam_http.Get)
-  |> request.set_scheme(gleam_http.Http)
-  |> request.set_host("localhost")
+  |> request.set_scheme(scheme)
+  |> request.set_host(host)
   |> request.set_path("/api/auth/logout")
-  |> request.set_port(8080)
+  |> request.set_port(port)
   |> request.set_header("credentials", "include")
   |> http.send(http.expect_text(msg))
 }

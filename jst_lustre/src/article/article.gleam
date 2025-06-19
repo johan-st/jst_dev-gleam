@@ -8,7 +8,7 @@ import gleam/http as gleam_http
 import gleam/http/request
 import gleam/json
 import gleam/option.{type Option, None, Some}
-import gleam/uri
+import gleam/uri.{type Uri}
 import lustre/effect.{type Effect}
 import utils/http.{type HttpError}
 import utils/remote_data.{type RemoteData, Loaded, NotInitialized}
@@ -80,48 +80,100 @@ pub fn can_edit(_article: Article, session: Session) {
 
 // Fetch ------------------------------------------------------------------------
 
-pub fn article_get(msg, id: String) -> Effect(a) {
+pub fn article_get(msg, id: String, base_uri: Uri) -> Effect(a) {
+  let scheme = case base_uri.scheme {
+    Some("http") -> gleam_http.Http
+    Some("https") -> gleam_http.Https
+    _ -> gleam_http.Http
+  }
+  let host = case base_uri.host {
+    Some(h) -> h
+    None -> "localhost"
+  }
+  let port = case base_uri.port {
+    Some(p) -> p
+    None -> 8080
+  }
   let request =
     request.new()
     |> request.set_method(gleam_http.Get)
-    |> request.set_scheme(gleam_http.Http)
-    |> request.set_host("localhost")
+    |> request.set_scheme(scheme)
+    |> request.set_host(host)
     |> request.set_path("/api/article/" <> id <> "/")
-    |> request.set_port(8080)
+    |> request.set_port(port)
   http.send(request, http.expect_json(article_decoder(), msg))
 }
 
-pub fn article_metadata_get(msg) -> Effect(a) {
+pub fn article_metadata_get(msg, base_uri: Uri) -> Effect(a) {
+  let scheme = case base_uri.scheme {
+    Some("http") -> gleam_http.Http
+    Some("https") -> gleam_http.Https
+    _ -> gleam_http.Http
+  }
+  let host = case base_uri.host {
+    Some(h) -> h
+    None -> "localhost"
+  }
+  let port = case base_uri.port {
+    Some(p) -> p
+    None -> 8080
+  }
   let request =
     request.new()
     |> request.set_method(gleam_http.Get)
-    |> request.set_scheme(gleam_http.Http)
-    |> request.set_host("localhost")
+    |> request.set_scheme(scheme)
+    |> request.set_host(host)
     |> request.set_path("/api/article/")
-    |> request.set_port(8080)
+    |> request.set_port(port)
   http.send(request, http.expect_json(metadata_decoder(), msg))
 }
 
-pub fn article_update(msg, article: Article) -> Effect(a) {
+pub fn article_update(msg, article: Article, base_uri: Uri) -> Effect(a) {
+  let scheme = case base_uri.scheme {
+    Some("http") -> gleam_http.Http
+    Some("https") -> gleam_http.Https
+    _ -> gleam_http.Http
+  }
+  let host = case base_uri.host {
+    Some(h) -> h
+    None -> "localhost"
+  }
+  let port = case base_uri.port {
+    Some(p) -> p
+    None -> 8080
+  }
   let request =
     request.new()
     |> request.set_method(gleam_http.Put)
-    |> request.set_scheme(gleam_http.Http)
-    |> request.set_host("localhost")
+    |> request.set_scheme(scheme)
+    |> request.set_host(host)
     |> request.set_path("/api/article/" <> article.id <> "/")
-    |> request.set_port(8080)
+    |> request.set_port(port)
     |> request.set_body(article_encoder(article) |> json.to_string)
   http.send(request, http.expect_json(article_decoder(), msg))
 }
 
-pub fn article_create(msg, article: Article) -> Effect(a) {
+pub fn article_create(msg, article: Article, base_uri: Uri) -> Effect(a) {
+  let scheme = case base_uri.scheme {
+    Some("http") -> gleam_http.Http
+    Some("https") -> gleam_http.Https
+    _ -> gleam_http.Http
+  }
+  let host = case base_uri.host {
+    Some(h) -> h
+    None -> "localhost"
+  }
+  let port = case base_uri.port {
+    Some(p) -> p
+    None -> 8080
+  }
   let request =
     request.new()
     |> request.set_method(gleam_http.Post)
-    |> request.set_scheme(gleam_http.Http)
-    |> request.set_host("localhost")
+    |> request.set_scheme(scheme)
+    |> request.set_host(host)
     |> request.set_path("/api/article/")
-    |> request.set_port(8080)
+    |> request.set_port(port)
     |> request.set_body(article_encoder(article) |> json.to_string)
   http.send(request, http.expect_json(article_decoder(), msg))
 }
