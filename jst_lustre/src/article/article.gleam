@@ -202,7 +202,7 @@ pub fn article_save(
 
 // DECODE ----------------------------------------------------------------------
 
-fn content_decoder() -> decode.Decoder(Content) {
+pub fn content_decoder() -> decode.Decoder(Content) {
   use content_type <- decode.field("type", decode.string)
   case content_type {
     "heading" -> {
@@ -264,6 +264,27 @@ fn content_decoder() -> decode.Decoder(Content) {
             Error(e) -> {
               echo e
               decode.failure(LinkExternal(fail_uri, text), "invalid link")
+            }
+          }
+        }
+      }
+    }
+    "image" -> {
+      let assert Ok(fail_uri) = uri.parse("/")
+      use url <- decode.field("url", decode.string)
+      use alt <- decode.field("alt", decode.string)
+      case url {
+        "" -> {
+          decode.failure(Image(fail_uri, alt), "empty image url")
+        }
+        _ -> {
+          case uri.parse(url) {
+            Ok(u) -> {
+              decode.success(Image(u, alt))
+            }
+            Error(e) -> {
+              echo e
+              decode.failure(Image(fail_uri, alt), "invalid image url")
             }
           }
         }
@@ -400,7 +421,7 @@ pub fn content_encoder(content: Content) -> json.Json {
     }
     Unknown(text) -> {
       json.object([
-        #("type", json.string("unknown")),
+        #("type", json.string(text)),
         #("text", json.string(text)),
       ])
     }

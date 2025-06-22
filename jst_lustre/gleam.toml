@@ -26,3 +26,4 @@ birl = ">= 1.8.0 and < 2.0.0"
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"
 lustre_dev_tools = ">= 1.7.0 and < 2.0.0"
+qcheck = ">= 1.0.0 and < 2.0.0"
