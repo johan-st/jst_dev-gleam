@@ -6,6 +6,7 @@ pub type Route {
   Article(slug: String)
   ArticleEdit(id: String)
   About
+  DjotDemo
 
   /// It's good practice to store whatever `Uri` we failed to match in case we
   /// want to log it or hint to the user that maybe they made a typo.
@@ -23,6 +24,7 @@ pub fn from_uri(uri: Uri) -> Route {
       ArticleEdit(id)
     }
     ["about"] -> About
+    ["djot-demo"] -> DjotDemo
     _ -> NotFound(uri)
   }
 }
@@ -34,6 +36,7 @@ pub fn to_string(route: Route) -> String {
     Articles -> "/articles"
     Article(slug) -> "/article/" <> slug
     ArticleEdit(id) -> "/article/" <> id <> "/edit"
+    DjotDemo -> "/djot-demo/"
     NotFound(uri) -> "/404?uri=" <> uri.to_string(uri)
   }
 }

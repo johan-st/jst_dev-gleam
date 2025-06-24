@@ -7,6 +7,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import gleam/uri.{type Uri}
+import jot_to_lustre
 import lustre
 import lustre/attribute as attr
 import lustre/effect.{type Effect}
@@ -38,10 +39,11 @@ pub fn main() {
 
 type Model {
   Model(
+    base_uri: Uri,
     route: Route,
     session: session.Session,
     articles: RemoteData(List(Article), HttpError),
-    base_uri: Uri,
+    djot_demo_content: String,
   )
 }
 
@@ -55,6 +57,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
       session: session.Unauthenticated,
       articles: NotInitialized,
       base_uri: uri,
+      djot_demo_content: "# Djot Demo\n\nThis is a demo of the Djot format.",
     )
   let effect_modem =
     modem.init(fn(uri) {
@@ -114,6 +117,8 @@ type Msg {
   AuthCheckResponse(result: Result(session.Session, HttpError))
   // CHAT
   // ChatMsg(msg: chat.Msg)
+  // DJOT DEMO
+  DjotDemoContentUpdated(content: String)
 }
 
 // fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -601,6 +606,10 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     //   let #(chat_model, chat_effect) = chat.update(msg, model.chat)
     //   #(Model(..model, chat: chat_model), effect.map(chat_effect, ChatMsg))
     // }
+    // DJOT DEMO
+    DjotDemoContentUpdated(content) -> {
+      #(Model(..model, djot_demo_content: content), effect.none())
+    }
   }
 }
 
@@ -692,6 +701,7 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
       }
     }
     routes.Index -> #(Model(..model, route:), effect.none())
+    routes.DjotDemo -> #(Model(..model, route:), effect.none())
     routes.NotFound(uri) -> #(Model(..model, route:), effect.none())
   }
 }
@@ -733,6 +743,7 @@ fn view(model: Model) -> Element(Msg) {
             }
           }
           pages.PageAbout -> view_about()
+          pages.PageDjotDemo(content) -> view_djot_demo(content)
           pages.PageNotFound(uri) -> view_not_found(uri)
         },
       ),
@@ -805,6 +816,7 @@ fn page_from_model(model: Model) -> pages.Page {
         }
       }
     }
+    routes.DjotDemo -> pages.PageDjotDemo(model.djot_demo_content)
     routes.About -> pages.PageAbout
     routes.NotFound(uri) -> pages.PageNotFound(uri)
   }
@@ -865,6 +877,11 @@ fn view_header(model: Model) -> Element(Msg) {
               target: routes.About,
               current: model.route,
               label: "About",
+            ),
+            view_header_link(
+              target: routes.DjotDemo,
+              current: model.route,
+              label: "Djot Demo",
             ),
           ]),
         ],
@@ -1779,5 +1796,25 @@ fn view_authentication_required(action: String) -> List(Element(Msg)) {
   [
     view_title("Authentication Required", "auth-required"),
     view_paragraph([content.Text("You need to be logged in to " <> action)]),
+  ]
+}
+
+fn view_djot_demo(content: String) -> List(Element(Msg)) {
+  let djot_demo_content = jot_to_lustre.to_lustre(content)
+  [
+    view_title("Djot Demo", "djot-demo"),
+    html.h2([], [html.text("Preview")]),
+    html.div([], djot_demo_content),
+    html.h2([], [html.text("Edit")]),
+    html.textarea(
+      [
+        attr.class(
+          "w-full h-96 bg-zinc-900 border border-zinc-700 rounded-md p-2",
+        ),
+        attr.value(content),
+        event.on_input(DjotDemoContentUpdated),
+      ],
+      content,
+    ),
   ]
 }

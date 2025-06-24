@@ -23,6 +23,7 @@ pub type Page {
   // Static pages
   PageAbout
   PageNotFound(requested_uri: Uri)
+  PageDjotDemo(content: String)
 }
 
 // Consolidated error types
@@ -82,6 +83,10 @@ pub fn to_uri(page: Page) -> Uri {
     }
     PageAbout -> {
       let assert Ok(uri) = uri.parse("/about")
+      uri
+    }
+    PageDjotDemo(content) -> {
+      let assert Ok(uri) = uri.parse("/djot-demo/" <> content)
       uri
     }
     PageNotFound(uri) -> {
@@ -154,6 +159,7 @@ pub fn from_uri(
       }
     }
     ["about"] -> PageAbout
+    ["djot-demo"] -> PageDjotDemo("")
     _ -> PageNotFound(uri)
   }
 }
