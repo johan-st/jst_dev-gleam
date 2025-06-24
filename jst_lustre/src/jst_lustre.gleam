@@ -7,7 +7,6 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import gleam/uri.{type Uri}
-import jot_to_lustre
 import lustre
 import lustre/attribute as attr
 import lustre/effect.{type Effect}
@@ -19,6 +18,7 @@ import pages/pages
 import routes/routes.{type Route}
 import utils/error_string
 import utils/http.{type HttpError}
+import utils/jot_to_lustre
 import utils/persist.{type PersistentModel, PersistentModelV0, PersistentModelV1}
 import utils/remote_data.{
   type RemoteData, Errored, Loaded, NotInitialized, Pending,
@@ -57,7 +57,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
       session: session.Unauthenticated,
       articles: NotInitialized,
       base_uri: uri,
-      djot_demo_content: "# Djot Demo\n\nThis is a demo of the Djot format.",
+      djot_demo_content: initial_djot,
     )
   let effect_modem =
     modem.init(fn(uri) {
@@ -1800,21 +1800,372 @@ fn view_authentication_required(action: String) -> List(Element(Msg)) {
 }
 
 fn view_djot_demo(content: String) -> List(Element(Msg)) {
-  let djot_demo_content = jot_to_lustre.to_lustre(content)
+  let preview_content = case content {
+    "" -> [
+      html.div([attr.class("text-zinc-500 italic text-center mt-8")], [
+        html.text("Start typing in the editor to see the preview here..."),
+      ]),
+    ]
+    _ -> jot_to_lustre.to_lustre(content)
+  }
+
   [
     view_title("Djot Demo", "djot-demo"),
-    html.h2([], [html.text("Preview")]),
-    html.div([], djot_demo_content),
-    html.h2([], [html.text("Edit")]),
-    html.textarea(
-      [
-        attr.class(
-          "w-full h-96 bg-zinc-900 border border-zinc-700 rounded-md p-2",
+    html.div([attr.class("mt-8")], [
+      html.p([attr.class("text-zinc-400 mb-6")], [
+        html.text(
+          "Edit Djot markup on the left and see the live preview on the right.",
         ),
-        attr.value(content),
-        event.on_input(DjotDemoContentUpdated),
+      ]),
+    ]),
+    html.div([attr.class("grid grid-cols-1 lg:grid-cols-2 gap-6")], [
+      // Editor section
+      html.section([attr.class("space-y-4")], [
+        html.div([attr.class("flex items-center justify-between")], [
+          html.h2([attr.class("text-xl text-pink-700 font-light")], [
+            html.text("Editor"),
+          ]),
+          html.div([attr.class("text-xs text-zinc-500")], [
+            html.text("Live preview updates as you type"),
+          ]),
+        ]),
+        html.div([attr.class("relative")], [
+          html.textarea(
+            [
+              attr.class(
+                "w-full h-[600px] bg-zinc-800 border border-zinc-600 rounded-lg p-4 font-mono text-sm text-zinc-100 resize-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500 focus:outline-none transition-colors duration-200",
+              ),
+              attr.placeholder(
+                "# Start typing your Djot content here...\n\n## Headings\n\n- Lists\n- Work too\n\n**Bold** and *italic* text",
+              ),
+              attr.value(content),
+              event.on_input(DjotDemoContentUpdated),
+              attr.attribute("spellcheck", "false"),
+            ],
+            content,
+          ),
+          // Character count
+          html.div(
+            [
+              attr.class(
+                "absolute bottom-2 right-2 text-xs text-zinc-500 bg-zinc-800 px-2 py-1 rounded",
+              ),
+            ],
+            [
+              html.text(string.length(content) |> string.inspect),
+              html.text(" chars"),
+            ],
+          ),
+        ]),
+      ]),
+      // Preview section
+      html.section([attr.class("space-y-4")], [
+        html.div([attr.class("flex items-center justify-between")], [
+          html.h2([attr.class("text-xl text-pink-700 font-light")], [
+            html.text("Preview"),
+          ]),
+          html.div([attr.class("text-xs text-zinc-500")], [
+            html.text("Rendered output"),
+          ]),
+        ]),
+        html.div(
+          [
+            attr.class(
+              "w-full h-[600px] bg-zinc-900 border border-zinc-600 rounded-lg p-6 overflow-y-auto prose prose-invert prose-pink max-w-none",
+            ),
+          ],
+          preview_content,
+        ),
+      ]),
+    ]),
+    // Quick reference section
+    html.div(
+      [attr.class("mt-8 p-4 bg-zinc-800 rounded-lg border border-zinc-700")],
+      [
+        html.h3([attr.class("text-lg text-pink-600 font-light mb-3")], [
+          html.text("Quick Reference"),
+        ]),
+        html.p([attr.class("text-zinc-400 mb-6")], [
+          html.strong([attr.class("text-zinc-300")], [html.text("Note: ")]),
+          html.text(
+            "The djot implementation is a work in progress. Not all features are supported yet.",
+          ),
+        ]),
+        html.div(
+          [
+            attr.class(
+              "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm",
+            ),
+          ],
+          [
+            html.div([], [
+              html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+                html.text("Headings"),
+              ]),
+              html.code([attr.class("text-zinc-300")], [
+                html.pre([attr.class("text-zinc-300")], [
+                  html.text("# H1\n## H2\n### H3"),
+                ]),
+              ]),
+            ]),
+            html.div([], [
+              html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+                html.text("Text"),
+              ]),
+              html.code([attr.class("text-zinc-300")], [
+                html.pre([attr.class("text-zinc-300")], [
+                  html.text("_italic_\n*bold*\n`code`"),
+                ]),
+              ]),
+            ]),
+            html.div([], [
+              html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+                html.text("Lists"),
+              ]),
+              html.code([attr.class("text-zinc-300")], [
+                html.pre([attr.class("text-zinc-300")], [
+                  html.text("- item 1\n- item 2\n\n  - nested"),
+                ]),
+              ]),
+            ]),
+            html.div([], [
+              html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+                html.text("Links"),
+              ]),
+              html.code([attr.class("text-zinc-300")], [
+                html.pre([attr.class("text-zinc-300")], [
+                  html.text("[text](url)\n[text](url){title=\"tooltip\"}"),
+                ]),
+              ]),
+            ]),
+            html.div([], [
+              html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+                html.text("Code Blocks"),
+              ]),
+              html.code([attr.class("text-zinc-300")], [
+                html.pre([attr.class("text-zinc-300")], [
+                  html.text("```\ncode here\n```"),
+                ]),
+              ]),
+            ]),
+            html.div([], [
+              html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+                html.text("Blockquotes"),
+              ]),
+              html.code([attr.class("text-zinc-300")], [
+                html.pre([attr.class("text-zinc-300")], [
+                  html.text("> quoted text"),
+                ]),
+              ]),
+            ]),
+          ],
+        ),
       ],
-      content,
     ),
   ]
 }
+
+const initial_djot = "# Quick Start for Markdown users
+
+Djot is a lot like Markdown.  Here are some of the main
+differences you need to be aware of in making the transition.
+
+#### Blank lines
+
+In djot you need blank lines around block-level
+elements.  Hence, instead of
+
+```
+This is some text.
+## My next heading
+```
+
+you must write
+
+```
+This is some text.
+
+## My next heading
+```
+
+Instead of
+
+````
+This is some text.
+``` lua
+local foo = bar.baz or false
+```
+````
+
+you must write
+
+````
+This is some text.
+
+``` lua
+local foo = bar.baz or false
+```
+````
+
+Instead of
+
+```
+Text.
+> a blockquote.
+```
+
+you must write
+
+```
+Text.
+
+> a blockquote.
+```
+
+And instead of
+
+```
+Before a thematic break.
+****
+After a thematic break.
+```
+
+you must write
+
+```
+Before a thematic break.
+
+****
+
+After a thematic break.
+```
+
+#### Lists
+
+A special case of this is that you always need a blank line before a
+list, even if it's a sublist. So, while in Markdown you can write
+
+```
+- one
+  - two
+  - three
+```
+
+in djot you must write
+
+```
+- one
+
+  - two
+  - three
+```
+
+#### Headings
+
+There are no Setext-style (underlined) headings, only ATX- (`#`) style.
+
+Heading content can extend over several lines, which may or may
+not be preceded by `#` characters:
+
+```
+## This is a single
+## level-2 heading
+
+### This is a single
+level-3 heading
+```
+
+As a result, headings must always have a blank line following.
+
+Trailing `#` characters in a heading are read as part of the
+content and not ignored.
+
+#### Code blocks
+
+There are no indented code blocks, only fenced with ` ``` `.
+
+#### Block quotes
+
+You need a space after the `>` character, unless it is followed
+by a newline.
+
+#### Emphasis
+
+Use single `_` delimiters for regular emphasis and
+single `*` delimiters for strong emphasis.
+
+#### Links
+
+There is no special syntax for adding a title to a link, as
+in Markdown:
+
+```
+[link](http://example.com \"Go to my website\")
+```
+
+If you want a title attribute on a link, use the general attribute syntax:
+
+```
+[link](http://example.com){title=\"Go to my website\"}
+```
+
+#### Hard line breaks
+
+In Markdown you can create a hard line break by ending a line
+with two spaces. In djot you use a backslash before the newline.
+
+```
+A new\\
+line.
+```
+
+#### Raw HTML
+
+In Markdown you can just insert raw HTML \"as is.\"  In djot,
+you must mark it as raw HTML:
+
+````
+This is raw HTML: `<a id=\"foo\">`{=html}.
+
+Here is a raw HTML block:
+
+``` =html
+<table>
+<tr><td>foo</td></tr>
+</table>
+```
+````
+
+#### Tables
+
+Pipe tables always require a pipe character at the start and end
+of each line, unlike in many Markdown implementations.  So, this
+is not a table:
+
+```
+a|b
+-|-
+1|2
+```
+
+but this is:
+
+```
+| a | b |
+| - | - |
+| 1 | 2 |
+```
+
+
+#### That's enough to get started!
+
+Here we have just focused on things that might trip up
+Markdown users.  If you keep these in mind, you should be
+able to start using djot without looking at any more
+documentation.
+
+However, we haven't discussed any of the things
+you can do in djot but not Markdown. See the [syntax
+description](https://htmlpreview.github.io/?https://github.com/jgm/djot/blob/master/doc/syntax.html)
+to find about the new constructions that are available.
+"
