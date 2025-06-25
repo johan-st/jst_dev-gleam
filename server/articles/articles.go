@@ -195,7 +195,9 @@ func (r *articleRepo) Update(art Article) (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("update article: %w", err)
 	}
-	return rev, nil
+	// NATS returns the next revision, so we need to subtract 1 to get the current revision. Confusing..
+	// TODO: Reproduce and report this as a bug to NATS.
+	return rev - 1, nil
 }
 
 func (r *articleRepo) Context() context.Context {

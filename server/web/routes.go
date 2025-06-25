@@ -488,7 +488,7 @@ func handleArticleSave(l *jst_log.Logger, repo articles.ArticleRepo) http.Handle
 		rev, err := repo.Update(articles.Article{
 			Id:            idUuid,
 			StructVersion: 1,
-			Rev:           uint64(req.Rev),  // Use client's revision, NATS will handle CAS
+			Rev:           uint64(req.Rev), // Use client's revision, NATS will handle CAS (Compare and Swap)
 			Slug:          req.Slug,
 			Title:         req.Title,
 			Subtitle:      req.Subtitle,
