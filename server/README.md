@@ -34,6 +34,10 @@ title: Server README
 - [ ] do not store id in kv value. It can cause confusion as we should rely on the nats kv key.
 - [ ] revisions increese globally. We should have one per article as well and use the global one to ensure we are not overwritting changes.
 
+### Bug
+
+- [ ] Initial load on a missing article results in the article metadata not being put into the model.. repro: reload on a missing article. go to article listing. It should show "loading...".
+
 ## Bechmarking
 
 ```sh

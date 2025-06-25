@@ -74,6 +74,16 @@ pub fn can_edit(_article: Article, session: Session) {
   |> session.permission_any(["post_edit_any"])
 }
 
+pub fn can_delete(_article: Article, session: Session) {
+  session
+  |> session.permission_any(["post_edit_any"])
+}
+
+pub fn can_publish(_article: Article, session: Session) {
+  session
+  |> session.permission_any(["post_edit_any"])
+}
+
 // HTTP -------------------------------------------------------------------------
 
 pub fn article_get(msg, id: String, base_uri: Uri) -> Effect(a) {
@@ -196,6 +206,78 @@ pub fn article_update_(msg, article: Article, base_uri: Uri) -> Effect(a) {
     |> request.set_path("/api/articles/" <> article.id)
     |> request.set_port(port)
     |> request.set_body(article_encoder(article) |> json.to_string)
+  http.send(request, http.expect_json(article_decoder(), msg))
+}
+
+pub fn article_delete(msg, id: String, base_uri: Uri) -> Effect(a) {
+  let scheme = case base_uri.scheme {
+    Some("http") -> gleam_http.Http
+    Some("https") -> gleam_http.Https
+    _ -> gleam_http.Http
+  }
+  let host = case base_uri.host {
+    Some(h) -> h
+    None -> "localhost"
+  }
+  let port = case base_uri.port {
+    Some(p) -> p
+    None -> 8080
+  }
+  let request =
+    request.new()
+    |> request.set_method(gleam_http.Delete)
+    |> request.set_scheme(scheme)
+    |> request.set_host(host)
+    |> request.set_path("/api/articles/" <> id)
+    |> request.set_port(port)
+  http.send(request, http.expect_text(msg))
+}
+
+pub fn article_publish(msg, id: String, base_uri: Uri) -> Effect(a) {
+  let scheme = case base_uri.scheme {
+    Some("http") -> gleam_http.Http
+    Some("https") -> gleam_http.Https
+    _ -> gleam_http.Http
+  }
+  let host = case base_uri.host {
+    Some(h) -> h
+    None -> "localhost"
+  }
+  let port = case base_uri.port {
+    Some(p) -> p
+    None -> 8080
+  }
+  let request =
+    request.new()
+    |> request.set_method(gleam_http.Post)
+    |> request.set_scheme(scheme)
+    |> request.set_host(host)
+    |> request.set_path("/api/articles/" <> id <> "/publish")
+    |> request.set_port(port)
+  http.send(request, http.expect_json(article_decoder(), msg))
+}
+
+pub fn article_unpublish(msg, id: String, base_uri: Uri) -> Effect(a) {
+  let scheme = case base_uri.scheme {
+    Some("http") -> gleam_http.Http
+    Some("https") -> gleam_http.Https
+    _ -> gleam_http.Http
+  }
+  let host = case base_uri.host {
+    Some(h) -> h
+    None -> "localhost"
+  }
+  let port = case base_uri.port {
+    Some(p) -> p
+    None -> 8080
+  }
+  let request =
+    request.new()
+    |> request.set_method(gleam_http.Post)
+    |> request.set_scheme(scheme)
+    |> request.set_host(host)
+    |> request.set_path("/api/articles/" <> id <> "/unpublish")
+    |> request.set_port(port)
   http.send(request, http.expect_json(article_decoder(), msg))
 }
 

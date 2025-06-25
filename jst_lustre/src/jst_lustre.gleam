@@ -111,6 +111,13 @@ type Msg {
   ArticleDraftSaveClicked(article: Article)
   ArticleDraftSaveResponse(id: String, result: Result(Article, HttpError))
   ArticleDraftDiscardClicked(article: Article)
+  // ARTICLE ACTIONS
+  ArticleDeleteClicked(article: Article)
+  ArticleDeleteResponse(id: String, result: Result(String, HttpError))
+  ArticlePublishClicked(article: Article)
+  ArticlePublishResponse(id: String, result: Result(Article, HttpError))
+  ArticleUnpublishClicked(article: Article)
+  ArticleUnpublishResponse(id: String, result: Result(Article, HttpError))
   // AUTH
   AuthLoginClicked(username: String, password: String)
   AuthLoginResponse(result: Result(session.Session, HttpError))
@@ -601,6 +608,108 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       }
       #(Model(..model, edit_view_mode: new_mode), effect.none())
     }
+    // ARTICLE ACTIONS
+    ArticleDeleteClicked(article) -> {
+      echo "article delete clicked"
+      #(
+        model,
+        effect.batch([
+          article.article_delete(
+            ArticleDeleteResponse(article.id, _),
+            article.id,
+            model.base_uri,
+          ),
+          modem.push(
+            routes.Articles |> routes.to_uri |> uri.to_string,
+            None,
+            None,
+          ),
+        ]),
+      )
+    }
+    ArticleDeleteResponse(id, result) -> {
+      case result {
+        Ok(_) -> {
+          let updated_articles =
+            remote_data.try_update(
+              model.articles,
+              list.filter(_, fn(article_current) { article_current.id != id }),
+            )
+          #(Model(..model, articles: updated_articles), effect.none())
+        }
+        Error(err) -> {
+          echo "article delete response error"
+          echo err
+          #(model, effect.none())
+        }
+      }
+    }
+    ArticlePublishClicked(article) -> {
+      echo "article publish clicked"
+      #(
+        model,
+        article.article_publish(
+          ArticlePublishResponse(article.id, _),
+          article.id,
+          model.base_uri,
+        ),
+      )
+    }
+    ArticlePublishResponse(id, result) -> {
+      case result {
+        Ok(published_article) -> {
+          let updated_articles =
+            remote_data.try_update(
+              model.articles,
+              list.map(_, fn(article_current) {
+                case id == article_current.id {
+                  True -> published_article
+                  False -> article_current
+                }
+              }),
+            )
+          #(Model(..model, articles: updated_articles), effect.none())
+        }
+        Error(err) -> {
+          echo "article publish response error"
+          echo err
+          #(model, effect.none())
+        }
+      }
+    }
+    ArticleUnpublishClicked(article) -> {
+      echo "article unpublish clicked"
+      #(
+        model,
+        article.article_unpublish(
+          ArticleUnpublishResponse(article.id, _),
+          article.id,
+          model.base_uri,
+        ),
+      )
+    }
+    ArticleUnpublishResponse(id, result) -> {
+      case result {
+        Ok(unpublished_article) -> {
+          let updated_articles =
+            remote_data.try_update(
+              model.articles,
+              list.map(_, fn(article_current) {
+                case id == article_current.id {
+                  True -> unpublished_article
+                  False -> article_current
+                }
+              }),
+            )
+          #(Model(..model, articles: updated_articles), effect.none())
+        }
+        Error(err) -> {
+          echo "article unpublish response error"
+          echo err
+          #(model, effect.none())
+        }
+      }
+    }
   }
 }
 
@@ -706,8 +815,7 @@ fn view(model: Model) -> Element(Msg) {
     pages.PageArticleList(articles, session) ->
       view_article_listing(articles, session)
     pages.PageArticleListLoading -> view_article_listing_loading()
-    pages.PageArticle(article, session) ->
-      view_article(article, article.can_edit(article, session))
+    pages.PageArticle(article, session) -> view_article(article, session)
     pages.PageArticleEdit(article) -> view_article_edit(model, article)
     pages.PageError(error) -> {
       case error {
@@ -763,7 +871,6 @@ fn view(model: Model) -> Element(Msg) {
       }
     }
   }
-  echo page
   layout(content)
 }
 
@@ -1030,7 +1137,7 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
           slug: draft.slug(draft),
           subtitle: draft.subtitle(draft),
         )
-      let preview = view_article(draft_article, False)
+      let preview = view_article(draft_article, session.Unauthenticated)
 
       [
         // Toggle button for mobile
@@ -1164,32 +1271,37 @@ fn view_edit_actions(draft: draft.Draft, article: Article) -> List(Element(Msg))
       ),
     ]),
     // Action buttons
-    html.div([attr.class("flex justify-end gap-4")], [
-      html.button(
-        [
-          attr.class(
-            "px-4 py-2 bg-zinc-700 text-zinc-300 rounded-md hover:bg-zinc-600 transition-colors duration-200",
-          ),
-          event.on_mouse_down(ArticleDraftDiscardClicked(article)),
-          attr.disabled(draft.is_saving(draft)),
-        ],
-        [html.text("Discard Changes")],
-      ),
-      html.button(
-        [
-          attr.class(
-            "px-4 py-2 bg-teal-700 text-white rounded-md hover:bg-teal-600 transition-colors duration-200",
-          ),
-          event.on_mouse_down(ArticleDraftSaveClicked(article)),
-          attr.disabled(draft.is_saving(draft)),
-        ],
-        [
-          case draft.is_saving(draft) {
-            True -> html.text("Saving...")
-            False -> html.text("Save Article")
-          },
-        ],
-      ),
+    html.div([attr.class("flex justify-between gap-4")], [
+      // Article actions (left side)
+      view_article_actions(article, session.Unauthenticated),
+      // Draft actions (right side)  
+      html.div([attr.class("flex gap-4")], [
+        html.button(
+          [
+            attr.class(
+              "px-4 py-2 bg-zinc-700 text-zinc-300 rounded-md hover:bg-zinc-600 transition-colors duration-200",
+            ),
+            event.on_mouse_down(ArticleDraftDiscardClicked(article)),
+            attr.disabled(draft.is_saving(draft)),
+          ],
+          [html.text("Discard Changes")],
+        ),
+        html.button(
+          [
+            attr.class(
+              "px-4 py-2 bg-teal-700 text-white rounded-md hover:bg-teal-600 transition-colors duration-200",
+            ),
+            event.on_mouse_down(ArticleDraftSaveClicked(article)),
+            attr.disabled(draft.is_saving(draft)),
+          ],
+          [
+            case draft.is_saving(draft) {
+              True -> html.text("Saving...")
+              False -> html.text("Save Article")
+            },
+          ],
+        ),
+      ]),
     ]),
   ]
 }
@@ -1343,11 +1455,10 @@ fn view_article_edit_input(
   ])
 }
 
-fn view_article(article: Article, can_edit: Bool) -> List(Element(Msg)) {
-  let edit_button = case can_edit {
-    True -> view_edit_link(article, "Edit")
-    False -> element.none()
-  }
+fn view_article(
+  article: Article,
+  session: session.Session,
+) -> List(Element(Msg)) {
   let content: List(Element(Msg)) = case article.content {
     NotInitialized -> [view_error("content not initialized")]
     Pending -> [view_error("loading")]
@@ -1358,7 +1469,7 @@ fn view_article(article: Article, can_edit: Bool) -> List(Element(Msg)) {
     html.article([attr.class("with-transition")], [
       html.div([attr.class("flex justify-between gap-4")], [
         view_title(article.title, article.slug),
-        edit_button,
+        view_article_actions(article, session),
       ]),
       view_subtitle(article.subtitle, article.slug),
       view_leading(article.leading, article.slug),
@@ -1433,6 +1544,93 @@ fn view_edit_link(article: Article, text: String) -> Element(msg) {
       html.text(text),
     ],
   )
+}
+
+fn view_article_actions(
+  article: Article,
+  session: session.Session,
+) -> Element(Msg) {
+  // Determine permissions
+  let can_edit = article.can_edit(article, session)
+  let can_publish = article.can_publish(article, session)
+  let can_delete = article.can_delete(article, session)
+  
+  // Determine which is the last button for border-e
+  let edit_is_last = can_edit && !can_publish && !can_delete
+  let publish_is_last = can_publish && !can_delete
+  let unpublish_is_last = can_publish && !can_delete
+  let delete_is_last = can_delete
+  
+  html.div([attr.class("flex")], [
+    case can_edit {
+      True ->
+        html.a(
+          [
+            attr.class(
+              "text-gray-500 pe-4 text-underline pt-2 hover:text-teal-300 hover:border-teal-300 border-t border-gray-500"
+              <> case edit_is_last {
+                True -> " border-e"
+                False -> ""
+              },
+            ),
+            attr.href(routes.to_string(routes.ArticleEdit(article.id))),
+          ],
+          [html.text("Edit")],
+        )
+      False -> element.none()
+    },
+    case can_publish {
+      True ->
+        html.button(
+          [
+            attr.class(
+              "text-gray-500 pe-4 text-underline pt-2 hover:text-green-300 hover:border-green-300 border-t border-gray-500"
+              <> case publish_is_last {
+                True -> " border-e"
+                False -> ""
+              },
+            ),
+            event.on_mouse_down(ArticlePublishClicked(article)),
+          ],
+          [html.text("Publish")],
+        )
+      False -> element.none()
+    },
+    case can_publish {
+      True ->
+        html.button(
+          [
+            attr.class(
+              "text-gray-500 pe-4 text-underline pt-2 hover:text-yellow-300 hover:border-yellow-300 border-t border-gray-500"
+              <> case unpublish_is_last {
+                True -> " border-e"
+                False -> ""
+              },
+            ),
+            event.on_mouse_down(ArticleUnpublishClicked(article)),
+          ],
+          [html.text("Unpublish")],
+        )
+      False -> element.none()
+    },
+    case can_delete {
+      True ->
+        html.button(
+          [
+            attr.class(
+              "text-gray-500 pe-4 text-underline pt-2 hover:text-red-300 hover:border-red-300 border-t border-gray-500"
+              <> case delete_is_last {
+                True -> " border-e"
+                False -> ""
+              },
+            ),
+            event.on_mouse_down(ArticleDeleteClicked(article)),
+          ],
+          [html.text("Delete")],
+        )
+      False -> element.none()
+    },
+  ])
 }
 
 fn view_title(title: String, slug: String) -> Element(msg) {
