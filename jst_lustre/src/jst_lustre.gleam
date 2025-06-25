@@ -472,15 +472,15 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     // ARTICLE DRAFT SAVE
     ArticleDraftSaveClicked(article) -> {
       case article.draft {
-        Some(draft) -> {
+        Some(current_draft) -> {
           let updated_article =
             ArticleV1(
               ..article,
-              slug: draft.slug(draft),
-              title: draft.title(draft),
-              leading: draft.leading(draft),
-              subtitle: draft.subtitle(draft),
-              content: Loaded(draft.content(draft)),
+              slug: draft.slug(current_draft),
+              title: draft.title(current_draft),
+              leading: draft.leading(current_draft),
+              subtitle: draft.subtitle(current_draft),
+              content: Loaded(draft.content(current_draft)),
               draft: None,
             )
           let updated_articles =
@@ -499,7 +499,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               article.article_save(
                 ArticleDraftSaveResponse(article.id, _),
                 article.id,
-                draft,
+                current_draft,
                 article.revision + 1,
                 model.base_uri,
               ),
@@ -714,7 +714,7 @@ fn view(model: Model) -> Element(Msg) {
     pages.PageNotFound(uri) -> view_not_found(uri)
   }
   let layout = case page {
-    pages.PageDjotDemo(_) -> {
+    pages.PageDjotDemo(_) | pages.PageArticleEdit(_) -> {
       fn(content) {
         html.div(
           [
@@ -748,7 +748,7 @@ fn view(model: Model) -> Element(Msg) {
       }
     }
   }
-
+  echo page
   layout(content)
 }
 
@@ -938,10 +938,10 @@ fn view_index() -> List(Element(Msg)) {
       view_link(nats_uri, "NATS all the way down ->"),
     ]),
     view_simple_paragraph(
-        "It to is a work in progress and I mostly keep it here for my own reference.",
+      "It to is a work in progress and I mostly keep it here for my own reference.",
     ),
     view_simple_paragraph(
-        "I'm also a software developer and a writer. I'm also a father and a 
+      "I'm also a software developer and a writer. I'm also a father and a 
         husband. I'm also a software developer and a writer. I'm also a father 
         and a husband. I'm also a software developer and a writer. I'm also a 
         father and a husband. I'm also a software developer and a writer.",
@@ -997,103 +997,234 @@ fn view_article_listing(
 }
 
 fn view_article_edit(_model: Model, article: Article) -> List(Element(Msg)) {
-  let assert Ok(index_uri) = uri.parse("/")
   case article.draft {
-    None -> [view_error("creating draft..")]
+    None -> [view_error("no draft..")]
     Some(draft) -> {
+      let preview_content = case draft.content(draft) {
+        "" -> "Start typing in the editor to see the preview here..."
+        content -> content
+      }
+      let draft_article =
+        article.ArticleV1(
+          title: draft.title(draft),
+          content: Loaded(preview_content),
+          draft: None,
+          id: article.id,
+          leading: draft.leading(draft),
+          revision: article.revision,
+          slug: draft.slug(draft),
+          subtitle: draft.subtitle(draft),
+        )
+      let preview = view_article(draft_article, False)
+
       [
-        html.article([attr.class("with-transition")], [
-          // Revision information
-          html.div([attr.class("mb-6 p-3 bg-zinc-800 rounded-lg border border-zinc-700")], [
-            html.div([attr.class("flex items-center justify-between")], [
-              html.div([], [
-                html.span([attr.class("text-sm text-zinc-400")], [html.text("Current Revision: ")]),
-                html.span([attr.class("text-lg font-mono text-pink-600")], [
-                  html.text("v" <> int.to_string(article.revision))
-                ]),
-              ]),
-              html.div([attr.class("text-xs text-zinc-500")], [
-                html.text("This version will be saved as v" <> int.to_string(article.revision + 1))
-              ]),
-            ]),
-          ]),
-          view_article_edit_input(
-            "Slug",
-            ArticleEditInputTypeSlug,
-            draft.slug(draft),
-            ArticleDraftUpdatedSlug(article, _),
-            article.slug,
+        html.div([attr.class("grid grid-cols-2 gap-8 h-screen")], [
+          html.div([attr.class("space-y-4")], view_edit_actions(draft, article)),
+          html.div(
+            [attr.class("max-w-screen-md mx-auto px-10 py-10 overflow-y-auto")],
+            preview,
           ),
-          view_article_edit_input(
-            "Title",
-            ArticleEditInputTypeTitle,
-            draft.title(draft),
-            ArticleDraftUpdatedTitle(article, _),
-            article.slug,
-          ),
-          view_article_edit_input(
-            "Subtitle",
-            ArticleEditInputTypeSubtitle,
-            draft.subtitle(draft),
-            ArticleDraftUpdatedSubtitle(article, _),
-            article.slug,
-          ),
-          view_article_edit_input(
-            "Leading",
-            ArticleEditInputTypeLeading,
-            draft.leading(draft),
-            ArticleDraftUpdatedLeading(article, _),
-            article.slug,
-          ),
-          // Djot content editor
-          html.div([attr.class("mb-4")], [
-            html.label(
-              [attr.class("block text-sm font-medium text-zinc-400 mb-1")],
-              [html.text("Content (Djot)")],
-            ),
-            html.textarea(
-              [
-                attr.class(
-                  "w-full h-96 bg-zinc-800 border border-zinc-700 rounded-md p-4 font-mono text-sm resize-none",
-                ),
-                attr.placeholder("Write your article content in Djot format...\n\n## Example Heading\n\nThis is a paragraph with *emphasis* and **strong** text.\n\n- List item 1\n- List item 2\n\n[Link text](url)"),
-                attr.value(draft.content(draft)),
-                event.on_input(ArticleDraftUpdatedContent(article, _)),
-              ],
-              draft.content(draft),
-            ),
-          ]),
-          html.div([attr.class("flex justify-end gap-4 mt-6")], [
-            html.button(
-              [
-                attr.class(
-                  "px-4 py-2 bg-pink-700 text-white rounded-md hover:bg-pink-600",
-                ),
-                event.on_mouse_down(ArticleDraftDiscardClicked(article)),
-                attr.disabled(draft.is_saving(draft)),
-              ],
-              [html.text("Discard")],
-            ),
-            html.button(
-              [
-                attr.class(
-                  "px-4 py-2 bg-teal-700 text-white rounded-md hover:bg-teal-600",
-                ),
-                event.on_mouse_down(ArticleDraftSaveClicked(article)),
-                attr.disabled(draft.is_saving(draft)),
-              ],
-              [
-                case draft.is_saving(draft) {
-                  True -> html.text("Saving...")
-                  False -> html.text("Save")
-                },
-              ],
-            ),
-          ]),
         ]),
+        view_djot_quick_reference(),
       ]
     }
   }
+}
+
+fn view_edit_actions(draft: draft.Draft, article: Article) -> List(Element(Msg)) {
+  [
+    // Form inputs - Slug with revision
+    html.div([attr.class("mb-4")], [
+      html.div([attr.class("flex items-center justify-between mb-1")], [
+        html.label([attr.class("block text-sm font-medium text-zinc-400")], [
+          html.text("Slug"),
+        ]),
+        html.span([attr.class("text-xs text-zinc-500")], [
+          html.text("rev " <> int.to_string(article.revision)),
+        ]),
+      ]),
+      html.input([
+        attr.class(
+          "w-full bg-zinc-800 border border-zinc-600 rounded-md p-2 font-light text-zinc-100 focus:border-pink-500 focus:ring-1 focus:ring-pink-500 focus:outline-none transition-colors duration-200",
+        ),
+        attr.value(draft.slug(draft)),
+        attr.id("edit-" <> article.slug <> "-" <> "Slug"),
+        event.on_input(ArticleDraftUpdatedSlug(article, _)),
+      ]),
+    ]),
+    view_article_edit_input(
+      "Title",
+      ArticleEditInputTypeTitle,
+      draft.title(draft),
+      ArticleDraftUpdatedTitle(article, _),
+      article.slug,
+    ),
+    view_article_edit_input(
+      "Subtitle",
+      ArticleEditInputTypeSubtitle,
+      draft.subtitle(draft),
+      ArticleDraftUpdatedSubtitle(article, _),
+      article.slug,
+    ),
+    // Leading as textarea
+    html.div([attr.class("mb-4")], [
+      html.label([attr.class("block text-sm font-medium text-zinc-400 mb-1")], [
+        html.text("Leading"),
+      ]),
+      html.textarea(
+        [
+          attr.class(
+            "w-full h-24 bg-zinc-800 border border-zinc-600 rounded-md p-2 font-bold text-zinc-100 resize-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500 focus:outline-none transition-colors duration-200",
+          ),
+          attr.value(draft.leading(draft)),
+          attr.id("edit-" <> article.slug <> "-" <> "Leading"),
+          event.on_input(ArticleDraftUpdatedLeading(article, _)),
+          attr.placeholder("Write a compelling leading paragraph..."),
+        ],
+        draft.leading(draft),
+      ),
+    ]),
+    // Content editor
+    html.div([attr.class("mb-4")], [
+      html.label([attr.class("block text-sm font-medium text-zinc-400 mb-1")], [
+        html.text("Content"),
+      ]),
+      html.textarea(
+        [
+          attr.class(
+            "w-full h-96 bg-zinc-800 border border-zinc-600 rounded-md p-4 font-mono text-sm text-zinc-100 resize-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500 focus:outline-none transition-colors duration-200",
+          ),
+          attr.value(draft.content(draft)),
+          event.on_input(ArticleDraftUpdatedContent(article, _)),
+          attr.placeholder("Write your article content in Djot format..."),
+        ],
+        draft.content(draft),
+      ),
+    ]),
+    // Action buttons
+    html.div([attr.class("flex justify-end gap-4")], [
+      html.button(
+        [
+          attr.class(
+            "px-4 py-2 bg-zinc-700 text-zinc-300 rounded-md hover:bg-zinc-600 transition-colors duration-200",
+          ),
+          event.on_mouse_down(ArticleDraftDiscardClicked(article)),
+          attr.disabled(draft.is_saving(draft)),
+        ],
+        [html.text("Discard Changes")],
+      ),
+      html.button(
+        [
+          attr.class(
+            "px-4 py-2 bg-teal-700 text-white rounded-md hover:bg-teal-600 transition-colors duration-200",
+          ),
+          event.on_mouse_down(ArticleDraftSaveClicked(article)),
+          attr.disabled(draft.is_saving(draft)),
+        ],
+        [
+          case draft.is_saving(draft) {
+            True -> html.text("Saving...")
+            False -> html.text("Save Article")
+          },
+        ],
+      ),
+    ]),
+  ]
+}
+
+fn view_djot_quick_reference() -> Element(Msg) {
+  // Quick reference section
+  html.div(
+    [attr.class("mt-8 p-4 bg-zinc-800 rounded-lg border border-zinc-700")],
+    [
+      html.h3([attr.class("text-lg text-pink-600 font-light")], [
+        html.text("Djot Quick Reference"),
+      ]),
+      html.p([attr.class("text-zinc-300 mb-6")], [
+        html.strong([], [html.text("Note: ")]),
+        html.text("This editor uses Djot format. See the "),
+        html.a(
+          [
+            attr.href(
+              "https://htmlpreview.github.io/?https://github.com/jgm/djot/blob/master/doc/syntax.html",
+            ),
+            attr.class("text-zinc-300 underline"),
+          ],
+          [html.text("djot syntax documentation")],
+        ),
+        html.text(" for complete details."),
+      ]),
+      html.div(
+        [
+          attr.class(
+            "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm",
+          ),
+        ],
+        [
+          html.div([], [
+            html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+              html.text("Headings"),
+            ]),
+            html.code([attr.class("text-zinc-300")], [
+              html.pre([attr.class("text-zinc-300")], [
+                html.text("# H1\n## H2\n### H3"),
+              ]),
+            ]),
+          ]),
+          html.div([], [
+            html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+              html.text("Text"),
+            ]),
+            html.code([attr.class("text-zinc-300")], [
+              html.pre([attr.class("text-zinc-300")], [
+                html.text("_italic_\n*bold*\n`code`"),
+              ]),
+            ]),
+          ]),
+          html.div([], [
+            html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+              html.text("Lists"),
+            ]),
+            html.code([attr.class("text-zinc-300")], [
+              html.pre([attr.class("text-zinc-300")], [
+                html.text("- item 1\n- item 2\n\n  - nested"),
+              ]),
+            ]),
+          ]),
+          html.div([], [
+            html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+              html.text("Links"),
+            ]),
+            html.code([attr.class("text-zinc-300")], [
+              html.pre([attr.class("text-zinc-300")], [
+                html.text("[text](url)\n[text](url){title=\"tooltip\"}"),
+              ]),
+            ]),
+          ]),
+          html.div([], [
+            html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+              html.text("Code Blocks"),
+            ]),
+            html.code([attr.class("text-zinc-300")], [
+              html.pre([attr.class("text-zinc-300")], [
+                html.text("```\ncode here\n```"),
+              ]),
+            ]),
+          ]),
+          html.div([], [
+            html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+              html.text("Blockquotes"),
+            ]),
+            html.code([attr.class("text-zinc-300")], [
+              html.pre([attr.class("text-zinc-300")], [
+                html.text("> quoted text"),
+              ]),
+            ]),
+          ]),
+        ],
+      ),
+    ],
+  )
 }
 
 fn view_article_edit_not_found(
@@ -1124,19 +1255,19 @@ fn view_article_edit_input(
   let input_classes = case input_type {
     ArticleEditInputTypeSlug ->
       attr.class(
-        "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 font-light",
+        "w-full bg-zinc-800 border border-zinc-600 rounded-md p-2 font-light text-zinc-100 focus:border-pink-500 focus:ring-1 focus:ring-pink-500 focus:outline-none transition-colors duration-200",
       )
     ArticleEditInputTypeTitle ->
       attr.class(
-        "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 text-3xl text-pink-700 font-light",
+        "w-full bg-zinc-800 border border-zinc-600 rounded-md p-2 text-3xl text-pink-700 font-light focus:border-pink-500 focus:ring-1 focus:ring-pink-500 focus:outline-none transition-colors duration-200",
       )
     ArticleEditInputTypeSubtitle ->
       attr.class(
-        "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 text-md text-zinc-500 font-light",
+        "w-full bg-zinc-800 border border-zinc-600 rounded-md p-2 text-md text-zinc-500 font-light focus:border-pink-500 focus:ring-1 focus:ring-pink-500 focus:outline-none transition-colors duration-200",
       )
     ArticleEditInputTypeLeading ->
       attr.class(
-        "w-full bg-zinc-800 border border-zinc-700 rounded-md p-2 font-bold",
+        "w-full bg-zinc-800 border border-zinc-600 rounded-md p-2 font-bold text-zinc-100 focus:border-pink-500 focus:ring-1 focus:ring-pink-500 focus:outline-none transition-colors duration-200",
       )
   }
   html.div([attr.class("mb-4")], [
@@ -1415,10 +1546,10 @@ fn view_djot_demo(content: String) -> List(Element(Msg)) {
           html.textarea(
             [
               attr.class(
-                "w-full h-[600px] bg-zinc-800 border border-zinc-600 rounded-lg p-4 font-mono text-sm text-zinc-100 resize-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500 focus:outline-none transition-colors duration-200",
+                "w-full h-[400px] lg:h-[600px] bg-zinc-800 border border-zinc-600 rounded-lg p-4 font-mono text-sm text-zinc-100 resize-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500 focus:outline-none transition-colors duration-200",
               ),
               attr.placeholder(
-                "# Start typing your Djot content here...\n\n## Headings\n\n- Lists\n- Work too\n\n**Bold** and *italic* text",
+                "# Start typing your article content here...\n\n## Headings\n\n- Lists\n- Work too\n\n**Bold** and *italic* text\n\n[Link text](url)",
               ),
               attr.value(content),
               event.on_input(DjotDemoContentUpdated),
@@ -1453,7 +1584,7 @@ fn view_djot_demo(content: String) -> List(Element(Msg)) {
         html.div(
           [
             attr.class(
-              "w-full h-[600px] bg-zinc-900 border border-zinc-600 rounded-lg p-6 overflow-y-auto prose prose-invert prose-pink max-w-none",
+              "w-full h-[400px] lg:h-[600px] bg-zinc-900 border border-zinc-600 rounded-lg p-6 overflow-y-auto prose prose-invert prose-pink max-w-none",
             ),
           ],
           preview_content,

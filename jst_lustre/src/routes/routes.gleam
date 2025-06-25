@@ -42,7 +42,6 @@ pub fn to_string(route: Route) -> String {
 }
 
 pub fn to_uri(route: Route) -> Uri {
-  echo "Dangerous assert triggered"
   let assert Ok(uri) = route |> to_string |> uri.parse
   uri
 }
