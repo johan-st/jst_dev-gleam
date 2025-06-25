@@ -1,0 +1,26 @@
+meta {
+  name: update
+  type: http
+  seq: 6
+}
+
+put {
+  url: http://localhost:8080/api/articles/:id
+  body: json
+  auth: none
+}
+
+params:path {
+  id: 2ba7a62f-b715-4b85-8fed-126022948e3d
+}
+
+body:json {
+  {
+    "revision": 16,
+    "slug": "slug_goes_here",
+    "title": "Bruno test 1",
+    "subtitle": "..or, smth.",
+    "leading": "bruno test one",
+    "content": "bob?"
+  }
+}

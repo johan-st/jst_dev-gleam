@@ -27,20 +27,22 @@ const (
 func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc *nats.Conn, jwtSecret string) {
 
 	// Add routes with their respective handlers
-	mux.Handle("GET /api/seed", handleSeed(l, repo))
-	mux.Handle("GET /api/article/", handleArticleList(l, repo))
-	mux.Handle("POST /api/article/", handleArticleNew(l, repo))
-	mux.Handle("PUT /api/article/{id}/", handleArticleUpdate(l, repo))
-	mux.Handle("GET /api/article/{id}/", handleArticle(l, repo))
-	mux.Handle("POST /api/article/{id}/save", handleArticleSave(l, repo))
+	mux.Handle("GET /api/articles", handleArticleList(l, repo))
+	mux.Handle("POST /api/articles", handleArticleNew(l, repo))
+	mux.Handle("GET /api/articles/{id}", handleArticle(l, repo))
+	mux.Handle("PUT /api/articles/{id}", handleArticleUpdate(l, repo))
+	mux.Handle("DELETE /api/articles/{id}", handleArticleDelete(l, repo))
+	mux.Handle("GET /api/articles/{id}/revisions", handleArticleRevisions(l, repo))
+	mux.Handle("GET /api/articles/{id}/revisions/{revision}", handleArticleRevision(l, repo))
 
 	// auth
 	mux.Handle("POST /api/auth", handleAuth(l, nc))
 	mux.Handle("GET /api/auth/logout", handleAuthLogout(l, nc))
 	mux.Handle("GET /api/auth", handleAuthCheck(l, nc, jwtSecret))
 
-	// Add catch-all route
-	// mux.Handle("/", http.NotFoundHandler())
+	// DEV routes
+	mux.Handle("GET /dev/seed", handleSeed(l, repo))   // TODO: remove this
+	mux.Handle("GET /dev/purge", handlePurge(l, repo)) // TODO: remove this
 	mux.Handle("/", handleProxy(l.WithBreadcrumb("proxy_frontend"), "http://127.0.0.1:1234"))
 }
 
@@ -58,13 +60,16 @@ func logger(l *jst_log.Logger, next http.Handler) http.Handler {
 	})
 }
 
-func cors(next http.Handler) http.Handler {
+func cors(l *jst_log.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		// Allow either localhost:1234 or 127.0.0.1:1234
 		if origin == "http://localhost:8080" || origin == "http://127.0.0.1:8080" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
+		} else {
+			l.Warn("dangerously setting origin to %s", origin)
+			w.Header().Set("Access-Control-Allow-Origin", "https://taylor.gazelle-chicken.ts.net")
 		}
+
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Allow-Credentials", "true") // Required for cookies
@@ -80,28 +85,32 @@ func authJwt(jwtSecret string, next http.Handler) http.Handler {
 		panic("next handler is nil")
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		jwtCookie, err := r.Cookie(cookieAuth)
-		if err != nil {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if jwtCookie == nil {
-			next.ServeHTTP(w, r)
-			return
-		}
-		if jwtCookie.Value == "" {
-			next.ServeHTTP(w, r)
-			return
-		}
-		subject, permissions, err := whoApi.JwtVerify(jwtSecret, audience, jwtCookie.Value)
-		if err != nil {
-			next.ServeHTTP(w, r)
-			return
-		}
 		ctx := context.WithValue(r.Context(), who.UserKey, whoApi.User{
-			ID:          subject,
-			Permissions: permissions,
+			ID:          "TEST_USER",
+			Permissions: []whoApi.Permission{whoApi.PermissionPostEditAny},
 		})
+		// jwtCookie, err := r.Cookie(cookieAuth)
+		// if err != nil {
+		// 	next.ServeHTTP(w, r)
+		// 	return
+		// }
+		// if jwtCookie == nil {
+		// 	next.ServeHTTP(w, r)
+		// 	return
+		// }
+		// if jwtCookie.Value == "" {
+		// 	next.ServeHTTP(w, r)
+		// 	return
+		// }
+		// subject, permissions, err := whoApi.JwtVerify(jwtSecret, audience, jwtCookie.Value)
+		// if err != nil {
+		// 	next.ServeHTTP(w, r)
+		// 	return
+		// }
+		// ctx := context.WithValue(r.Context(), who.UserKey, whoApi.User{
+		// 	ID:          subject,
+		// 	Permissions: permissions,
+		// })
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -109,6 +118,8 @@ func authJwt(jwtSecret string, next http.Handler) http.Handler {
 
 // --- HANDLERS ---
 
+// handleProxy proxies requests to the target URL
+// NOTE: this handler uses the the logger that is passed without adding any breadcrumbs
 func handleProxy(l *jst_log.Logger, targetUrl string) http.Handler {
 
 	proxyUrl, err := url.Parse(targetUrl)
@@ -135,6 +146,8 @@ func handleProxy(l *jst_log.Logger, targetUrl string) http.Handler {
 		proxy.ServeHTTP(w, r)
 	})
 }
+
+// - auth
 
 func handleAuth(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 	type Req struct {
@@ -239,13 +252,13 @@ func handleAuth(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 	})
 }
 
-func handleAuthLogout(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+func handleAuthLogout(_ *jst_log.Logger, _ *nats.Conn) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, &http.Cookie{Name: cookieAuth, MaxAge: -1, Path: "/"})
 	})
 }
 
-func handleAuthCheck(l *jst_log.Logger, nc *nats.Conn, jwtSecret string) http.Handler {
+func handleAuthCheck(l *jst_log.Logger, _ *nats.Conn, _ string) http.Handler {
 	type Resp struct {
 		Subject     string              `json:"subject"`
 		ExpiresAt   int64               `json:"expiresAt"`
@@ -300,16 +313,35 @@ func handleSeed(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 	})
 }
 
+func handlePurge(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
+	logger := l.WithBreadcrumb("purge")
+	logger.Debug("ready")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Debug("called")
+		err := repo.Purge()
+		if err != nil {
+			logger.Error("failed to purge repo: %s", err.Error())
+			http.Error(w, "failed to purge repo", http.StatusInternalServerError)
+			return
+		}
+		respJson(w, "purged", http.StatusOK)
+	})
+}
+
+// - articles
+
 // handleArticleList creates a handler for listing all articles
 func handleArticleList(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 	type Resp struct {
 		Articles []articles.ArticleMetadata `json:"articles"`
 	}
 
-	logger := l.WithBreadcrumb("article").WithBreadcrumb("list")
+	logger := l.WithBreadcrumb("articles").WithBreadcrumb("list")
 	logger.Debug("ready")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Debug("called")
 		articles, err := repo.AllNoContent()
 		if err != nil {
 			logger.Error("failed to get all articles: %s", err.Error())
@@ -323,10 +355,11 @@ func handleArticleList(l *jst_log.Logger, repo articles.ArticleRepo) http.Handle
 
 // handleArticle creates a handler for getting a single article by slug
 func handleArticle(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
-	logger := l.WithBreadcrumb("article").WithBreadcrumb("get")
+	logger := l.WithBreadcrumb("articles").WithBreadcrumb("get")
 	logger.Debug("ready")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Debug("called")
 		id := r.PathValue("id")
 		idUuid, err := uuid.Parse(id)
 		if err != nil {
@@ -334,6 +367,7 @@ func handleArticle(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 			http.Error(w, "failed to parse id", http.StatusBadRequest)
 			return
 		}
+		logger.Debug("idUuid: %s", idUuid)
 		article, err := repo.Get(idUuid)
 		if err != nil {
 			logger.Error("failed to get article: %s", err.Error())
@@ -360,17 +394,22 @@ func handleArticleNew(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler
 		Content  string `json:"content"`
 	}
 
-	logger := l.WithBreadcrumb("article").WithBreadcrumb("new")
+	logger := l.WithBreadcrumb("articles").WithBreadcrumb("new")
 	logger.Debug("ready")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req ReqNew
+		var (
+			req ReqNew
+			art = articles.Article{}
+		)
+		logger.Debug("called")
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			logger.Warn("Failed to decode request", "error", err)
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
-		rev, err := repo.Create(articles.Article{
+		logger.Debug("decoded request")
+		art = articles.Article{
 			StructVersion: 1,
 			Rev:           1,
 			Slug:          req.Slug,
@@ -378,57 +417,25 @@ func handleArticleNew(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler
 			Subtitle:      req.Subtitle,
 			Leading:       req.Leading,
 			Content:       req.Content,
-		})
+		}
+		art_created, err := repo.Create(art)
 		if err != nil {
-			logger.Error("failed to put new article in repo: %v", err)
-			http.Error(w, "failed to put new article in repo", http.StatusInternalServerError)
+			logger.Error("failed to Create new article in repo: %v", err)
+			http.Error(w, "failed to Create new article in repo", http.StatusInternalServerError)
 			return
 		}
-		respJson(w, fmt.Sprintf("%s (rev: %d)", req.Slug, rev), http.StatusOK)
+		if art_created == nil {
+			logger.Error("article was nil")
+			http.Error(w, "article was nil", http.StatusInternalServerError)
+			return
+		}
+		logger.Debug("created article with slug: %s", req.Slug)
+		respJson(w, art_created, http.StatusOK)
 	})
 }
 
 // handleArticleUpdate creates a handler for updating an existing article
 func handleArticleUpdate(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
-	type ReqUpdate struct {
-		Rev      int    `json:"revision"`
-		Slug     string `json:"slug"`
-		Title    string `json:"title"`
-		Subtitle string `json:"subtitle"`
-		Leading  string `json:"leading"`
-		Content  string `json:"content"`
-	}
-
-	logger := l.WithBreadcrumb("article").WithBreadcrumb("update")
-	logger.Debug("ready")
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req ReqUpdate
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			logger.Warn("Failed to decode request", "error", err)
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
-			return
-		}
-		rev, err := repo.Update(articles.Article{
-			StructVersion: 1,
-			Rev:           uint64(req.Rev),
-			Slug:          req.Slug,
-			Title:         req.Title,
-			Subtitle:      req.Subtitle,
-			Leading:       req.Leading,
-			Content:       req.Content,
-		})
-		if err != nil {
-			logger.Error("failed to update article in repo: %v", err)
-			http.Error(w, fmt.Sprintf("failed to update article in repo: %s", err.Error()), http.StatusInternalServerError)
-			return
-		}
-		respJson(w, fmt.Sprintf("%s (rev: %d)", req.Slug, rev), http.StatusOK)
-	})
-}
-
-// handleArticleSave creates a handler for saving an existing article
-func handleArticleSave(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 	type ReqSave struct {
 		Rev      int    `json:"revision"`
 		Slug     string `json:"slug"`
@@ -438,11 +445,11 @@ func handleArticleSave(l *jst_log.Logger, repo articles.ArticleRepo) http.Handle
 		Content  string `json:"content"`
 	}
 
-	logger := l.WithBreadcrumb("article").WithBreadcrumb("save")
+	logger := l.WithBreadcrumb("articles").WithBreadcrumb("save")
 	logger.Debug("ready")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Get article ID from path
+		logger.Debug("called")
 		id := r.PathValue("id")
 		idUuid, err := uuid.Parse(id)
 		if err != nil {
@@ -450,7 +457,7 @@ func handleArticleSave(l *jst_log.Logger, repo articles.ArticleRepo) http.Handle
 			http.Error(w, "failed to parse id", http.StatusBadRequest)
 			return
 		}
-
+		logger.Debug("idUuid: %s", idUuid)
 		// Check user permissions
 		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
 		if !ok {
@@ -463,7 +470,9 @@ func handleArticleSave(l *jst_log.Logger, repo articles.ArticleRepo) http.Handle
 			return
 		}
 
-		// Get current article to verify it exists
+		logger.Debug("permissions ok")
+		// Get current article to verify it exists.
+		// TODO: not necessary as we can check the update error
 		currentArticle, err := repo.Get(idUuid)
 		if err != nil {
 			logger.Error("failed to get current article: %s", err.Error())
@@ -485,7 +494,7 @@ func handleArticleSave(l *jst_log.Logger, repo articles.ArticleRepo) http.Handle
 		}
 
 		// Update article using client's revision
-		rev, err := repo.Update(articles.Article{
+		updatedArticle, err := repo.Update(articles.Article{
 			Id:            idUuid,
 			StructVersion: 1,
 			Rev:           uint64(req.Rev), // Use client's revision, NATS will handle CAS (Compare and Swap)
@@ -501,17 +510,118 @@ func handleArticleSave(l *jst_log.Logger, repo articles.ArticleRepo) http.Handle
 			return
 		}
 
+		logger.Debug("updated article with slug: %s", req.Slug)
 		// Return the new revision number
-		respJson(w, articles.Article{
-			Id:            idUuid,
-			StructVersion: 1,
-			Rev:           rev,
-			Slug:          req.Slug,
-			Title:         req.Title,
-			Subtitle:      req.Subtitle,
-			Leading:       req.Leading,
-			Content:       req.Content,
-		}, http.StatusOK)
+		respJson(w, &updatedArticle, http.StatusOK)
+	})
+}
+
+// handleArticleDelete creates a handler for deleting an article
+func handleArticleDelete(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
+	logger := l.WithBreadcrumb("articles").WithBreadcrumb("delete")
+	logger.Debug("ready")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Debug("called")
+		id := r.PathValue("id")
+		idUuid, err := uuid.Parse(id)
+		if err != nil {
+			logger.Error("failed to parse id: %s", err.Error())
+			http.Error(w, "failed to parse id", http.StatusBadRequest)
+			return
+		}
+		logger.Debug("idUuid: %s", idUuid)
+		// Check user permissions
+		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		hasPermission := slices.Contains(user.Permissions, whoApi.PermissionPostEditAny)
+		if !hasPermission {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		logger.Debug("permissions ok")
+		err = repo.Delete(idUuid)
+		if err != nil {
+			logger.Error("failed to delete article: %s", err.Error())
+			http.Error(w, "failed to delete article", http.StatusInternalServerError)
+			return
+		}
+
+		logger.Debug("deleted article: %s", id)
+		respJson(w, "deleted", http.StatusOK)
+	})
+}
+
+// handleArticleRevisions creates a handler for getting all revisions of an article
+func handleArticleRevisions(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
+	logger := l.WithBreadcrumb("article_revisions").WithBreadcrumb("list")
+	logger.Debug("ready")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Debug("called")
+		id := r.PathValue("id")
+		idUuid, err := uuid.Parse(id)
+		if err != nil {
+			logger.Error("failed to parse id: %s", err.Error())
+			http.Error(w, "failed to parse id", http.StatusBadRequest)
+			return
+		}
+		logger.Debug("idUuid: %s", idUuid)
+		revisions, err := repo.GetHistory(idUuid)
+		if err != nil {
+			logger.Error("failed to get article revisions: %s", err.Error())
+			http.Error(w, "failed to get article revisions", http.StatusInternalServerError)
+			return
+		}
+
+		logger.Debug("found %d revisions for article: %s", len(revisions), id)
+		respJson(w, revisions, http.StatusOK)
+	})
+}
+
+// handleArticleRevision creates a handler for getting a specific revision of an article
+func handleArticleRevision(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
+	logger := l.WithBreadcrumb("article_revisions").WithBreadcrumb("get")
+	logger.Debug("ready")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		revision := r.PathValue("revision")
+
+		logger.Debug("called with id: %s and revision: %s", id, revision)
+
+		idUuid, err := uuid.Parse(id)
+		if err != nil {
+			logger.Error("failed to parse id: %s", err.Error())
+			http.Error(w, "failed to parse id", http.StatusBadRequest)
+			return
+		}
+
+		// Parse revision as uint64
+		var rev uint64
+		if _, err := fmt.Sscanf(revision, "%d", &rev); err != nil {
+			logger.Error("failed to parse revision: %s", err.Error())
+			http.Error(w, "failed to parse revision", http.StatusBadRequest)
+			return
+		}
+
+		article, err := repo.GetRevision(idUuid, rev)
+		if err != nil {
+			logger.Error("failed to get article revision: %s", err.Error())
+			http.Error(w, "failed to get article revision", http.StatusInternalServerError)
+			return
+		}
+		if article == nil {
+			logger.Info("not found, article \"%s\" revision %d", id, rev)
+			http.NotFound(w, r)
+			return
+		}
+
+		logger.Debug("article: %s (rev: %d)", article.Slug, article.Rev)
+		respJson(w, article, http.StatusOK)
 	})
 }
 

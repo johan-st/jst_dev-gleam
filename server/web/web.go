@@ -54,7 +54,7 @@ func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger
 	var handler http.Handler = s.mux
 	handler = logger(l.WithBreadcrumb("log"), handler)
 	handler = authJwt(jwtSecret, handler)
-	handler = cors(handler)
+	handler = cors(l.WithBreadcrumb("cors"), handler)
 	s.handler = handler // Store the wrapped handler
 
 	return s

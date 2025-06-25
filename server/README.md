@@ -8,7 +8,7 @@ title: Server README
 - [ ] have local logging be disconnected from nats
 - [ ] make a version that works with the nats global supercluster
 - [ ] clean up architecture from superflous code and logic
-- [ ] admin panel 
+- [ ] admin panel
 
 ### `v0`
 
@@ -16,6 +16,8 @@ title: Server README
 - [ ] seed initial admin somehow (from environment?)
 - [ ] clean up and protect api endpoints
 - [ ] check auth and permissions on api endpoints
+- [ ] fail creation if slug is not unique (alt. create with id as slug)
+- [ ] after delete, we can still access the article history (revisions). Should we show deleted articles to logged in users?
 
 ### `v0.1`
 
@@ -23,8 +25,14 @@ title: Server README
   - [ ] testdata should be populated from a series of json files in the testdata directory that are to be used with the nats cli. We could then have a script that requests each service to create the data we want for local development.
 - [ ] add "new" article button
 - [ ] support publish/unpublish
+- [ ] add a "delete" button
+- [ ] add a "history" button
 
 ### `later`
+
+- [ ] do not store rev in kv value. It can cause confusion as we should rely on the nats kv revision number.
+- [ ] do not store id in kv value. It can cause confusion as we should rely on the nats kv key.
+- [ ] revisions increese globally. We should have one per article as well and use the global one to ensure we are not overwritting changes.
 
 ## Bechmarking
 

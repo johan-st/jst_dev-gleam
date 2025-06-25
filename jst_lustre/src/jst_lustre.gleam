@@ -505,11 +505,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           #(
             Model(..model, articles: updated_articles),
             effect.batch([
-              article.article_save(
-                ArticleDraftSaveResponse(article.id, _),
-                article.id,
-                current_draft,
-                article.revision + 1,
+              article.article_update(
+                ArticleDraftSaveResponse(updated_article.id, _),
+                updated_article,
                 model.base_uri,
               ),
               modem.push(
@@ -1069,10 +1067,7 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
                   #("lg:block", True),
                   #("lg:col-span-1", True),
                   #("col-span-2", model.edit_view_mode == EditViewModeEdit),
-                  #(
-                    "hidden",
-                    model.edit_view_mode == EditViewModePreview,
-                  ),
+                  #("hidden", model.edit_view_mode == EditViewModePreview),
                 ]),
               ],
               view_edit_actions(draft, article),
@@ -1085,10 +1080,7 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
                   #("lg:block", True),
                   #("lg:col-span-1", True),
                   #("col-span-2", model.edit_view_mode == EditViewModePreview),
-                  #(
-                    "hidden",
-                    model.edit_view_mode == EditViewModeEdit,
-                  ),
+                  #("hidden", model.edit_view_mode == EditViewModeEdit),
                 ]),
               ],
               preview,

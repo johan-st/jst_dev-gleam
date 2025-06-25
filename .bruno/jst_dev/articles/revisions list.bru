@@ -1,0 +1,26 @@
+meta {
+  name: revisions list
+  type: http
+  seq: 8
+}
+
+get {
+  url: http://localhost:8080//api/articles/:id/revisions
+  body: none
+  auth: none
+}
+
+params:path {
+  id: 2ba7a62f-b715-4b85-8fed-126022948e3d
+}
+
+body:json {
+  {
+    "revision": 11,
+    "slug": "slug_goes_here",
+    "title": "Bruno test 1",
+    "subtitle": "..or, smth.",
+    "leading": "bruno test one",
+    "content": "bob?"
+  }
+}

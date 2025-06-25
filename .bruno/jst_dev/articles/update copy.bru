@@ -1,0 +1,28 @@
+meta {
+  name: update copy
+  type: http
+  seq: 10
+}
+
+put {
+  url: http://localhost:8080/api/articles/:id
+  body: json
+  auth: none
+}
+
+params:path {
+  id: f6d258b2-068f-487f-9233-d461c9dc3974
+}
+
+body:json {
+  {
+    "struct_version": 1,
+    "id": "f6d258b2-068f-487f-9233-d461c9dc3974",
+    "revision": 30,
+    "slug": "REV. 30",
+    "title": "Bruno test 1",
+    "subtitle": "..or, smth.",
+    "leading": "bruno test one",
+    "content": "bob?"
+  }
+}

@@ -22,9 +22,13 @@ type ArticleRepo interface {
 	Get(id uuid.UUID) (*Article, error)
 	GetBySLug(slug string) (*Article, error)
 	AllNoContent() ([]ArticleMetadata, error)
-	Create(art Article) (uint64, error)
-	Update(art Article) (uint64, error)
+	Create(art Article) (*Article, error)
+	Update(art Article) (*Article, error)
+	Delete(id uuid.UUID) error
+	GetHistory(id uuid.UUID) ([]Article, error)
+	GetRevision(id uuid.UUID, revision uint64) (*Article, error)
 	Context() context.Context
+	Purge() error
 }
 
 type ArticleRepoWithWatchAll interface {
@@ -93,6 +97,7 @@ func (r *articleRepo) Get(id uuid.UUID) (*Article, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal article: %w", err)
 	}
+	art.Rev = entry.Revision()
 	return art, nil
 }
 
@@ -118,6 +123,7 @@ func (r *articleRepo) GetBySLug(slug string) (*Article, error) {
 			return nil, fmt.Errorf("unmarshal article: %w", err)
 		}
 		if art.Slug == slug {
+			art.Rev = entry.Revision()
 			return art, nil
 		}
 	}
@@ -151,7 +157,7 @@ func (r *articleRepo) AllNoContent() ([]ArticleMetadata, error) {
 		arts = append(arts, ArticleMetadata{
 			StructVersion: art.StructVersion,
 			Id:            art.Id,
-			Rev:           art.Rev,
+			Rev:           entry.Revision(),
 			Slug:          art.Slug,
 			Title:         art.Title,
 			Subtitle:      art.Subtitle,
@@ -161,7 +167,7 @@ func (r *articleRepo) AllNoContent() ([]ArticleMetadata, error) {
 	return arts, nil
 }
 
-func (r *articleRepo) Create(art Article) (uint64, error) {
+func (r *articleRepo) Create(art Article) (*Article, error) {
 	var (
 		err  error
 		data []byte
@@ -172,32 +178,85 @@ func (r *articleRepo) Create(art Article) (uint64, error) {
 	art.Id = uuid.New()
 	data, err = json.Marshal(art)
 	if err != nil {
-		return 0, fmt.Errorf("marshal article: %w", err)
+		return nil, fmt.Errorf("marshal article: %w", err)
 	}
 	rev, err = r.kv.Create(r.ctx, art.Id.String(), data)
 	if err != nil {
-		return 0, fmt.Errorf("create article: %w", err)
+		return nil, fmt.Errorf("create article: %w", err)
 	}
-	return rev, nil
+	art.Rev = rev
+	return &art, nil
 }
 
-func (r *articleRepo) Update(art Article) (uint64, error) {
+func (r *articleRepo) Update(art Article) (*Article, error) {
 	var (
 		err  error
 		data []byte
 		rev  uint64
 	)
+	art.Rev++
 	data, err = json.Marshal(art)
 	if err != nil {
-		return 0, fmt.Errorf("marshal article: %w", err)
+		return nil, fmt.Errorf("marshal article: %w", err)
 	}
+
 	rev, err = r.kv.Update(r.ctx, art.Id.String(), data, uint64(art.Rev))
 	if err != nil {
-		return 0, fmt.Errorf("update article: %w", err)
+		return nil, fmt.Errorf("update article: %w", err)
 	}
-	// NATS returns the next revision, so we need to subtract 1 to get the current revision. Confusing..
-	// TODO: Reproduce and report this as a bug to NATS.
-	return rev - 1, nil
+	art.Rev = rev
+	return &art, nil
+}
+
+func (r *articleRepo) Delete(id uuid.UUID) error {
+	err := r.kv.Delete(r.ctx, id.String())
+	if err != nil {
+		return fmt.Errorf("delete article: %w", err)
+	}
+	return nil
+}
+
+func (r *articleRepo) GetHistory(id uuid.UUID) ([]Article, error) {
+	var revisions []Article
+
+	history, err := r.kv.History(r.ctx, id.String())
+	if err != nil {
+		return nil, fmt.Errorf("get article history: %w", err)
+	}
+
+	for _, entry := range history {
+		if entry.Operation() == jetstream.KeyValuePut {
+			var art Article
+			err = json.Unmarshal(entry.Value(), &art)
+			if err != nil {
+				return nil, fmt.Errorf("unmarshal article: %w", err)
+			}
+			art.Rev = entry.Revision()
+			revisions = append(revisions, art)
+		}
+	}
+
+	// Reverse to show newest first
+	for i, j := 0, len(revisions)-1; i < j; i, j = i+1, j-1 {
+		revisions[i], revisions[j] = revisions[j], revisions[i]
+	}
+
+	return revisions, nil
+}
+
+func (r *articleRepo) GetRevision(id uuid.UUID, revision uint64) (*Article, error) {
+	entry, err := r.kv.GetRevision(r.ctx, id.String(), revision)
+	if err != nil {
+		return nil, fmt.Errorf("get article revision: %w", err)
+	}
+
+	var art Article
+	err = json.Unmarshal(entry.Value(), &art)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshal article: %w", err)
+	}
+
+	return &art, nil
 }
 
 func (r *articleRepo) Context() context.Context {
@@ -206,6 +265,20 @@ func (r *articleRepo) Context() context.Context {
 
 func (r *articleRepo) WatchAll() (jetstream.KeyWatcher, error) {
 	return r.kv.WatchAll(r.ctx)
+}
+
+func (r *articleRepo) Purge() error {
+	keys, err := r.kv.ListKeys(r.ctx)
+	if err != nil {
+		return fmt.Errorf("purge article: %w", err)
+	}
+	for key := range keys.Keys() {
+		err = r.kv.Purge(r.ctx, key)
+		if err != nil {
+			return fmt.Errorf("purge article: %w", err)
+		}
+	}
+	return nil
 }
 
 // --- REPO WITH IN MEM CACHE ---

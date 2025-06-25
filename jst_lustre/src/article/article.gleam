@@ -1,4 +1,3 @@
-
 import article/draft.{type Draft}
 import gleam/dynamic/decode
 import gleam/http as gleam_http
@@ -96,7 +95,7 @@ pub fn article_get(msg, id: String, base_uri: Uri) -> Effect(a) {
     |> request.set_method(gleam_http.Get)
     |> request.set_scheme(scheme)
     |> request.set_host(host)
-    |> request.set_path("/api/article/" <> id <> "/")
+    |> request.set_path("/api/articles/" <> id)
     |> request.set_port(port)
   http.send(request, http.expect_json(article_decoder(), msg))
 }
@@ -120,7 +119,7 @@ pub fn article_metadata_get(msg, base_uri: Uri) -> Effect(a) {
     |> request.set_method(gleam_http.Get)
     |> request.set_scheme(scheme)
     |> request.set_host(host)
-    |> request.set_path("/api/article/")
+    |> request.set_path("/api/articles")
     |> request.set_port(port)
   http.send(request, http.expect_json(metadata_decoder(), msg))
 }
@@ -144,7 +143,7 @@ pub fn article_update(msg, article: Article, base_uri: Uri) -> Effect(a) {
     |> request.set_method(gleam_http.Put)
     |> request.set_scheme(scheme)
     |> request.set_host(host)
-    |> request.set_path("/api/article/" <> article.id <> "/")
+    |> request.set_path("/api/articles/" <> article.id)
     |> request.set_port(port)
     |> request.set_body(article_encoder(article) |> json.to_string)
   http.send(request, http.expect_json(article_decoder(), msg))
@@ -169,32 +168,35 @@ pub fn article_create(msg, article: Article, base_uri: Uri) -> Effect(a) {
     |> request.set_method(gleam_http.Post)
     |> request.set_scheme(scheme)
     |> request.set_host(host)
-    |> request.set_path("/api/article/")
+    |> request.set_path("/api/articles")
     |> request.set_port(port)
     |> request.set_body(article_encoder(article) |> json.to_string)
   http.send(request, http.expect_json(article_decoder(), msg))
 }
 
-pub fn article_save(
-  msg: fn(Result(Article, HttpError)) -> msg,
-  id: String,
-  draft: Draft,
-  revision: Int,
-  base_uri: Uri,
-) -> Effect(msg) {
-  let assert Ok(url) = uri.parse("/api/article/" <> id <> "/save/")
-  let assert Ok(url) = uri.merge(base_uri, url)
-  let body =
-    json.object([
-      #("revision", json.int(revision)),
-      #("slug", json.string(draft.slug(draft))),
-      #("title", json.string(draft.title(draft))),
-      #("subtitle", json.string(draft.subtitle(draft))),
-      #("leading", json.string(draft.leading(draft))),
-      #("content", json.string(draft.content(draft))),
-    ])
-
-  http.post(uri.to_string(url), body, http.expect_json(article_decoder(), msg))
+pub fn article_update_(msg, article: Article, base_uri: Uri) -> Effect(a) {
+  let scheme = case base_uri.scheme {
+    Some("http") -> gleam_http.Http
+    Some("https") -> gleam_http.Https
+    _ -> gleam_http.Http
+  }
+  let host = case base_uri.host {
+    Some(h) -> h
+    None -> "localhost"
+  }
+  let port = case base_uri.port {
+    Some(p) -> p
+    None -> 8080
+  }
+  let request =
+    request.new()
+    |> request.set_method(gleam_http.Put)
+    |> request.set_scheme(scheme)
+    |> request.set_host(host)
+    |> request.set_path("/api/articles/" <> article.id)
+    |> request.set_port(port)
+    |> request.set_body(article_encoder(article) |> json.to_string)
+  http.send(request, http.expect_json(article_decoder(), msg))
 }
 
 // DECODE ----------------------------------------------------------------------
