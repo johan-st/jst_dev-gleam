@@ -1,8 +1,8 @@
 // IMPORTS ---------------------------------------------------------------------
 
 import article/article.{type Article, ArticleV1}
-import article/content.{type Content}
 import article/draft
+import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
@@ -98,12 +98,8 @@ type Msg {
   ArticleDraftUpdatedSlug(article: Article, text: String)
   ArticleDraftUpdatedTitle(article: Article, text: String)
   ArticleDraftUpdatedLeading(article: Article, text: String)
-  ArticleDraftAddContent(article: Article, content: Content)
   ArticleDraftUpdatedSubtitle(article: Article, text: String)
-  ArticleDraftContentMoveUp(content_item: Content, index: Int)
-  ArticleDraftContentMoveDown(content_item: Content, index: Int)
-  ArticleDraftContentRemove(content_item: Content, index: Int)
-  ArticleDraftContentUpdate(content_item: Content, index: Int, content: Content)
+  ArticleDraftUpdatedContent(article: Article, content: String)
   // ARTICLE DRAFT SAVE & CREATE & DISCARD
   ArticleDraftSaveClicked(article: Article)
   ArticleDraftSaveResponse(id: String, result: Result(Article, HttpError))
@@ -415,7 +411,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         _ -> #(model, effect.none())
       }
     }
-    ArticleDraftAddContent(article, content) -> {
+    ArticleDraftUpdatedContent(article, content) -> {
       case article {
         ArticleV1(
           _id,
@@ -429,10 +425,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         ) -> {
           let updated_article =
             article.draft_update(article, fn(draft) {
-              draft.set_content(
-                draft,
-                list.append(draft.content(draft), [content]),
-              )
+              draft.set_content(draft, content)
             })
           #(
             Model(
@@ -453,23 +446,6 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         _ -> #(model, effect.none())
       }
     }
-    ArticleDraftContentMoveUp(_content_item, _index) -> {
-      todo as "move up"
-      #(model, effect.none())
-    }
-    ArticleDraftContentMoveDown(_content_item, _index) -> {
-      todo as "move down"
-      #(model, effect.none())
-    }
-    ArticleDraftContentRemove(_content_item, _index) -> {
-      todo as "remove"
-      #(model, effect.none())
-    }
-    ArticleDraftContentUpdate(_content_item, _index, _text) -> {
-      todo as "update"
-      #(model, effect.none())
-    }
-
     // ARTICLE DRAFT DISCARD
     ArticleDraftDiscardClicked(article) -> {
       echo "article draft discard clicked"
@@ -961,19 +937,15 @@ fn view_index() -> List(Element(Msg)) {
       ),
       view_link(nats_uri, "NATS all the way down ->"),
     ]),
-    view_paragraph([
-      content.Text(
+    view_simple_paragraph(
         "It to is a work in progress and I mostly keep it here for my own reference.",
-      ),
-    ]),
-    view_paragraph([
-      content.Text(
+    ),
+    view_simple_paragraph(
         "I'm also a software developer and a writer. I'm also a father and a 
         husband. I'm also a software developer and a writer. I'm also a father 
         and a husband. I'm also a software developer and a writer. I'm also a 
         father and a husband. I'm also a software developer and a writer.",
-      ),
-    ]),
+    ),
   ]
 }
 
@@ -1014,9 +986,7 @@ fn view_article_listing(
                   },
                 ]),
                 view_subtitle(subtitle, slug),
-                html.p([
-                  attr.class("mt-3 line-clamp-3 text-zinc-400"),
-                ], [html.text(leading)]),
+                view_simple_paragraph(leading),
               ],
             ),
           ])
@@ -1033,6 +1003,20 @@ fn view_article_edit(_model: Model, article: Article) -> List(Element(Msg)) {
     Some(draft) -> {
       [
         html.article([attr.class("with-transition")], [
+          // Revision information
+          html.div([attr.class("mb-6 p-3 bg-zinc-800 rounded-lg border border-zinc-700")], [
+            html.div([attr.class("flex items-center justify-between")], [
+              html.div([], [
+                html.span([attr.class("text-sm text-zinc-400")], [html.text("Current Revision: ")]),
+                html.span([attr.class("text-lg font-mono text-pink-600")], [
+                  html.text("v" <> int.to_string(article.revision))
+                ]),
+              ]),
+              html.div([attr.class("text-xs text-zinc-500")], [
+                html.text("This version will be saved as v" <> int.to_string(article.revision + 1))
+              ]),
+            ]),
+          ]),
           view_article_edit_input(
             "Slug",
             ArticleEditInputTypeSlug,
@@ -1061,59 +1045,23 @@ fn view_article_edit(_model: Model, article: Article) -> List(Element(Msg)) {
             ArticleDraftUpdatedLeading(article, _),
             article.slug,
           ),
-          // Content editor with support for different content types
+          // Djot content editor
           html.div([attr.class("mb-4")], [
             html.label(
               [attr.class("block text-sm font-medium text-zinc-400 mb-1")],
-              [html.text("Content")],
+              [html.text("Content (Djot)")],
             ),
-            // Content blocks container
-            html.div(
-              [attr.class("space-y-4 mb-4")],
-              list.index_map(draft.content(draft), fn(content_item, index) {
-                view_content_editor_block(content_item, index)
-              }),
+            html.textarea(
+              [
+                attr.class(
+                  "w-full h-96 bg-zinc-800 border border-zinc-700 rounded-md p-4 font-mono text-sm resize-none",
+                ),
+                attr.placeholder("Write your article content in Djot format...\n\n## Example Heading\n\nThis is a paragraph with *emphasis* and **strong** text.\n\n- List item 1\n- List item 2\n\n[Link text](url)"),
+                attr.value(draft.content(draft)),
+                event.on_input(ArticleDraftUpdatedContent(article, _)),
+              ],
+              draft.content(draft),
             ),
-            // Add content buttons
-            html.div([attr.class("flex flex-wrap gap-2 mt-4")], [
-              view_add_content_button(
-                "Text",
-                ArticleDraftAddContent(article, content.Text("")),
-              ),
-              view_add_content_button(
-                "Heading",
-                ArticleDraftAddContent(article, content.Heading("")),
-              ),
-              view_add_content_button(
-                "List",
-                ArticleDraftAddContent(article, content.List([])),
-              ),
-              view_add_content_button(
-                "Block",
-                ArticleDraftAddContent(article, content.Block([])),
-              ),
-              view_add_content_button(
-                "Link",
-                ArticleDraftAddContent(
-                  article,
-                  content.Link(index_uri, "link_title"),
-                ),
-              ),
-              view_add_content_button(
-                "External Link",
-                ArticleDraftAddContent(
-                  article,
-                  content.LinkExternal(index_uri, "link_title"),
-                ),
-              ),
-              view_add_content_button(
-                "Image",
-                ArticleDraftAddContent(
-                  article,
-                  content.Image(index_uri, "image_title"),
-                ),
-              ),
-            ]),
           ]),
           html.div([attr.class("flex justify-end gap-4 mt-6")], [
             html.button(
@@ -1154,9 +1102,7 @@ fn view_article_edit_not_found(
 ) -> List(Element(Msg)) {
   [
     view_title("Article not found", id),
-    view_paragraph([
-      content.Text("The article you are looking for does not exist."),
-    ]),
+    view_simple_paragraph("The article you are looking for does not exist."),
   ]
 }
 
@@ -1212,7 +1158,7 @@ fn view_article(article: Article, can_edit: Bool) -> List(Element(Msg)) {
   let content: List(Element(Msg)) = case article.content {
     NotInitialized -> [view_error("content not initialized")]
     Pending -> [view_error("loading")]
-    Loaded(content) -> view_article_content(content)
+    Loaded(content_string) -> jot_to_lustre.to_lustre(content_string)
     Errored(error) -> [view_error(error_string.http_error(error))]
   }
   [
@@ -1235,21 +1181,19 @@ fn view_article_not_found(
   case available_articles {
     Loaded(_articles) -> [
       view_title("Article not found", slug),
-      view_paragraph([
-        content.Text("The article you are looking for does not exist."),
-      ]),
+      view_simple_paragraph("The article you are looking for does not exist."),
     ]
     Errored(error) -> [
       view_title("There was an error loading the article", slug),
-      view_paragraph([content.Text(error_string.http_error(error))]),
+      view_simple_paragraph(error_string.http_error(error)),
     ]
     Pending -> [
       view_title("Loading article", slug),
-      view_paragraph([content.Text("Loading article...")]),
+      view_simple_paragraph("Loading article..."),
     ]
     NotInitialized -> [
       view_title("Loading article", slug),
-      view_paragraph([content.Text("Loading article...")]),
+      view_simple_paragraph("Loading article..."),
     ]
   }
 }
@@ -1257,21 +1201,17 @@ fn view_article_not_found(
 fn view_about() -> List(Element(Msg)) {
   [
     view_title("About", "about"),
-    view_paragraph([
-      content.Text(
-        "I'm a software developer and a writer. I'm also a father and a husband. 
+    view_simple_paragraph(
+      "I'm a software developer and a writer. I'm also a father and a husband. 
       I'm also a software developer and a writer. I'm also a father and a 
       husband. I'm also a software developer and a writer. I'm also a father 
       and a husband. I'm also a software developer and a writer. I'm also a 
       father and a husband.",
-      ),
-    ]),
-    view_paragraph([
-      content.Text(
-        "If you enjoy these glimpses into my mind, feel free to come back
+    ),
+    view_simple_paragraph(
+      "If you enjoy these glimpses into my mind, feel free to come back
        semi-regularly. But not too regularly, you creep.",
-      ),
-    ]),
+    ),
   ]
 }
 
@@ -1279,11 +1219,9 @@ fn view_not_found(requested_uri: Uri) -> List(Element(Msg)) {
   [
     view_title("404 - Page Not Found", "not-found"),
     view_subtitle("The page you're looking for doesn't exist.", "not-found"),
-    view_paragraph([
-      content.Text(
-        "The page at " <> uri.to_string(requested_uri) <> " could not be found.",
-      ),
-    ]),
+    view_simple_paragraph(
+      "The page at " <> uri.to_string(requested_uri) <> " could not be found.",
+    ),
   ]
 }
 
@@ -1361,8 +1299,8 @@ fn view_h2(title: String) -> Element(msg) {
 //   )
 // }
 
-fn view_paragraph(contents: List(Content)) -> Element(Msg) {
-  html.p([attr.class("pt-8")], view_article_content(contents))
+fn view_simple_paragraph(text: String) -> Element(Msg) {
+  html.p([attr.class("pt-8")], [html.text(text)])
 }
 
 fn view_error(error_string: String) -> Element(Msg) {
@@ -1405,52 +1343,7 @@ fn view_link_missing(url: Uri, title: String) -> Element(Msg) {
   )
 }
 
-fn view_block(contents: List(Content)) -> Element(Msg) {
-  html.div([attr.class("pt-8")], view_article_content(contents))
-}
-
-fn view_list(items: List(Content)) -> Element(Msg) {
-  html.ul(
-    [attr.class("pt-8 list-disc list-inside")],
-    items
-      |> list.map(fn(item) {
-        html.li([attr.class("pt-1")], view_article_content([item]))
-      }),
-  )
-}
-
-fn view_unknown(content_type: String) -> Element(Msg) {
-  html.span([attr.class("text-orange-500")], [
-    html.text("<unknown: " <> content_type <> ">"),
-  ])
-}
-
-// VIEW ARTICLE CONTENT --------------------------------------------------------
-
-fn view_article_content(contents: List(Content)) -> List(Element(Msg)) {
-  let view_content = fn(content: Content) -> Element(Msg) {
-    case content {
-      content.Text(text) -> html.text(text)
-      content.Block(contents) -> view_block(contents)
-      content.Heading(text) -> view_h2(text)
-      content.Paragraph(contents) -> view_paragraph(contents)
-      content.Link(url, title) -> view_link(url, title)
-      content.LinkExternal(url, title) -> view_link_external(url, title)
-      content.Image(uri, alt) -> view_image(uri, alt)
-      content.List(items) -> view_list(items)
-      content.Unknown(type_) -> view_unknown(type_)
-    }
-  }
-  list.map(contents, view_content)
-}
-
-fn view_image(uri: Uri, alt: String) -> Element(Msg) {
-  html.img([
-    attr.src(uri.to_string(uri)),
-    attr.alt(alt),
-    attr.class("max-w-full h-auto rounded-lg shadow-lg mt-8"),
-  ])
-}
+// Content rendering functions removed - now using Djot parsing
 
 // Helper function to create add content buttons
 fn view_add_content_button(label: String, click_message: Msg) -> Element(Msg) {
@@ -1468,341 +1361,12 @@ fn view_add_content_button(label: String, click_message: Msg) -> Element(Msg) {
   )
 }
 
-// Helper function to render content editor blocks based on content type
-fn view_content_editor_block(content_item: Content, index: Int) -> Element(Msg) {
-  html.div([
-    attr.class("border border-zinc-700 rounded-md p-4 bg-zinc-800/80"),
-    attr.class("transition-all duration-200 hover:border-zinc-600 hover:shadow-lg"),
-    attr.id("content-block-" <> int.to_string(index)),
-  ], [
-    // Content type label and controls
-    html.div([attr.class("flex justify-between items-center mb-3")], [
-      html.div([attr.class("flex items-center gap-2")], [
-        html.span([
-          attr.class("text-xs font-medium px-2 py-1 rounded-full bg-zinc-700 text-zinc-300"),
-        ], [
-          html.text(content_type_label(content_item)),
-        ]),
-        html.span([attr.class("text-xs text-zinc-500")], [
-          html.text("Block #" <> int.to_string(index + 1)),
-        ]),
-      ]),
-      html.div([attr.class("flex gap-1")], [
-        // Move up button
-        html.button(
-          [
-            attr.class(
-              "text-xs px-2 py-1 bg-zinc-700 rounded hover:bg-zinc-600 transition-colors",
-            ),
-            event.on_mouse_down(ArticleDraftContentMoveUp(content_item, index)),
-            attr.disabled(index == 0),
-          ],
-          [html.text("↑")],
-        ),
-        // Move down button
-        html.button(
-          [
-            attr.class(
-              "text-xs px-2 py-1 bg-zinc-700 rounded hover:bg-zinc-600 transition-colors",
-            ),
-            event.on_mouse_down(ArticleDraftContentMoveDown(content_item, index)),
-          ],
-          [html.text("↓")],
-        ),
-        // Delete button
-        html.button(
-          [
-            attr.class("text-xs px-2 py-1 bg-red-900 rounded hover:bg-red-800"),
-            event.on_mouse_down(ArticleDraftContentRemove(content_item, index)),
-          ],
-          [html.text("×")],
-        ),
-      ]),
-    ]),
-    // Content editor based on type
-    case content_item {
-      content.Text(text) ->
-        html.div([attr.class("relative")], [
-          html.textarea(
-            [
-              attr.class(
-                "w-full bg-zinc-900 border border-zinc-700 rounded-md p-3",
-              ),
-              attr.class("focus:border-teal-600 focus:ring-1 focus:ring-teal-600 focus:outline-none transition-colors"),
-              attr.class("text-zinc-300 leading-relaxed"),
-              attr.rows(4),
-              attr.value(text),
-              attr.placeholder("Enter your text here..."),
-              event.on_input(fn(new_text) {
-                ArticleDraftContentUpdate(
-                  content_item,
-                  index,
-                  content.Text(new_text),
-                )
-              }),
-            ],
-            text,
-          ),
-          html.div([
-            attr.class("absolute bottom-2 right-2 text-xs text-zinc-500"),
-          ], [
-            html.text(int.to_string(string.length(text)) <> " characters"),
-          ]),
-        ])
-
-      content.Heading(text) ->
-        html.div([attr.class("relative")], [
-          html.input([
-            attr.class(
-              "w-full bg-zinc-900 border border-zinc-700 rounded-md p-3 text-xl text-pink-600",
-            ),
-            attr.class("focus:border-pink-600 focus:ring-1 focus:ring-pink-600 focus:outline-none transition-colors"),
-            attr.value(text),
-            attr.placeholder("Enter heading text..."),
-            event.on_input(fn(new_text) {
-              ArticleDraftContentUpdate(
-                content_item,
-                index,
-                content.Heading(new_text),
-              )
-            }),
-          ]),
-        ])
-
-      content.Link(url, title) ->
-        html.div([attr.class("space-y-3")], [
-          html.div([attr.class("relative")], [
-            html.label(
-              [attr.class("block text-xs font-medium text-zinc-500 mb-1")],
-              [html.text("Link Text")],
-            ),
-            html.input([
-              attr.class(
-                "w-full bg-zinc-900 border border-zinc-700 rounded-md p-3",
-              ),
-              attr.class("focus:border-teal-600 focus:ring-1 focus:ring-teal-600 focus:outline-none transition-colors"),
-              attr.placeholder("Link display text"),
-              attr.value(title),
-              event.on_input(fn(new_title) {
-                ArticleDraftContentUpdate(
-                  content_item,
-                  index,
-                  content.Link(url, new_title),
-                )
-              }),
-            ]),
-          ]),
-          html.div([attr.class("relative")], [
-            html.label(
-              [attr.class("block text-xs font-medium text-zinc-500 mb-1")],
-              [html.text("Internal URL Path")],
-            ),
-            html.div([attr.class("flex")], [
-              html.input([
-                attr.class(
-                  "w-full bg-zinc-900 border border-zinc-700 rounded-l-md p-3 text-teal-500",
-                ),
-                attr.class("focus:border-teal-600 focus:ring-1 focus:ring-teal-600 focus:outline-none transition-colors"),
-                attr.placeholder("URL path (e.g., /articles)"),
-                attr.value(uri.to_string(url)),
-                event.on_input(fn(new_url) {
-                  case uri.parse(new_url) {
-                    Ok(parsed_url) ->
-                      ArticleDraftContentUpdate(
-                        content_item,
-                        index,
-                        content.Link(parsed_url, title),
-                      )
-                    Error(_) ->
-                      ArticleDraftContentUpdate(
-                        content_item,
-                        index,
-                        content.Link(url, title),
-                      )
-                  }
-                }),
-              ]),
-              html.button([
-                attr.class("bg-teal-900/50 text-teal-400 px-3 rounded-r-md border-y border-r border-zinc-700"),
-                attr.class("hover:bg-teal-900 transition-colors"),
-                attr.title("Test Link"),
-              ], [
-                html.text("Test")
-              ]),
-            ]),
-          ]),
-        ])
-
-      content.LinkExternal(url, title) ->
-        html.div([attr.class("space-y-3")], [
-          html.div([attr.class("relative")], [
-            html.label(
-              [attr.class("block text-xs font-medium text-zinc-500 mb-1")],
-              [html.text("Link Text")],
-            ),
-            html.input([
-              attr.class(
-                "w-full bg-zinc-900 border border-zinc-700 rounded-md p-3",
-              ),
-              attr.class("focus:border-blue-600 focus:ring-1 focus:ring-blue-600 focus:outline-none transition-colors"),
-              attr.placeholder("Link display text"),
-              attr.value(title),
-              event.on_input(fn(new_title) {
-                ArticleDraftContentUpdate(
-                  content_item,
-                  index,
-                  content.LinkExternal(url, new_title),
-                )
-              }),
-            ]),
-          ]),
-          html.div([attr.class("relative")], [
-            html.label(
-              [attr.class("block text-xs font-medium text-zinc-500 mb-1")],
-              [html.text("External URL")],
-            ),
-            html.div([attr.class("flex")], [
-              html.input([
-                attr.class(
-                  "w-full bg-zinc-900 border border-zinc-700 rounded-l-md p-3 text-blue-500",
-                ),
-                attr.class("focus:border-blue-600 focus:ring-1 focus:ring-blue-600 focus:outline-none transition-colors"),
-                attr.placeholder("Full URL (e.g., https://example.com)"),
-                attr.value(uri.to_string(url)),
-                event.on_input(fn(new_url) {
-                  case uri.parse(new_url) {
-                    Ok(parsed_url) ->
-                      ArticleDraftContentUpdate(
-                        content_item,
-                        index,
-                        content.LinkExternal(parsed_url, title),
-                      )
-                    Error(_) ->
-                      ArticleDraftContentUpdate(
-                        content_item,
-                        index,
-                        content.LinkExternal(url, title),
-                      )
-                  }
-                }),
-              ]),
-              html.button([
-                attr.class("bg-blue-900/50 text-blue-400 px-3 rounded-r-md border-y border-r border-zinc-700"),
-                attr.class("hover:bg-blue-900 transition-colors"),
-                attr.title("Open Link"),
-              ], [
-                html.text("Open")
-              ]),
-            ]),
-          ]),
-        ])
-
-      content.Image(url, alt) ->
-        html.div([attr.class("space-y-3")], [
-          // Preview of the image
-          html.div([
-            attr.class("bg-zinc-900/50 rounded-md p-2 border border-zinc-800 mb-2"),
-          ], [
-            html.div([
-              attr.class("aspect-video bg-zinc-950 rounded flex items-center justify-center overflow-hidden"),
-            ], [
-              case uri.to_string(url) {
-                "" -> 
-                  html.div([attr.class("text-zinc-600 text-center p-4")], [
-                    html.text("Enter an image URL below")
-                  ])
-                _ -> 
-                  html.img([
-                    attr.src(uri.to_string(url)),
-                    attr.alt(alt),
-                    attr.class("max-h-full object-contain"),
-                    attr.attribute("loading", "lazy"),
-                  ])
-              }
-            ]),
-          ]),
-          
-          html.div([attr.class("relative")], [
-            html.label(
-              [attr.class("block text-xs font-medium text-zinc-500 mb-1")],
-              [html.text("Alt Text (for accessibility)")],
-            ),
-            html.input([
-              attr.class(
-                "w-full bg-zinc-900 border border-zinc-700 rounded-md p-3",
-              ),
-              attr.class("focus:border-purple-600 focus:ring-1 focus:ring-purple-600 focus:outline-none transition-colors"),
-              attr.placeholder("Describe the image for screen readers"),
-              attr.value(alt),
-              event.on_input(fn(new_alt) {
-                ArticleDraftContentUpdate(
-                  content_item,
-                  index,
-                  content.Image(url, new_alt),
-                )
-              }),
-            ]),
-          ]),
-          html.div([attr.class("relative")], [
-            html.label(
-              [attr.class("block text-xs font-medium text-zinc-500 mb-1")],
-              [html.text("Image URL")],
-            ),
-            html.input([
-              attr.class(
-                "w-full bg-zinc-900 border border-zinc-700 rounded-md p-3 text-purple-400",
-              ),
-              attr.class("focus:border-purple-600 focus:ring-1 focus:ring-purple-600 focus:outline-none transition-colors"),
-              attr.placeholder("URL to the image"),
-              attr.value(uri.to_string(url)),
-              event.on_input(fn(new_url) {
-                case uri.parse(new_url) {
-                  Ok(parsed_url) ->
-                    ArticleDraftContentUpdate(
-                      content_item,
-                      index,
-                      content.Image(parsed_url, alt),
-                    )
-                  Error(_) ->
-                    ArticleDraftContentUpdate(
-                      content_item,
-                      index,
-                      content.Image(url, alt),
-                    )
-                }
-              }),
-            ]),
-          ]),
-        ])
-      _ ->
-        html.div([], [
-          html.text(
-            "Unsupported content type: " <> content_type_label(content_item),
-          ),
-        ])
-    },
-  ])
-}
-
-// Helper function to get a label for content type
-fn content_type_label(content: Content) -> String {
-  case content {
-    content.Text(_) -> "Text"
-    content.Heading(_) -> "Heading"
-    content.Link(_, _) -> "Link"
-    content.LinkExternal(_, _) -> "External Link"
-    content.Image(_, _) -> "Image"
-    content.List(_) -> "List"
-    content.Block(_) -> "Block"
-    content.Paragraph(_) -> "Paragraph"
-    content.Unknown(type_) -> "Unknown: " <> type_
-  }
-}
+// Content editor functions removed - now using simple Djot textarea
 
 fn view_article_listing_loading() -> List(Element(Msg)) {
   [
     view_title("Articles", "articles"),
-    view_paragraph([content.Text("Loading articles...")]),
+    view_simple_paragraph("Loading articles..."),
   ]
 }
 
@@ -1820,7 +1384,7 @@ fn view_internal_link(uri: Uri, content: List(Element(Msg))) -> Element(Msg) {
 fn view_authentication_required(action: String) -> List(Element(Msg)) {
   [
     view_title("Authentication Required", "auth-required"),
-    view_paragraph([content.Text("You need to be logged in to " <> action)]),
+    view_simple_paragraph("You need to be logged in to " <> action),
   ]
 }
 
@@ -2095,8 +1659,8 @@ in djot you must write
 
 There are no Setext-style (underlined) headings, only ATX- (`#`) style.
 
-Heading content can extend over several lines, which may or may
-not be preceded by `#` characters:
+Heading content can extend over several lines, which may or
+may not be preceded by `#` characters:
 
 ```
 ## This is a single

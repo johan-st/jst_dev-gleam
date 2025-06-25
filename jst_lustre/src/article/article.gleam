@@ -1,7 +1,4 @@
-import article/content.{
-  type Content, Block, Heading, Image, Link, LinkExternal, List, Paragraph, Text,
-  Unknown,
-}
+
 import article/draft.{type Draft}
 import gleam/dynamic/decode
 import gleam/http as gleam_http
@@ -22,7 +19,7 @@ pub type Article {
     title: String,
     leading: String,
     subtitle: String,
-    content: RemoteData(List(Content), HttpError),
+    content: RemoteData(String, HttpError),
     draft: Option(Draft),
   )
 }
@@ -194,111 +191,13 @@ pub fn article_save(
       #("title", json.string(draft.title(draft))),
       #("subtitle", json.string(draft.subtitle(draft))),
       #("leading", json.string(draft.leading(draft))),
-      #("content", json.array(draft.content(draft), content_encoder)),
+      #("content", json.string(draft.content(draft))),
     ])
 
   http.post(uri.to_string(url), body, http.expect_json(article_decoder(), msg))
 }
 
 // DECODE ----------------------------------------------------------------------
-
-pub fn content_decoder() -> decode.Decoder(Content) {
-  use content_type <- decode.field("type", decode.string)
-  case content_type {
-    "heading" -> {
-      use text <- decode.field("text", decode.string)
-      decode.success(Heading(text))
-    }
-    "paragraph" -> {
-      use contents <- decode.field("content", decode.list(content_decoder()))
-      decode.success(Paragraph(contents))
-    }
-    "block" -> {
-      use contents <- decode.field("content", decode.list(content_decoder()))
-      decode.success(Block(contents))
-    }
-    "text" -> {
-      use text <- decode.field("text", decode.string)
-      decode.success(Text(text))
-    }
-    "link" -> {
-      let assert Ok(fail_uri) = uri.parse("/")
-      use url <- decode.field("url", decode.string)
-      use text <- decode.field("text", decode.string)
-      case url, text {
-        "", _ -> {
-          decode.failure(Link(fail_uri, text), "empty link")
-        }
-        _, "" -> {
-          decode.failure(Link(fail_uri, text), "empty link text")
-        }
-        _, _ -> {
-          case uri.parse(url) {
-            Ok(u) -> {
-              decode.success(Link(u, text))
-            }
-            Error(e) -> {
-              echo e
-              decode.failure(Link(fail_uri, text), "invalid link")
-            }
-          }
-        }
-      }
-    }
-    "link_external" -> {
-      let assert Ok(fail_uri) = uri.parse("/")
-      use url <- decode.field("url", decode.string)
-      use text <- decode.field("text", decode.string)
-      case url, text {
-        "", _ -> {
-          decode.failure(LinkExternal(fail_uri, text), "empty link")
-        }
-        _, "" -> {
-          decode.failure(LinkExternal(fail_uri, text), "empty link text")
-        }
-        _, _ -> {
-          case uri.parse(url) {
-            Ok(u) -> {
-              decode.success(LinkExternal(u, text))
-            }
-            Error(e) -> {
-              echo e
-              decode.failure(LinkExternal(fail_uri, text), "invalid link")
-            }
-          }
-        }
-      }
-    }
-    "image" -> {
-      let assert Ok(fail_uri) = uri.parse("/")
-      use url <- decode.field("url", decode.string)
-      use alt <- decode.field("alt", decode.string)
-      case url {
-        "" -> {
-          decode.failure(Image(fail_uri, alt), "empty image url")
-        }
-        _ -> {
-          case uri.parse(url) {
-            Ok(u) -> {
-              decode.success(Image(u, alt))
-            }
-            Error(e) -> {
-              echo e
-              decode.failure(Image(fail_uri, alt), "invalid image url")
-            }
-          }
-        }
-      }
-    }
-    "list" -> {
-      use contents <- decode.field("content", decode.list(content_decoder()))
-      decode.success(List(contents))
-    }
-    _ -> {
-      decode.success(Unknown(content_type))
-    }
-  }
-}
 
 fn metadata_decoder() -> decode.Decoder(List(Article)) {
   use articles <- decode.field("articles", decode.list(article_decoder()))
@@ -313,15 +212,11 @@ pub fn article_decoder() -> decode.Decoder(Article) {
   use title <- decode.field("title", decode.string)
   use leading <- decode.field("leading", decode.string)
   use subtitle <- decode.field("subtitle", decode.string)
-  use content_list <- decode.optional_field(
-    "content",
-    [],
-    decode.list(content_decoder()),
-  )
+  use content_string <- decode.optional_field("content", "", decode.string)
 
-  let content = case content_list {
-    [] -> NotInitialized
-    _ -> Loaded(content_list)
+  let content = case content_string {
+    "" -> NotInitialized
+    _ -> Loaded(content_string)
   }
 
   decode.success(ArticleV1(
@@ -351,8 +246,8 @@ pub fn article_encoder(article: Article) -> json.Json {
       _draft,
     ) -> {
       let content = case remote_data_content {
-        Loaded(content) -> json.array(content, of: content_encoder)
-        _ -> json.array([], of: content_encoder)
+        Loaded(content) -> json.string(content)
+        _ -> json.string("")
       }
       json.object([
         #("version", json.int(1)),
@@ -364,65 +259,6 @@ pub fn article_encoder(article: Article) -> json.Json {
         #("subtitle", json.string(subtitle)),
         #("content", content),
         // #("draft", draft |> draft_encoder),
-      ])
-    }
-  }
-}
-
-pub fn content_encoder(content: Content) -> json.Json {
-  case content {
-    Block(contents) -> {
-      json.object([
-        #("type", json.string("block")),
-        #("content", json.array(contents, of: content_encoder)),
-      ])
-    }
-    Heading(text) -> {
-      json.object([
-        #("type", json.string("heading")),
-        #("text", json.string(text)),
-      ])
-    }
-    Paragraph(contents) -> {
-      json.object([
-        #("type", json.string("paragraph")),
-        #("content", json.array(contents, of: content_encoder)),
-      ])
-    }
-    Text(text) -> {
-      json.object([#("type", json.string("text")), #("text", json.string(text))])
-    }
-    Link(url, title) -> {
-      json.object([
-        #("type", json.string("link")),
-        #("url", json.string(uri.to_string(url))),
-        #("text", json.string(title)),
-      ])
-    }
-    LinkExternal(url, title) -> {
-      json.object([
-        #("type", json.string("link_external")),
-        #("url", json.string(uri.to_string(url))),
-        #("text", json.string(title)),
-      ])
-    }
-    Image(url, alt) -> {
-      json.object([
-        #("type", json.string("image")),
-        #("url", json.string(uri.to_string(url))),
-        #("alt", json.string(alt)),
-      ])
-    }
-    List(contents) -> {
-      json.object([
-        #("type", json.string("list")),
-        #("content", json.array(contents, of: content_encoder)),
-      ])
-    }
-    Unknown(text) -> {
-      json.object([
-        #("type", json.string(text)),
-        #("text", json.string(text)),
       ])
     }
   }

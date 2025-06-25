@@ -1,5 +1,5 @@
 import article/article.{ArticleV1}
-import article/content.{Heading, Paragraph, Text}
+
 import gleam/option.{None}
 import gleam/uri
 import gleeunit/should
@@ -16,7 +16,7 @@ pub fn route_url_test() {
       leading: "l",
       title: "t",
       subtitle: "sub",
-      content: Loaded([]),
+      content: Loaded(""),
       draft: None,
     )
   let route = routes.ArticleEdit(article_id)

@@ -1,10 +1,7 @@
 import article/article.{
   type Article, ArticleV1, article_decoder, article_encoder,
 }
-import article/content.{
-  type Content, Block, Heading, Image, Link, LinkExternal, List, Paragraph, Text,
-  Unknown,
-}
+
 import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/int
@@ -111,74 +108,13 @@ fn generator_article() -> qc.Generator(Article) {
     qc.non_empty_string(),
     qc.non_empty_string(),
     qc.non_empty_string(),
-    generator_content() |> generator_remote_data(),
+    qc.non_empty_string() |> generator_remote_data(),
     qc.constant(None),
     ArticleV1,
   )
 }
 
-// content
-
-fn generator_content_text() -> qc.Generator(Content) {
-  use text <- qc.map(qc.non_empty_string())
-  Text(text)
-}
-
-fn generator_content_block() -> qc.Generator(Content) {
-  generator_content()
-  |> qc.map(Block)
-}
-
-fn generator_content_heading() -> qc.Generator(Content) {
-  qc.string() |> qc.map(Heading)
-}
-
-fn generator_content_paragraph() -> qc.Generator(Content) {
-  qc.list_from(generator_content_text())
-  |> qc.map(Paragraph)
-}
-
-fn generator_content_link() -> qc.Generator(Content) {
-  use uri, text <- qc.map2(generator_uri(), qc.non_empty_string())
-  Link(uri, text)
-}
-
-fn generator_content_link_external() -> qc.Generator(Content) {
-  use uri, text <- qc.map2(generator_uri(), qc.non_empty_string())
-  LinkExternal(uri, text)
-}
-
-fn generator_content_image() -> qc.Generator(Content) {
-  use uri, text <- qc.map2(generator_uri(), qc.non_empty_string())
-  Image(uri, text)
-}
-
-fn generator_content_list() -> qc.Generator(Content) {
-  generator_content()
-  |> qc.map(content.List)
-}
-
-fn generator_content_unknown() -> qc.Generator(Content) {
-  use text <- qc.map(qc.string())
-  Unknown(text)
-}
-
-fn generator_content() -> qc.Generator(List(Content)) {
-  qc.generic_list(
-    elements_from: qc.from_generators(generator_content_text(), [
-      //   generator_content_block(),
-      generator_content_heading(),
-      generator_content_image(),
-      generator_content_link(),
-      generator_content_link_external(),
-      //   generator_content_list(),
-      generator_content_text(),
-      generator_content_paragraph(),
-      generator_content_unknown(),
-    ]),
-    length_from: qc.small_strictly_positive_int(),
-  )
-}
+// content - removed, now using Djot strings
 
 fn generator_remote_data(
   generator: qc.Generator(a),

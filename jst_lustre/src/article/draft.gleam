@@ -1,4 +1,4 @@
-import article/content.{type Content}
+
 
 pub opaque type Draft {
   DraftV1(
@@ -7,7 +7,7 @@ pub opaque type Draft {
     title: String,
     subtitle: String,
     leading: String,
-    content: List(Content),
+    content: String,
   )
 }
 
@@ -16,7 +16,7 @@ pub fn new(
   title: String,
   subtitle: String,
   leading: String,
-  content: List(Content),
+  content: String,
 ) -> Draft {
   DraftV1(saving: False, slug:, title:, subtitle:, leading:, content:)
 }

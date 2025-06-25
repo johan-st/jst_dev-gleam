@@ -1,6 +1,6 @@
 // In test/yourapp_test.gleam
 import article/article.{ArticleV1}
-import article/content.{Heading, Paragraph, Text}
+
 import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/option.{None}
@@ -31,7 +31,7 @@ pub fn model_encoder_and_decoder_test() {
         leading: "leading",
         title: "test",
         subtitle: "subtitle",
-        content: Loaded([Heading("test"), Paragraph([Text("test")])]),
+        content: Loaded("# test\n\ntest"),
         draft: None,
       ),
       ArticleV1(
@@ -115,7 +115,7 @@ pub fn model_encoder_and_decoder_test() {
               case content {
                 Loaded(loaded_content) -> {
                   loaded_content
-                  |> should.equal([Heading("test"), Paragraph([Text("test")])])
+                  |> should.equal("# test\n\ntest")
                 }
                 _ -> should.fail()
               }

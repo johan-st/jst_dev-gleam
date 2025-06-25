@@ -353,11 +353,11 @@ func handleArticle(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 // handleArticleNew creates a handler for creating a new article
 func handleArticleNew(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 	type ReqNew struct {
-		Slug     string             `json:"slug"`
-		Title    string             `json:"title"`
-		Subtitle string             `json:"subtitle"`
-		Leading  string             `json:"leading"`
-		Content  []articles.Content `json:"content"`
+		Slug     string `json:"slug"`
+		Title    string `json:"title"`
+		Subtitle string `json:"subtitle"`
+		Leading  string `json:"leading"`
+		Content  string `json:"content"`
 	}
 
 	logger := l.WithBreadcrumb("article").WithBreadcrumb("new")
@@ -391,12 +391,12 @@ func handleArticleNew(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler
 // handleArticleUpdate creates a handler for updating an existing article
 func handleArticleUpdate(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 	type ReqUpdate struct {
-		Rev      int                `json:"revision"`
-		Slug     string             `json:"slug"`
-		Title    string             `json:"title"`
-		Subtitle string             `json:"subtitle"`
-		Leading  string             `json:"leading"`
-		Content  []articles.Content `json:"content"`
+		Rev      int    `json:"revision"`
+		Slug     string `json:"slug"`
+		Title    string `json:"title"`
+		Subtitle string `json:"subtitle"`
+		Leading  string `json:"leading"`
+		Content  string `json:"content"`
 	}
 
 	logger := l.WithBreadcrumb("article").WithBreadcrumb("update")
@@ -430,12 +430,12 @@ func handleArticleUpdate(l *jst_log.Logger, repo articles.ArticleRepo) http.Hand
 // handleArticleSave creates a handler for saving an existing article
 func handleArticleSave(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 	type ReqSave struct {
-		Rev      int                `json:"revision"`
-		Slug     string             `json:"slug"`
-		Title    string             `json:"title"`
-		Subtitle string             `json:"subtitle"`
-		Leading  string             `json:"leading"`
-		Content  []articles.Content `json:"content"`
+		Rev      int    `json:"revision"`
+		Slug     string `json:"slug"`
+		Title    string `json:"title"`
+		Subtitle string `json:"subtitle"`
+		Leading  string `json:"leading"`
+		Content  string `json:"content"`
 	}
 
 	logger := l.WithBreadcrumb("article").WithBreadcrumb("save")
