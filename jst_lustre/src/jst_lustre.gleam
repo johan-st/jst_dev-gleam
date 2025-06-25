@@ -44,7 +44,13 @@ type Model {
     session: session.Session,
     articles: RemoteData(List(Article), HttpError),
     djot_demo_content: String,
+    edit_view_mode: EditViewMode,
   )
+}
+
+type EditViewMode {
+  EditViewModeEdit
+  EditViewModePreview
 }
 
 fn init(_) -> #(Model, Effect(Msg)) {
@@ -58,6 +64,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
       articles: NotInitialized,
       base_uri: uri,
       djot_demo_content: initial_djot,
+      edit_view_mode: EditViewModeEdit,
     )
   let effect_modem =
     modem.init(fn(uri) {
@@ -115,6 +122,8 @@ type Msg {
   // ChatMsg(msg: chat.Msg)
   // DJOT DEMO
   DjotDemoContentUpdated(content: String)
+  // EDIT VIEW TOGGLE
+  EditViewModeToggled
 }
 
 // fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -586,6 +595,14 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     DjotDemoContentUpdated(content) -> {
       #(Model(..model, djot_demo_content: content), effect.none())
     }
+    // EDIT VIEW TOGGLE
+    EditViewModeToggled -> {
+      let new_mode = case model.edit_view_mode {
+        EditViewModeEdit -> EditViewModePreview
+        EditViewModePreview -> EditViewModeEdit
+      }
+      #(Model(..model, edit_view_mode: new_mode), effect.none())
+    }
   }
 }
 
@@ -996,7 +1013,7 @@ fn view_article_listing(
   [view_title("Articles", "articles"), ..articles_elements]
 }
 
-fn view_article_edit(_model: Model, article: Article) -> List(Element(Msg)) {
+fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
   case article.draft {
     None -> [view_error("no draft..")]
     Some(draft) -> {
@@ -1018,13 +1035,66 @@ fn view_article_edit(_model: Model, article: Article) -> List(Element(Msg)) {
       let preview = view_article(draft_article, False)
 
       [
-        html.div([attr.class("grid grid-cols-2 gap-8 h-screen")], [
-          html.div([attr.class("space-y-4")], view_edit_actions(draft, article)),
-          html.div(
-            [attr.class("max-w-screen-md mx-auto px-10 py-10 overflow-y-auto")],
-            preview,
+        // Toggle button for mobile
+        html.div([attr.class("lg:hidden mb-4 flex justify-center")], [
+          html.button(
+            [
+              attr.class(
+                "px-4 py-2 bg-pink-700 text-white rounded-md hover:bg-pink-600 transition-colors duration-200",
+              ),
+              event.on_mouse_down(EditViewModeToggled),
+            ],
+            [
+              case model.edit_view_mode {
+                EditViewModeEdit -> html.text("Show Preview")
+                EditViewModePreview -> html.text("Show Editor")
+              },
+            ],
           ),
         ]),
+        // Main content area
+        html.div(
+          [
+            attr.classes([
+              #("grid gap-8 h-screen", True),
+              #("grid-cols-2 lg:grid-cols-2", True),
+            ]),
+          ],
+          [
+            // Editor column
+            html.div(
+              [
+                attr.classes([
+                  #("space-y-4", True),
+                  #("lg:block", True),
+                  #("lg:col-span-1", True),
+                  #("col-span-2", model.edit_view_mode == EditViewModeEdit),
+                  #(
+                    "hidden",
+                    model.edit_view_mode == EditViewModePreview,
+                  ),
+                ]),
+              ],
+              view_edit_actions(draft, article),
+            ),
+            // Preview column
+            html.div(
+              [
+                attr.classes([
+                  #("max-w-screen-md mx-auto px-10 py-10 overflow-y-auto", True),
+                  #("lg:block", True),
+                  #("lg:col-span-1", True),
+                  #("col-span-2", model.edit_view_mode == EditViewModePreview),
+                  #(
+                    "hidden",
+                    model.edit_view_mode == EditViewModeEdit,
+                  ),
+                ]),
+              ],
+              preview,
+            ),
+          ],
+        ),
         view_djot_quick_reference(),
       ]
     }
