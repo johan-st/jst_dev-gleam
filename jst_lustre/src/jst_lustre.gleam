@@ -709,46 +709,71 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
 // VIEW ------------------------------------------------------------------------
 
 fn view(model: Model) -> Element(Msg) {
-  html.div(
-    [
-      attr.class(
-        "min-h-screen bg-zinc-900 text-zinc-100 selection:bg-pink-700 selection:text-zinc-100 ",
-      ),
-    ],
-    [
-      view_header(model),
-      html.main(
-        [attr.class("max-w-screen-md mx-auto px-10 py-10")],
-        case page_from_model(model) {
-          pages.PageIndex -> view_index()
-          pages.PageArticleList(articles, session) ->
-            view_article_listing(articles, session)
-          pages.PageArticleListLoading -> view_article_listing_loading()
-          pages.PageArticle(article, session) ->
-            view_article(article, article.can_edit(article, session))
-          pages.PageArticleEdit(article) -> view_article_edit(model, article)
-          pages.PageError(error) -> {
-            case error {
-              pages.ArticleNotFound(slug, _) ->
-                view_article_not_found(model.articles, slug)
-              pages.ArticleEditNotFound(id) ->
-                view_article_edit_not_found(model.articles, id)
-              pages.HttpError(error, _) -> [
-                view_error(error_string.http_error(error)),
-              ]
-              pages.AuthenticationRequired(action) -> [
-                view_error("Authentication required: " <> action),
-              ]
-              pages.Other(msg) -> [view_error(msg)]
-            }
-          }
-          pages.PageAbout -> view_about()
-          pages.PageDjotDemo(content) -> view_djot_demo(content)
-          pages.PageNotFound(uri) -> view_not_found(uri)
-        },
-      ),
-    ],
-  )
+  let page = page_from_model(model)
+  let content = case page {
+    pages.PageIndex -> view_index()
+    pages.PageArticleList(articles, session) ->
+      view_article_listing(articles, session)
+    pages.PageArticleListLoading -> view_article_listing_loading()
+    pages.PageArticle(article, session) ->
+      view_article(article, article.can_edit(article, session))
+    pages.PageArticleEdit(article) -> view_article_edit(model, article)
+    pages.PageError(error) -> {
+      case error {
+        pages.ArticleNotFound(slug, _) ->
+          view_article_not_found(model.articles, slug)
+        pages.ArticleEditNotFound(id) ->
+          view_article_edit_not_found(model.articles, id)
+        pages.HttpError(error, _) -> [
+          view_error(error_string.http_error(error)),
+        ]
+        pages.AuthenticationRequired(action) -> [
+          view_error("Authentication required: " <> action),
+        ]
+        pages.Other(msg) -> [view_error(msg)]
+      }
+    }
+    pages.PageAbout -> view_about()
+    pages.PageDjotDemo(content) -> view_djot_demo(content)
+    pages.PageNotFound(uri) -> view_not_found(uri)
+  }
+  let layout = case page {
+    pages.PageDjotDemo(_) -> {
+      fn(content) {
+        html.div(
+          [
+            attr.class(
+              "min-h-screen bg-zinc-900 text-zinc-100 selection:bg-pink-700 selection:text-zinc-100 ",
+            ),
+          ],
+          [
+            view_header(model),
+            html.main([attr.class("mx-auto px-10 py-10")], content),
+          ],
+        )
+      }
+    }
+    _ -> {
+      fn(content) {
+        html.div(
+          [
+            attr.class(
+              "min-h-screen bg-zinc-900 text-zinc-100 selection:bg-pink-700 selection:text-zinc-100 ",
+            ),
+          ],
+          [
+            view_header(model),
+            html.main(
+              [attr.class("max-w-screen-md mx-auto px-10 py-10")],
+              content,
+            ),
+          ],
+        )
+      }
+    }
+  }
+
+  layout(content)
 }
 
 fn page_from_model(model: Model) -> pages.Page {
@@ -1811,13 +1836,6 @@ fn view_djot_demo(content: String) -> List(Element(Msg)) {
 
   [
     view_title("Djot Demo", "djot-demo"),
-    html.div([attr.class("mt-8")], [
-      html.p([attr.class("text-zinc-400 mb-6")], [
-        html.text(
-          "Edit Djot markup on the left and see the live preview on the right.",
-        ),
-      ]),
-    ]),
     html.div([attr.class("grid grid-cols-1 lg:grid-cols-2 gap-6")], [
       // Editor section
       html.section([attr.class("space-y-4")], [
@@ -1882,14 +1900,27 @@ fn view_djot_demo(content: String) -> List(Element(Msg)) {
     html.div(
       [attr.class("mt-8 p-4 bg-zinc-800 rounded-lg border border-zinc-700")],
       [
-        html.h3([attr.class("text-lg text-pink-600 font-light mb-3")], [
+        html.h3([attr.class("text-lg text-pink-600 font-light")], [
           html.text("Quick Reference"),
         ]),
-        html.p([attr.class("text-zinc-400 mb-6")], [
-          html.strong([attr.class("text-zinc-300")], [html.text("Note: ")]),
+        html.p([attr.class("text-zinc-300")], [
+          html.strong([], [html.text("Note: ")]),
           html.text(
             "The djot implementation is a work in progress. Not all features are supported yet.",
           ),
+        ]),
+        html.p([attr.class("mb-6")], [
+          html.text("See the "),
+          html.a(
+            [
+              attr.href(
+                "https://htmlpreview.github.io/?https://github.com/jgm/djot/blob/master/doc/syntax.html",
+              ),
+              attr.class("text-zinc-300 underline"),
+            ],
+            [html.text("djot syntax documentation")],
+          ),
+          html.text(" for more details."),
         ]),
         html.div(
           [
