@@ -1192,7 +1192,7 @@ fn view_article_listing(
                 event.on_mouse_down(UserMouseDownNavigation(article_uri)),
               ],
               [
-                html.div([attr.class("flex justify-between gap-4 h-6")], [
+                html.div([attr.class("flex justify-between gap-4")], [
                   html.h3(
                     [
                       attr.id("article-title-" <> slug),
@@ -1201,7 +1201,10 @@ fn view_article_listing(
                     ],
                     [html.text(title)],
                   ),
-                  view_publication_status(article),
+                  html.div([attr.class("flex flex-col items-end")], [
+                    view_publication_status(article),
+                    view_author(article.author),
+                  ]),
                 ]),
                 view_subtitle(subtitle, slug),
                 view_simple_paragraph(leading),
@@ -1593,7 +1596,13 @@ fn view_article(
         view_article_actions(article, session),
         view_title(article.title, article.slug),
         view_subtitle(article.subtitle, article.slug),
-        view_article_tags(article.tags),
+        html.div([attr.class("flex justify-between mt-2")], [
+          html.div([attr.class("flex gap-4")], [
+            view_author(article.author),
+            view_publication_status(article),
+          ]),
+          view_article_tags(article.tags),
+        ]),
       ]),
       view_leading(article.leading, article.slug),
       ..content
@@ -1661,7 +1670,7 @@ fn view_publication_status(article: Article) -> Element(msg) {
       html.span(
         [
           attr.class(
-            "text-xs text-zinc-500 pt-2 border-t border-r border-zinc-700 pr-2 group-hover:border-pink-700 transition-colors duration-25",
+            "text-xs text-zinc-500 pt-2 border-t border-r border-zinc-700 px-2 group-hover:border-pink-700 transition-colors duration-25",
           ),
         ],
         [html.text(formatted_date)],
@@ -1677,6 +1686,20 @@ fn view_publication_status(article: Article) -> Element(msg) {
         [html.text("not published")],
       )
   }
+}
+
+fn view_author(author: String) -> Element(msg) {
+  html.div(
+    [
+      attr.class(
+        "text-xs text-zinc-400 pt-0 border-r border-zinc-700 pr-2 group-hover:border-pink-700 transition-colors duration-25",
+      ),
+    ],
+    [
+      html.span([attr.class("text-zinc-500 font-light")], [html.text("by ")]),
+      html.span([attr.class("text-zinc-300")], [html.text(author)]),
+    ],
+  )
 }
 
 fn view_article_tags(tags: List(String)) -> Element(Msg) {
