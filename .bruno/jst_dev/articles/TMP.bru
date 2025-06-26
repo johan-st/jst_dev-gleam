@@ -1,24 +1,24 @@
 meta {
-  name: update copy
+  name: TMP
   type: http
   seq: 10
 }
 
-put {
-  url: http://localhost:8080/api/articles/:id
+get {
+  url: http://localhost:8080/api/articles/:id/revisions
   body: json
   auth: none
 }
 
 params:path {
-  id: f6d258b2-068f-487f-9233-d461c9dc3974
+  id: 61a3019a-bf16-4c75-b429-f3e1d72b6270
 }
 
 body:json {
   {
     "struct_version": 1,
     "id": "f6d258b2-068f-487f-9233-d461c9dc3974",
-    "revision": 30,
+    "revision": 32,
     "slug": "REV. 30",
     "title": "Bruno test 1",
     "subtitle": "..or, smth.",
