@@ -1512,13 +1512,13 @@ fn view_article(
   }
   [
     html.article([attr.class("with-transition")], [
-      html.div([attr.class("flex justify-between gap-4")], [
-        view_title(article.title, article.slug),
+      html.div([attr.class("flex flex-col justify-between")], [
         view_article_actions(article, session),
+        view_title(article.title, article.slug),
+        view_subtitle(article.subtitle, article.slug),
+        view_article_tags(article.tags),
       ]),
-      view_subtitle(article.subtitle, article.slug),
       view_leading(article.leading, article.slug),
-      html.div([attr.class("mt-6 mb-8")], [view_article_tags(article.tags)]),
       ..content
     ]),
   ]
@@ -1602,14 +1602,14 @@ fn view_publication_status(article: Article) -> Element(msg) {
   }
 }
 
-fn view_article_tags(tags: List(String)) -> Element(msg) {
+fn view_article_tags(tags: List(String)) -> Element(Msg) {
   case tags {
     [] -> element.none()
     _ ->
       html.div(
         [
           attr.class(
-            "flex justify-end gap-0 flex-wrap border-b border-r border-zinc-700 pb-1 pr-2 group-hover:border-pink-700 transition-colors duration-25",
+            "flex justify-end align-end gap-0 flex-wrap border-b border-r border-zinc-700 pb-1 pr-2 hover:border-pink-700 transition-colors duration-25 max-w-max ml-auto mt-2",
           ),
         ],
         tags
@@ -1617,7 +1617,7 @@ fn view_article_tags(tags: List(String)) -> Element(msg) {
             html.span(
               [
                 attr.class(
-                  "text-xs text-zinc-500 px-2 group-hover:border-pink-700 transition-colors duration-25",
+                  "text-xs cursor-pointer text-zinc-500 px-2 hover:border-pink-700 hover:text-pink-700 transition-colors duration-25",
                 ),
               ],
               [html.text(tag)],
@@ -1636,25 +1636,19 @@ fn view_article_actions(
   let can_publish = article.can_publish(article, session)
   let can_delete = article.can_delete(article, session)
 
-  // Determine which is the last button for border-e
-  let edit_is_last = can_edit && !can_publish && !can_delete
-  let publish_is_last = can_publish && !can_delete
-  let unpublish_is_last = can_publish && !can_delete
-  let delete_is_last = can_delete
-
-  html.div([attr.class("flex")], [
+  html.div([attr.class("flex justify-start h-10 ")], [
     case can_edit {
       True ->
-        html.a(
+        html.button(
           [
             attr.class(
-              "text-gray-500 pe-4 text-underline pt-2 hover:text-teal-300 hover:border-teal-300 border-t border-gray-500"
-              <> case edit_is_last {
-                True -> " border-e"
-                False -> ""
-              },
+              "text-gray-500 pe-4 text-underline pt-2 hover:text-teal-300 hover:border-teal-300 border-t border-gray-500",
             ),
-            attr.href(routes.to_string(routes.ArticleEdit(article.id))),
+            event.on_mouse_down(
+              UserMouseDownNavigation(
+                routes.to_uri(routes.ArticleEdit(article.id)),
+              ),
+            ),
           ],
           [html.text("Edit")],
         )
@@ -1665,11 +1659,7 @@ fn view_article_actions(
         html.button(
           [
             attr.class(
-              "text-gray-500 pe-4 text-underline pt-2 hover:text-green-300 hover:border-green-300 border-t border-gray-500"
-              <> case publish_is_last {
-                True -> " border-e"
-                False -> ""
-              },
+              "text-gray-500 pe-4 text-underline pt-2 hover:text-green-300 hover:border-green-300 border-t border-gray-500",
             ),
             event.on_mouse_down(ArticlePublishClicked(article)),
           ],
@@ -1682,11 +1672,7 @@ fn view_article_actions(
         html.button(
           [
             attr.class(
-              "text-gray-500 pe-4 text-underline pt-2 hover:text-yellow-300 hover:border-yellow-300 border-t border-gray-500"
-              <> case unpublish_is_last {
-                True -> " border-e"
-                False -> ""
-              },
+              "text-gray-500 pe-4 text-underline pt-2 hover:text-yellow-300 hover:border-yellow-300 border-t border-gray-500",
             ),
             event.on_mouse_down(ArticleUnpublishClicked(article)),
           ],
@@ -1699,11 +1685,7 @@ fn view_article_actions(
         html.button(
           [
             attr.class(
-              "text-gray-500 pe-4 text-underline pt-2 hover:text-red-300 hover:border-red-300 border-t border-gray-500"
-              <> case delete_is_last {
-                True -> " border-e"
-                False -> ""
-              },
+              "text-gray-500 pe-4 text-underline pt-2 hover:text-red-400 hover:border-red-400 border-t border-gray-500",
             ),
             event.on_mouse_down(ArticleDeleteClicked(article)),
           ],
@@ -1729,7 +1711,7 @@ fn view_subtitle(title: String, slug: String) -> Element(msg) {
   html.div(
     [
       attr.id("article-subtitle-" <> slug),
-      attr.class("text-sm md:text-md text-zinc-500 font-light mt-2"),
+      attr.class("text-md text-zinc-500 font-light italic"),
       attr.class("article-subtitle"),
     ],
     [html.text(title)],
