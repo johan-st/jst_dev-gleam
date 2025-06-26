@@ -32,6 +32,9 @@ pub fn model_encoder_and_decoder_test() {
         title: "test",
         subtitle: "subtitle",
         content: Loaded("# test\n\ntest"),
+        author: "author",
+        published_at: None,
+        tags: [],
         draft: None,
       ),
       ArticleV1(
@@ -42,6 +45,9 @@ pub fn model_encoder_and_decoder_test() {
         title: "test2",
         subtitle: "subtitle",
         content: Errored(NotFound),
+        author: "author",
+        published_at: None,
+        tags: [],
         draft: None,
       ),
       ArticleV1(
@@ -52,6 +58,9 @@ pub fn model_encoder_and_decoder_test() {
         title: "test3",
         subtitle: "subtitle",
         content: Pending,
+        author: "author",
+        published_at: None,
+        tags: [],
         draft: None,
       ),
       ArticleV1(
@@ -62,6 +71,9 @@ pub fn model_encoder_and_decoder_test() {
         title: "test4",
         subtitle: "subtitle",
         content: NotInitialized,
+        author: "author",
+        published_at: None,
+        tags: [],
         draft: None,
       ),
     ])
@@ -96,18 +108,24 @@ pub fn model_encoder_and_decoder_test() {
           // Article 1 - Loaded content
           case a1 {
             ArticleV1(
-              id,
-              slug,
-              revision,
-              title,
-              leading,
-              subtitle,
-              content,
-              draft,
+              id:,
+              slug:,
+              revision:,
+              author:,
+              published_at:,
+              tags:,
+              title:,
+              leading:,
+              subtitle:,
+              content:,
+              draft:,
             ) -> {
               id |> should.equal("1")
               slug |> should.equal("test")
               revision |> should.equal(1)
+              author |> should.equal("author")
+              published_at |> should.equal(None)
+              tags |> should.equal([])
               title |> should.equal("test")
               leading |> should.equal("leading")
               subtitle |> should.equal("subtitle")
@@ -125,18 +143,24 @@ pub fn model_encoder_and_decoder_test() {
           // Article 2 - Errored content
           case a2 {
             ArticleV1(
-              id,
-              slug,
-              revision,
-              title,
-              leading,
-              subtitle,
-              content,
-              draft,
+              author:,
+              content:,
+              draft:,
+              id:,
+              tags:,
+              title:,
+              published_at:,
+              leading:,
+              revision:,
+              slug:,
+              subtitle:,
             ) -> {
               id |> should.equal("2")
               slug |> should.equal("test2")
               revision |> should.equal(1)
+              author |> should.equal("author")
+              published_at |> should.equal(None)
+              tags |> should.equal([])
               title |> should.equal("test2")
               leading |> should.equal("leading")
               subtitle |> should.equal("subtitle")
@@ -148,18 +172,24 @@ pub fn model_encoder_and_decoder_test() {
           // Article 3 - Pending content
           case a3 {
             ArticleV1(
-              id,
-              slug,
-              revision,
-              title,
-              leading,
-              subtitle,
-              content,
-              draft,
+              author:,
+              content:,
+              draft:,
+              id:,
+              tags:,
+              title:,
+              published_at:,
+              leading:,
+              revision:,
+              slug:,
+              subtitle:,
             ) -> {
               id |> should.equal("3")
               slug |> should.equal("test3")
               revision |> should.equal(1)
+              author |> should.equal("author")
+              published_at |> should.equal(None)
+              tags |> should.equal([])
               title |> should.equal("test3")
               leading |> should.equal("leading")
               subtitle |> should.equal("subtitle")
@@ -171,18 +201,24 @@ pub fn model_encoder_and_decoder_test() {
           // Article 4 - NotInitialized content
           case a4 {
             ArticleV1(
-              id,
-              slug,
-              revision,
-              title,
-              leading,
-              subtitle,
-              content,
-              draft,
+              author:,
+              content:,
+              draft:,
+              id:,
+              tags:,
+              title:,
+              published_at:,
+              leading:,
+              revision:,
+              slug:,
+              subtitle:,
             ) -> {
               id |> should.equal("4")
               slug |> should.equal("test4")
               revision |> should.equal(1)
+              author |> should.equal("author")
+              published_at |> should.equal(None)
+              tags |> should.equal([])
               title |> should.equal("test4")
               leading |> should.equal("leading")
               subtitle |> should.equal("subtitle")

@@ -334,7 +334,7 @@ func handlePurge(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 // handleArticleList creates a handler for listing all articles
 func handleArticleList(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 	type Resp struct {
-		Articles []articles.ArticleMetadata `json:"articles"`
+		Articles []articles.Article `json:"articles"`
 	}
 
 	logger := l.WithBreadcrumb("articles").WithBreadcrumb("list")
@@ -359,6 +359,7 @@ func handleArticle(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 	logger.Debug("ready")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var art articles.Article
 		logger.Debug("called")
 		id := r.PathValue("id")
 		idUuid, err := uuid.Parse(id)
@@ -368,19 +369,19 @@ func handleArticle(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 			return
 		}
 		logger.Debug("idUuid: %s", idUuid)
-		article, err := repo.Get(idUuid)
+		art, err = repo.Get(idUuid)
 		if err != nil {
 			logger.Error("failed to get article: %s", err.Error())
 			http.Error(w, "failed to get article", http.StatusInternalServerError)
 			return
 		}
-		if article == nil {
+		if art.Id == uuid.Nil {
 			logger.Info("not found, article \"%s\"", id)
 			http.NotFound(w, r)
 			return
 		}
-		logger.Debug("article: %s (rev: %d)", article.Slug, article.Rev)
-		respJson(w, article, http.StatusOK)
+		logger.Debug("article: %s (rev: %d)", art.Slug, art.Rev)
+		respJson(w, art, http.StatusOK)
 	})
 }
 
@@ -424,7 +425,7 @@ func handleArticleNew(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler
 			http.Error(w, "failed to Create new article in repo", http.StatusInternalServerError)
 			return
 		}
-		if art_created == nil {
+		if art_created.Id == uuid.Nil {
 			logger.Error("article was nil")
 			http.Error(w, "article was nil", http.StatusInternalServerError)
 			return
@@ -449,6 +450,7 @@ func handleArticleUpdate(l *jst_log.Logger, repo articles.ArticleRepo) http.Hand
 	logger.Debug("ready")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var art articles.Article
 		logger.Debug("called")
 		id := r.PathValue("id")
 		idUuid, err := uuid.Parse(id)
@@ -473,13 +475,13 @@ func handleArticleUpdate(l *jst_log.Logger, repo articles.ArticleRepo) http.Hand
 		logger.Debug("permissions ok")
 		// Get current article to verify it exists.
 		// TODO: not necessary as we can check the update error
-		currentArticle, err := repo.Get(idUuid)
+		art, err = repo.Get(idUuid)
 		if err != nil {
 			logger.Error("failed to get current article: %s", err.Error())
 			http.Error(w, "failed to get current article", http.StatusInternalServerError)
 			return
 		}
-		if currentArticle == nil {
+		if art.Id == uuid.Nil {
 			logger.Error("article not found: %s", id)
 			http.Error(w, "article not found", http.StatusNotFound)
 			return
@@ -494,7 +496,7 @@ func handleArticleUpdate(l *jst_log.Logger, repo articles.ArticleRepo) http.Hand
 		}
 
 		// Update article using client's revision
-		updatedArticle, err := repo.Update(articles.Article{
+		art, err = repo.Update(articles.Article{
 			Id:            idUuid,
 			StructVersion: 1,
 			Rev:           uint64(req.Rev), // Use client's revision, NATS will handle CAS (Compare and Swap)
@@ -512,7 +514,7 @@ func handleArticleUpdate(l *jst_log.Logger, repo articles.ArticleRepo) http.Hand
 
 		logger.Debug("updated article with slug: %s", req.Slug)
 		// Return the new revision number
-		respJson(w, &updatedArticle, http.StatusOK)
+		respJson(w, art, http.StatusOK)
 	})
 }
 
@@ -588,6 +590,7 @@ func handleArticleRevision(l *jst_log.Logger, repo articles.ArticleRepo) http.Ha
 	logger.Debug("ready")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var art articles.Article
 		id := r.PathValue("id")
 		revision := r.PathValue("revision")
 
@@ -608,20 +611,20 @@ func handleArticleRevision(l *jst_log.Logger, repo articles.ArticleRepo) http.Ha
 			return
 		}
 
-		article, err := repo.GetRevision(idUuid, rev)
+		art, err = repo.GetRevision(idUuid, rev)
 		if err != nil {
 			logger.Error("failed to get article revision: %s", err.Error())
 			http.Error(w, "failed to get article revision", http.StatusInternalServerError)
 			return
 		}
-		if article == nil {
+		if art.Id == uuid.Nil {
 			logger.Info("not found, article \"%s\" revision %d", id, rev)
 			http.NotFound(w, r)
 			return
 		}
 
-		logger.Debug("article: %s (rev: %d)", article.Slug, article.Rev)
-		respJson(w, article, http.StatusOK)
+		logger.Debug("article: %s (rev: %d)", art.Slug, art.Rev)
+		respJson(w, art, http.StatusOK)
 	})
 }
 

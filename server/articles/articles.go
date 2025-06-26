@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
@@ -19,14 +20,14 @@ const (
 )
 
 type ArticleRepo interface {
-	Get(id uuid.UUID) (*Article, error)
-	GetBySLug(slug string) (*Article, error)
-	AllNoContent() ([]ArticleMetadata, error)
-	Create(art Article) (*Article, error)
-	Update(art Article) (*Article, error)
+	Get(id uuid.UUID) (Article, error)
+	GetBySLug(slug string) (Article, error)
+	AllNoContent() ([]Article, error)
+	Create(art Article) (Article, error)
+	Update(art Article) (Article, error)
 	Delete(id uuid.UUID) error
 	GetHistory(id uuid.UUID) ([]Article, error)
-	GetRevision(id uuid.UUID, revision uint64) (*Article, error)
+	GetRevision(id uuid.UUID, revision uint64) (Article, error)
 	Context() context.Context
 	Purge() error
 }
@@ -41,31 +42,25 @@ type articleRepo struct {
 	ctx context.Context
 	kv  jetstream.KeyValue
 }
+
 type articleRepoInMem struct {
 	repo     ArticleRepo
 	lock     sync.RWMutex
 	articles map[string]*Article
 }
 
-type ArticleMetadata struct {
-	StructVersion int       `json:"struct_version"`
-	Id            uuid.UUID `json:"id"`
-	Rev           uint64    `json:"revision"`
-	Slug          string    `json:"slug"`
-	Title         string    `json:"title"`
-	Subtitle      string    `json:"subtitle"`
-	Leading       string    `json:"leading"`
-}
-
 type Article struct {
 	StructVersion int       `json:"struct_version"`
 	Id            uuid.UUID `json:"id"`
-	Rev           uint64    `json:"revision"`
+	Rev           uint64    `json:"revision,omitempty"`
 	Slug          string    `json:"slug"`
 	Title         string    `json:"title"`
 	Subtitle      string    `json:"subtitle"`
 	Leading       string    `json:"leading"`
-	Content       string    `json:"content"`
+	Author        string    `json:"author"`
+	PublishedAt   time.Time `json:"published_at"`
+	Tags          []string  `json:"tags"`
+	Content       string    `json:"content,omitempty"`
 }
 
 // --- REPO ---
@@ -83,60 +78,60 @@ func Repo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (ArticleRepo, e
 	}, nil
 }
 
-func (r *articleRepo) Get(id uuid.UUID) (*Article, error) {
+func (r *articleRepo) Get(id uuid.UUID) (Article, error) {
 	var (
 		err   error
 		entry jetstream.KeyValueEntry
-		art   *Article = &Article{}
+		art   Article
 	)
 	entry, err = r.kv.Get(r.ctx, id.String())
 	if err != nil {
-		return nil, fmt.Errorf("get article: %w", err)
+		return art, fmt.Errorf("get article: %w", err)
 	}
-	err = json.Unmarshal(entry.Value(), art)
+	err = json.Unmarshal(entry.Value(), &art)
 	if err != nil {
-		return nil, fmt.Errorf("unmarshal article: %w", err)
+		return art, fmt.Errorf("unmarshal article: %w", err)
 	}
 	art.Rev = entry.Revision()
 	return art, nil
 }
 
-func (r *articleRepo) GetBySLug(slug string) (*Article, error) {
+func (r *articleRepo) GetBySLug(slug string) (Article, error) {
 	var (
 		err   error
 		keys  jetstream.KeyLister
 		key   string
 		entry jetstream.KeyValueEntry
-		art   *Article = &Article{}
+		art   Article
 	)
 	keys, err = r.kv.ListKeys(r.ctx)
 	if err != nil {
-		return nil, fmt.Errorf("list keys: %w", err)
+		return art, fmt.Errorf("list keys: %w", err)
 	}
 	for key = range keys.Keys() {
 		entry, err = r.kv.Get(r.ctx, key)
 		if err != nil {
-			return nil, fmt.Errorf("get article: %w", err)
+			return art, fmt.Errorf("get article: %w", err)
 		}
-		err = json.Unmarshal(entry.Value(), art)
+		err = json.Unmarshal(entry.Value(), &art)
 		if err != nil {
-			return nil, fmt.Errorf("unmarshal article: %w", err)
+			return art, fmt.Errorf("unmarshal article: %w", err)
 		}
 		if art.Slug == slug {
 			art.Rev = entry.Revision()
 			return art, nil
 		}
 	}
-	return nil, fmt.Errorf("article with slug %s not found", slug)
+	return art, fmt.Errorf("article with slug %s not found", slug)
 }
 
-func (r *articleRepo) AllNoContent() ([]ArticleMetadata, error) {
+func (r *articleRepo) AllNoContent() ([]Article, error) {
 	var (
 		err       error
-		art       *Article = &Article{}
+		art       Article
 		keyLister jetstream.KeyLister
 		entry     jetstream.KeyValueEntry
-		arts      []ArticleMetadata
+		arts      []Article
 		keys      []string
 	)
 	keyLister, err = r.kv.ListKeys(r.ctx)
@@ -150,13 +145,16 @@ func (r *articleRepo) AllNoContent() ([]ArticleMetadata, error) {
 		if err != nil {
 			return nil, fmt.Errorf("get article: %w", err)
 		}
-		err = json.Unmarshal(entry.Value(), art)
+		err = json.Unmarshal(entry.Value(), &art)
 		if err != nil {
 			return nil, fmt.Errorf("unmarshal article: %w", err)
 		}
-		arts = append(arts, ArticleMetadata{
+		arts = append(arts, Article{
 			StructVersion: art.StructVersion,
 			Id:            art.Id,
+			Author:        art.Author,
+			PublishedAt:   art.PublishedAt,
+			Tags:          art.Tags,
 			Rev:           entry.Revision(),
 			Slug:          art.Slug,
 			Title:         art.Title,
@@ -167,7 +165,7 @@ func (r *articleRepo) AllNoContent() ([]ArticleMetadata, error) {
 	return arts, nil
 }
 
-func (r *articleRepo) Create(art Article) (*Article, error) {
+func (r *articleRepo) Create(art Article) (Article, error) {
 	var (
 		err  error
 		data []byte
@@ -178,17 +176,17 @@ func (r *articleRepo) Create(art Article) (*Article, error) {
 	art.Id = uuid.New()
 	data, err = json.Marshal(art)
 	if err != nil {
-		return nil, fmt.Errorf("marshal article: %w", err)
+		return art, fmt.Errorf("marshal article: %w", err)
 	}
 	rev, err = r.kv.Create(r.ctx, art.Id.String(), data)
 	if err != nil {
-		return nil, fmt.Errorf("create article: %w", err)
+		return art, fmt.Errorf("create article: %w", err)
 	}
 	art.Rev = rev
-	return &art, nil
+	return art, nil
 }
 
-func (r *articleRepo) Update(art Article) (*Article, error) {
+func (r *articleRepo) Update(art Article) (Article, error) {
 	var (
 		err  error
 		data []byte
@@ -197,15 +195,15 @@ func (r *articleRepo) Update(art Article) (*Article, error) {
 	art.Rev++
 	data, err = json.Marshal(art)
 	if err != nil {
-		return nil, fmt.Errorf("marshal article: %w", err)
+		return art, fmt.Errorf("marshal article: %w", err)
 	}
 
 	rev, err = r.kv.Update(r.ctx, art.Id.String(), data, uint64(art.Rev))
 	if err != nil {
-		return nil, fmt.Errorf("update article: %w", err)
+		return art, fmt.Errorf("update article: %w", err)
 	}
 	art.Rev = rev
-	return &art, nil
+	return art, nil
 }
 
 func (r *articleRepo) Delete(id uuid.UUID) error {
@@ -244,19 +242,20 @@ func (r *articleRepo) GetHistory(id uuid.UUID) ([]Article, error) {
 	return revisions, nil
 }
 
-func (r *articleRepo) GetRevision(id uuid.UUID, revision uint64) (*Article, error) {
+func (r *articleRepo) GetRevision(id uuid.UUID, revision uint64) (Article, error) {
+	var art Article
+
 	entry, err := r.kv.GetRevision(r.ctx, id.String(), revision)
 	if err != nil {
-		return nil, fmt.Errorf("get article revision: %w", err)
+		return art, fmt.Errorf("get article revision: %w", err)
 	}
 
-	var art Article
 	err = json.Unmarshal(entry.Value(), &art)
 	if err != nil {
-		return nil, fmt.Errorf("unmarshal article: %w", err)
+		return art, fmt.Errorf("unmarshal article: %w", err)
 	}
 
-	return &art, nil
+	return art, nil
 }
 
 func (r *articleRepo) Context() context.Context {

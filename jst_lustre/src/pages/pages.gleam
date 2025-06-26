@@ -167,7 +167,7 @@ pub fn from_uri(
 pub fn get_available_slugs(articles: List(Article)) -> List(String) {
   list.map(articles, fn(article) {
     case article {
-      article.ArticleV1(_, slug, _, _, _, _, _, _) -> slug
+      article.ArticleV1(_, slug, _, _, _, _, _, _, _, _, _) -> slug
     }
   })
 }
@@ -179,7 +179,7 @@ fn find_article_by_slug(
 ) -> Result(Article, Nil) {
   list.find(articles, fn(article) {
     case article {
-      article.ArticleV1(_, article_slug, _, _, _, _, _, _) ->
+      article.ArticleV1(_, article_slug, _, _, _, _, _, _, _, _, _) ->
         article_slug == slug
     }
   })
@@ -192,7 +192,7 @@ fn find_article_by_id(
 ) -> Result(Article, Nil) {
   list.find(articles, fn(article) {
     case article {
-      article.ArticleV1(article_id, _, _, _, _, _, _, _) ->
+      article.ArticleV1(article_id, _, _, _, _, _, _, _, _, _, _) ->
         article_id == id_string
     }
   })

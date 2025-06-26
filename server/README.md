@@ -43,7 +43,6 @@ title: Server README
 ```sh
 # Benchmarking the talk package (nats basically)
 server > go test -benchmem -bench . jst_dev/server/talk
-```
     goos: windows
     goarch: amd64
     pkg: jst_dev/server/talk
@@ -52,4 +51,4 @@ server > go test -benchmem -bench . jst_dev/server/talk
     BenchmarkMessagingLoopback-22     16885    61609 ns/op    1396 B/op    25 allocs/op
     PASS
     ok      jst_dev/server/talk     3.421s
-
+```

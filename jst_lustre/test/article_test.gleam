@@ -2,6 +2,7 @@ import article/article.{
   type Article, ArticleV1, article_decoder, article_encoder,
 }
 
+import birl.{type Time}
 import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/int
@@ -22,7 +23,7 @@ import utils/remote_data.{
 pub fn fuzz_article_test() {
   use article <- qc.run(
     qc.default_config() |> qc.with_test_count(15),
-    generator_article(),
+    generator_article_v1(),
   )
   let assert Ok(decoded) =
     article
@@ -100,11 +101,17 @@ pub fn fuzz_article_test() {
 
 // article
 
-fn generator_article() -> qc.Generator(Article) {
-  map8(
+fn generator_article_v1() -> qc.Generator(Article) {
+  map11(
     qc.non_empty_string(),
     qc.non_empty_string(),
     qc.small_strictly_positive_int(),
+    qc.non_empty_string(),
+    qc.list_from(qc.non_empty_string()),
+    qc.option_from(
+      qc.bounded_int(1_700_000_000, 1_800_000_000)
+      |> qc.map(birl.from_unix_milli),
+    ),
     qc.non_empty_string(),
     qc.non_empty_string(),
     qc.non_empty_string(),
@@ -156,7 +163,7 @@ fn generator_uri_path() -> qc.Generator(String) {
   |> qc.map(fn(path) { "/" <> path })
 }
 
-pub fn map8(
+pub fn map11(
   g1: qc.Generator(a),
   g2: qc.Generator(b),
   g3: qc.Generator(c),
@@ -165,15 +172,20 @@ pub fn map8(
   g6: qc.Generator(f),
   g7: qc.Generator(g),
   g8: qc.Generator(h),
-  func: fn(a, b, c, d, e, f, g, h) -> i,
-) -> qc.Generator(i) {
-  qc.map2(
+  g9: qc.Generator(i),
+  g10: qc.Generator(j),
+  g11: qc.Generator(k),
+  func: fn(a, b, c, d, e, f, g, h, i, j, k) -> l,
+) -> qc.Generator(l) {
+  qc.map3(
     qc.tuple4(g1, g2, g3, g4),
     qc.tuple4(g5, g6, g7, g8),
-    fn(tuple1, tuple2) {
+    qc.tuple3(g9, g10, g11),
+    fn(tuple1, tuple2, tuple3) {
       let #(a, b, c, d) = tuple1
       let #(e, f, g, h) = tuple2
-      func(a, b, c, d, e, f, g, h)
+      let #(i, j, k) = tuple3
+      func(a, b, c, d, e, f, g, h, i, j, k)
     },
   )
 }

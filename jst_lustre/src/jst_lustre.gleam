@@ -2,6 +2,7 @@
 
 import article/article.{type Article, ArticleV1}
 import article/draft
+import birl.{type Time}
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -107,17 +108,14 @@ type Msg {
   ArticleDraftUpdatedLeading(article: Article, text: String)
   ArticleDraftUpdatedSubtitle(article: Article, text: String)
   ArticleDraftUpdatedContent(article: Article, content: String)
-  // ARTICLE DRAFT SAVE & CREATE & DISCARD
-  ArticleDraftSaveClicked(article: Article)
-  ArticleDraftSaveResponse(id: String, result: Result(Article, HttpError))
-  ArticleDraftDiscardClicked(article: Article)
   // ARTICLE ACTIONS
+  ArticleUpdateResponse(id: String, result: Result(Article, HttpError))
+  ArticleDraftSaveClicked(article: Article)
+  ArticleDraftDiscardClicked(article: Article)
   ArticleDeleteClicked(article: Article)
   ArticleDeleteResponse(id: String, result: Result(String, HttpError))
   ArticlePublishClicked(article: Article)
-  ArticlePublishResponse(id: String, result: Result(Article, HttpError))
   ArticleUnpublishClicked(article: Article)
-  ArticleUnpublishResponse(id: String, result: Result(Article, HttpError))
   // AUTH
   AuthLoginClicked(username: String, password: String)
   AuthLoginResponse(result: Result(session.Session, HttpError))
@@ -198,8 +196,32 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       case result, model.route {
         Ok(articles), routes.Article(slug) -> {
           case list.find(articles, fn(article) { article.slug == slug }) {
-            Ok(ArticleV1(id, _, _, _, _, _, NotInitialized, _))
-            | Ok(ArticleV1(id, _, _, _, _, _, Errored(_), _)) -> {
+            Ok(ArticleV1(
+              id:,
+              slug: _,
+              author: _,
+              title: _,
+              leading: _,
+              subtitle: _,
+              content: NotInitialized,
+              draft: _,
+              published_at: _,
+              revision: _,
+              tags: _,
+            ))
+            | Ok(ArticleV1(
+                id:,
+                slug: _,
+                author: _,
+                title: _,
+                leading: _,
+                subtitle: _,
+                content: NotInitialized,
+                draft: _,
+                published_at: _,
+                revision: _,
+                tags: _,
+              )) -> {
               let articles_with_pending_content =
                 list.map(articles, fn(article) {
                   case article.slug == slug {
@@ -308,11 +330,14 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           _,
           _slug,
           _revision,
+          _author,
+          _tags,
+          _published_at,
           _title,
           _leading,
           _subtitle,
           _content,
-          Some(_draft),
+          draft: Some(_draft),
         ) -> {
           let updated_article =
             article.draft_update(article, fn(draft) {
@@ -338,129 +363,71 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       }
     }
     ArticleDraftUpdatedTitle(article, text) -> {
-      case article {
-        ArticleV1(
-          _id,
-          _slug,
-          _revision,
-          _title,
-          _leading,
-          _subtitle,
-          _content,
-          Some(_draft),
-        ) -> {
-          let updated_article =
-            article.draft_update(article, fn(draft) {
-              draft.set_title(draft, text)
-            })
-          let updated_articles =
-            remote_data.try_update(
-              model.articles,
-              list.map(_, fn(article_current) {
-                case article.id == article_current.id {
-                  True -> updated_article
-                  False -> article_current
-                }
-              }),
-            )
-          #(Model(..model, articles: updated_articles), effect.none())
-        }
-        _ -> #(model, effect.none())
-      }
+      let updated_article =
+        article.draft_update(article, fn(draft) { draft.set_title(draft, text) })
+      let updated_articles =
+        remote_data.try_update(
+          model.articles,
+          list.map(_, fn(article_current) {
+            case article.id == article_current.id {
+              True -> updated_article
+              False -> article_current
+            }
+          }),
+        )
+      #(Model(..model, articles: updated_articles), effect.none())
     }
     ArticleDraftUpdatedLeading(article, text) -> {
-      case article {
-        ArticleV1(
-          _id,
-          _slug,
-          _revision,
-          _title,
-          _leading,
-          _subtitle,
-          _content,
-          Some(_draft),
-        ) -> {
-          let updated_article =
-            article.draft_update(article, fn(draft) {
-              draft.set_leading(draft, text)
-            })
-          let updated_articles =
-            remote_data.try_update(
-              model.articles,
-              list.map(_, fn(article_current) {
-                case article.id == article_current.id {
-                  True -> updated_article
-                  False -> article_current
-                }
-              }),
-            )
-          #(Model(..model, articles: updated_articles), effect.none())
-        }
-        _ -> #(model, effect.none())
-      }
+      let updated_article =
+        article.draft_update(article, fn(draft) {
+          draft.set_leading(draft, text)
+        })
+      let updated_articles =
+        remote_data.try_update(
+          model.articles,
+          list.map(_, fn(article_current) {
+            case article.id == article_current.id {
+              True -> updated_article
+              False -> article_current
+            }
+          }),
+        )
+      #(Model(..model, articles: updated_articles), effect.none())
     }
     ArticleDraftUpdatedSubtitle(article, text) -> {
-      case article {
-        ArticleV1(
-          _id,
-          _slug,
-          _revision,
-          _title,
-          _leading,
-          _subtitle,
-          _content,
-          Some(_draft),
-        ) -> {
-          let updated_article =
-            article.draft_update(article, fn(draft) {
-              draft.set_subtitle(draft, text)
-            })
-          let updated_articles =
-            remote_data.map_loaded(model.articles, fn(article_current) {
+      let updated_article =
+        article.draft_update(article, fn(draft) {
+          draft.set_subtitle(draft, text)
+        })
+      let updated_articles =
+        remote_data.map_loaded(model.articles, fn(article_current) {
+          case article.id == article_current.id {
+            True -> updated_article
+            False -> article_current
+          }
+        })
+      #(Model(..model, articles: updated_articles), effect.none())
+    }
+    ArticleDraftUpdatedContent(article, content) -> {
+      let updated_article =
+        article.draft_update(article, fn(draft) {
+          draft.set_content(draft, content)
+        })
+      #(
+        Model(
+          ..model,
+          articles: remote_data.try_update(
+            model.articles,
+            list.map(_, fn(article_current) {
               case article.id == article_current.id {
                 True -> updated_article
                 False -> article_current
               }
-            })
-          #(Model(..model, articles: updated_articles), effect.none())
-        }
-        _ -> #(model, effect.none())
-      }
-    }
-    ArticleDraftUpdatedContent(article, content) -> {
-      case article {
-        ArticleV1(
-          _id,
-          _slug,
-          _revision,
-          _title,
-          _leading,
-          _subtitle,
-          _content,
-          Some(_draft),
-        ) -> {
-          let updated_article =
-            article.draft_update(article, fn(draft) {
-              draft.set_content(draft, content)
-            })
-          #(
-            Model(
-              ..model,
-              articles: remote_data.try_update(
-                model.articles,
-                list.map(_, fn(article_current) {
-                  case article.id == article_current.id {
-                    True -> updated_article
-                    False -> article_current
-                  }
-                }),
-              ),
-            ),
-            effect.none(),
-          )
-        }
-        _ -> #(model, effect.none())
-      }
+            }),
+          ),
+        ),
+        effect.none(),
+      )
     }
     // ARTICLE DRAFT DISCARD
     ArticleDraftDiscardClicked(article) -> {
@@ -513,7 +480,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             Model(..model, articles: updated_articles),
             effect.batch([
               article.article_update(
-                ArticleDraftSaveResponse(updated_article.id, _),
+                ArticleUpdateResponse(updated_article.id, _),
                 updated_article,
                 model.base_uri,
               ),
@@ -529,7 +496,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         None -> #(model, effect.none())
       }
     }
-    ArticleDraftSaveResponse(id, result) -> {
+    ArticleUpdateResponse(id, result) -> {
       case result {
         Ok(saved_article) -> {
           let updated_articles =
@@ -545,7 +512,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           #(Model(..model, articles: updated_articles), effect.none())
         }
         Error(err) -> {
-          echo "article draft save response error"
+          echo "article update response error"
           echo err
           #(model, effect.none())
         }
@@ -646,69 +613,26 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     ArticlePublishClicked(article) -> {
       echo "article publish clicked"
+      let updated_article = ArticleV1(..article, published_at: Some(birl.now()))
       #(
         model,
-        article.article_publish(
-          ArticlePublishResponse(article.id, _),
-          article.id,
+        article.article_update(
+          ArticleUpdateResponse(article.id, _),
+          updated_article,
           model.base_uri,
         ),
       )
-    }
-    ArticlePublishResponse(id, result) -> {
-      case result {
-        Ok(published_article) -> {
-          let updated_articles =
-            remote_data.try_update(
-              model.articles,
-              list.map(_, fn(article_current) {
-                case id == article_current.id {
-                  True -> published_article
-                  False -> article_current
-                }
-              }),
-            )
-          #(Model(..model, articles: updated_articles), effect.none())
-        }
-        Error(err) -> {
-          echo "article publish response error"
-          echo err
-          #(model, effect.none())
-        }
-      }
     }
     ArticleUnpublishClicked(article) -> {
       echo "article unpublish clicked"
       #(
         model,
-        article.article_unpublish(
-          ArticleUnpublishResponse(article.id, _),
-          article.id,
+        article.article_update(
+          ArticleUpdateResponse(article.id, _),
+          ArticleV1(..article, published_at: None),
           model.base_uri,
         ),
       )
-    }
-    ArticleUnpublishResponse(id, result) -> {
-      case result {
-        Ok(unpublished_article) -> {
-          let updated_articles =
-            remote_data.try_update(
-              model.articles,
-              list.map(_, fn(article_current) {
-                case id == article_current.id {
-                  True -> unpublished_article
-                  False -> article_current
-                }
-              }),
-            )
-          #(Model(..model, articles: updated_articles), effect.none())
-        }
-        Error(err) -> {
-          echo "article unpublish response error"
-          echo err
-          #(model, effect.none())
-        }
-      }
     }
   }
 }
@@ -1080,7 +1004,19 @@ fn view_article_listing(
     |> list.sort(fn(a, b) { string.compare(a.slug, b.slug) })
     |> list.map(fn(article) {
       case article {
-        ArticleV1(_, slug, _, title, leading, subtitle, _content, _draft_option) -> {
+        ArticleV1(
+          id: _,
+          slug:,
+          author: _,
+          title:,
+          leading:,
+          subtitle:,
+          content: _,
+          draft: _,
+          published_at: _,
+          revision: _,
+          tags: _,
+        ) -> {
           let article_uri = routes.Article(article.slug) |> routes.to_uri
           html.article([attr.class("mt-14")], [
             html.a(
@@ -1128,6 +1064,9 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
       }
       let draft_article =
         article.ArticleV1(
+          author: article.author,
+          published_at: article.published_at,
+          tags: article.tags,
           title: draft.title(draft),
           content: Loaded(preview_content),
           draft: None,
@@ -1554,13 +1493,13 @@ fn view_article_actions(
   let can_edit = article.can_edit(article, session)
   let can_publish = article.can_publish(article, session)
   let can_delete = article.can_delete(article, session)
-  
+
   // Determine which is the last button for border-e
   let edit_is_last = can_edit && !can_publish && !can_delete
   let publish_is_last = can_publish && !can_delete
   let unpublish_is_last = can_publish && !can_delete
   let delete_is_last = can_delete
-  
+
   html.div([attr.class("flex")], [
     case can_edit {
       True ->
