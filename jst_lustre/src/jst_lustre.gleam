@@ -14,6 +14,7 @@ import lustre/attribute as attr
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
+import lustre/element/svg
 import lustre/event
 import modem
 import pages/pages
@@ -47,6 +48,7 @@ type Model {
     articles: RemoteData(List(Article), HttpError),
     djot_demo_content: String,
     edit_view_mode: EditViewMode,
+    profile_menu_open: Bool,
   )
 }
 
@@ -67,6 +69,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
       base_uri: uri,
       djot_demo_content: initial_djot,
       edit_view_mode: EditViewModeEdit,
+      profile_menu_open: False,
     )
   let effect_modem =
     modem.init(fn(uri) {
@@ -95,6 +98,8 @@ type Msg {
   // NAVIGATION
   UserNavigatedTo(uri: Uri)
   UserMouseDownNavigation(uri: Uri)
+  // HAMBURGER MENU
+  ProfileMenuToggled
   // MESSAGES
   // UserMessageDismissed(msg: UserMessage)
   // LOCALSTORAGE
@@ -179,6 +184,13 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       echo "user mouse down navigation"
       echo uri
       #(model, modem.push(uri.to_string(uri), None, None))
+    }
+    // MENU
+    ProfileMenuToggled -> {
+      #(
+        Model(..model, profile_menu_open: !model.profile_menu_open),
+        effect.none(),
+      )
     }
     // Browser Persistance
     PersistGotModel(opt:) -> {
@@ -935,7 +947,7 @@ fn page_from_model(model: Model) -> pages.Page {
 // VIEW HEADER ----------------------------------------------------------------
 fn view_header(model: Model) -> Element(Msg) {
   html.nav(
-    [attr.class("py-3 border-b bg-zinc-800 border-pink-700 font-mono sticky top-0 z-10 shadow-md")],
+    [attr.class("py-2 border-b bg-zinc-800 border-pink-700 font-mono relative")],
     [
       html.div(
         [
@@ -949,50 +961,115 @@ fn view_header(model: Model) -> Element(Msg) {
               html.text("jst.dev"),
             ]),
           ]),
-          html.ul([attr.class("flex space-x-8 pr-2")], [
-            html.li([], [
-              html.button(
-                [
-                  event.on_mouse_down(AuthLoginClicked("johan-st", "password")),
-                  attr.class("bg-pink-700 text-white px-2 rounded-md"),
-                ],
-                [html.text("Login")],
+          html.div([attr.class("flex items-center space-x-8")], [
+            // Desktop navigation
+            html.ul([attr.class("hidden md:flex space-x-8 pr-2")], [
+              view_header_link(
+                target: routes.Articles,
+                current: model.route,
+                label: "Articles",
+              ),
+              view_header_link(
+                target: routes.About,
+                current: model.route,
+                label: "About",
+              ),
+              view_header_link(
+                target: routes.DjotDemo,
+                current: model.route,
+                label: "Djot Demo",
               ),
             ]),
-            html.li([], [
+            // Hamburger menu for auth actions
+            html.div([attr.class("relative")], [
               html.button(
                 [
-                  event.on_mouse_down(AuthLogoutClicked),
-                  attr.class("bg-pink-700 text-white px-2 rounded-md"),
+                  attr.class(
+                    "p-2 rounded-md bg-zinc-700 hover:bg-zinc-600 transition-colors",
+                  ),
+                  event.on_mouse_down(ProfileMenuToggled),
                 ],
-                [html.text("Logout")],
-              ),
-            ]),
-            html.li([], [
-              html.button(
                 [
-                  event.on_mouse_down(AuthCheckClicked),
-                  attr.class("bg-teal-700 text-white px-2 rounded-md"),
+                  html.svg(
+                    [
+                      attr.attribute("fill", "none"),
+                      attr.attribute("viewBox", "0 0 24 24"),
+                      attr.attribute("stroke-width", "1.5"),
+                      attr.attribute("stroke", "currentColor"),
+                      attr.class("w-6 h-6"),
+                    ],
+                    [
+                      svg.path([
+                        attr.attribute("stroke-linecap", "round"),
+                        attr.attribute("stroke-linejoin", "round"),
+                        attr.attribute(
+                          "d",
+                          "M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5",
+                        ),
+                      ]),
+                    ],
+                  ),
                 ],
-                [html.text("Check")],
               ),
+              // Dropdown menu
+              case model.profile_menu_open {
+                True ->
+                  html.div(
+                    [
+                      attr.class(
+                        "absolute right-0 mt-2 w-48 rounded-md shadow-lg bg-zinc-700 ring-1 ring-black ring-opacity-5 z-50",
+                      ),
+                    ],
+                    [
+                      html.div([attr.class("py-1")], [
+                        html.button(
+                          [
+                            attr.class(
+                              "block w-full text-left px-4 py-2 text-sm text-zinc-200 hover:bg-green-800 transition-colors cursor-pointe",
+                            ),
+                            attr.classes([
+                              #(
+                                "hidden",
+                                model.session != session.Unauthenticated,
+                              ),
+                            ]),
+                            event.on_mouse_down(AuthLoginClicked(
+                              "johan-st",
+                              "password",
+                            )),
+                          ],
+                          [html.text("Login")],
+                        ),
+                        html.button(
+                          [
+                            attr.class(
+                              "block w-full text-left px-4 py-2 text-sm text-zinc-200 hover:bg-orange-800 transition-colors cursor-pointe",
+                            ),
+                            attr.classes([
+                              #(
+                                "hidden",
+                                model.session == session.Unauthenticated,
+                              ),
+                            ]),
+                            event.on_mouse_down(AuthLogoutClicked),
+                          ],
+                          [html.text("Logout")],
+                        ),
+                        html.button(
+                          [
+                            attr.class(
+                              "block w-full text-left px-4 py-2 text-sm text-zinc-200 hover:bg-teal-800 transition-colors cursor-pointe",
+                            ),
+                            event.on_mouse_down(AuthCheckClicked),
+                          ],
+                          [html.text("Check")],
+                        ),
+                      ]),
+                    ],
+                  )
+                False -> html.div([], [])
+              },
             ]),
-            view_header_link(
-              // target: pages.PageArticleList([], model.session),
-              target: routes.Articles,
-              current: model.route,
-              label: "Articles",
-            ),
-            view_header_link(
-              target: routes.About,
-              current: model.route,
-              label: "About",
-            ),
-            view_header_link(
-              target: routes.DjotDemo,
-              current: model.route,
-              label: "Djot Demo",
-            ),
           ]),
         ],
       ),
