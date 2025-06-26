@@ -189,3 +189,63 @@ pub fn map11(
     },
   )
 }
+
+pub fn test_tags_consistency_between_metadata_and_full_article() {
+  // Test article with specific tags
+  let test_article = ArticleV1(
+    id: "test-id-123",
+    slug: "test-article",
+    revision: 1,
+    author: "test-author",
+    tags: ["gleam", "test", "bug-fix"],
+    published_at: Some(birl.from_unix_milli(1700000000000)),
+    title: "Test Article",
+    subtitle: "Test subtitle",
+    leading: "Test leading text",
+    content: NotInitialized,
+    draft: None,
+  )
+
+  // Test article when loaded with full content
+  let full_article = ArticleV1(
+    ..test_article,
+    content: Loaded("# Test Content\n\nThis is test content."),
+  )
+
+  // Both should have the same tags
+  should.equal(test_article.tags, full_article.tags)
+  should.equal(test_article.tags, ["gleam", "test", "bug-fix"])
+  should.equal(full_article.tags, ["gleam", "test", "bug-fix"])
+}
+
+pub fn test_article_roundtrip_preserves_tags() {
+  let original_article = ArticleV1(
+    id: "test-id-456",
+    slug: "roundtrip-test",
+    revision: 2,
+    author: "test-author",
+    tags: ["preservation", "tags", "roundtrip"],
+    published_at: Some(birl.from_unix_milli(1700000000000)),
+    title: "Roundtrip Test",
+    subtitle: "Testing tag preservation",
+    leading: "This tests that tags are preserved",
+    content: Loaded("# Content\n\nTest content here."),
+    draft: None,
+  )
+
+  // Encode to JSON and decode back
+  let assert Ok(roundtrip_article) =
+    original_article
+    |> article_encoder()
+    |> json.to_string()
+    |> json.parse(article_decoder())
+
+  // Tags should be preserved
+  should.equal(original_article.tags, roundtrip_article.tags)
+  should.equal(roundtrip_article.tags, ["preservation", "tags", "roundtrip"])
+  
+  // All other fields should also be preserved
+  should.equal(original_article.id, roundtrip_article.id)
+  should.equal(original_article.author, roundtrip_article.author)
+  should.equal(original_article.published_at, roundtrip_article.published_at)
+}

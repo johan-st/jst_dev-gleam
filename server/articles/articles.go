@@ -83,15 +83,19 @@ func (r *articleRepo) Get(id uuid.UUID) (Article, error) {
 		entry jetstream.KeyValueEntry
 		art   Article
 	)
+	fmt.Printf("[DEBUG] Get requesting article with ID: %s\n", id.String())
 	entry, err = r.kv.Get(r.ctx, id.String())
 	if err != nil {
 		return art, fmt.Errorf("get article: %w", err)
 	}
+	fmt.Printf("[DEBUG] Get raw entry value length: %d\n", len(entry.Value()))
 	err = json.Unmarshal(entry.Value(), &art)
 	if err != nil {
 		return art, fmt.Errorf("unmarshal article: %w", err)
 	}
 	art.Rev = entry.Revision()
+	fmt.Printf("[DEBUG] Get article %s (%s) tags: %v\n", art.Slug, art.Id, art.Tags)
+	fmt.Printf("[DEBUG] Get article %s author: %s, published_at: %d\n", art.Slug, art.Author, art.PublishedAt)
 	return art, nil
 }
 
@@ -138,8 +142,9 @@ func (r *articleRepo) AllNoContent() ([]Article, error) {
 		return nil, fmt.Errorf("list keys: %w", err)
 	}
 	for key := range keyLister.Keys() {
+		art = Article{}
 		keys = append(keys, key)
-		fmt.Println(key)
+		fmt.Printf("[DEBUG] AllNoContent processing key: %s\n", key)
 		entry, err = r.kv.Get(r.ctx, key)
 		if err != nil {
 			return nil, fmt.Errorf("get article: %w", err)
@@ -148,7 +153,9 @@ func (r *articleRepo) AllNoContent() ([]Article, error) {
 		if err != nil {
 			return nil, fmt.Errorf("unmarshal article: %w", err)
 		}
-		arts = append(arts, Article{
+		fmt.Printf("[DEBUG] AllNoContent article %s (%s) tags: %v\n", art.Slug, art.Id, art.Tags)
+
+		metadataArticle := Article{
 			StructVersion: art.StructVersion,
 			Id:            art.Id,
 			Author:        art.Author,
@@ -159,8 +166,11 @@ func (r *articleRepo) AllNoContent() ([]Article, error) {
 			Title:         art.Title,
 			Subtitle:      art.Subtitle,
 			Leading:       art.Leading,
-		})
+		}
+		fmt.Printf("[DEBUG] AllNoContent metadata article %s tags: %v\n", metadataArticle.Slug, metadataArticle.Tags)
+		arts = append(arts, metadataArticle)
 	}
+	fmt.Printf("[DEBUG] AllNoContent returning %d articles\n", len(arts))
 	return arts, nil
 }
 
@@ -191,11 +201,17 @@ func (r *articleRepo) Update(art Article) (Article, error) {
 		data []byte
 		rev  uint64
 	)
+	fmt.Printf("[DEBUG] Update article %s (%s) incoming tags: %v\n", art.Slug, art.Id, art.Tags)
+	fmt.Printf("[DEBUG] Update article %s author: %s, published_at: %d\n", art.Slug, art.Author, art.PublishedAt)
+
 	art.Rev++
 	data, err = json.Marshal(art)
 	if err != nil {
 		return art, fmt.Errorf("marshal article: %w", err)
 	}
+
+	fmt.Printf("[DEBUG] Update marshaled data length: %d\n", len(data))
+	fmt.Printf("[DEBUG] Update marshaled data: %s\n", string(data))
 
 	// rev, err = r.kv.Update(r.ctx, art.Id.String(), data, uint64(art.Rev)) // TODO: use CAS
 	rev, err = r.kv.Put(r.ctx, art.Id.String(), data)
@@ -203,6 +219,7 @@ func (r *articleRepo) Update(art Article) (Article, error) {
 		return art, fmt.Errorf("update article: %w", err)
 	}
 	art.Rev = rev
+	fmt.Printf("[DEBUG] Update completed for article %s, new revision: %d\n", art.Slug, art.Rev)
 	return art, nil
 }
 

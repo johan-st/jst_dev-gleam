@@ -349,6 +349,12 @@ func handleArticleList(l *jst_log.Logger, repo articles.ArticleRepo) http.Handle
 			return
 		}
 		logger.Debug("articles count: %d", len(articles))
+		
+		// Debug log each article's tags
+		for i, art := range articles {
+			fmt.Printf("[DEBUG] ArticleList article %d: %s tags: %v\n", i, art.Slug, art.Tags)
+		}
+		
 		respJson(w, Resp{Articles: articles}, http.StatusOK)
 	})
 }
@@ -381,6 +387,8 @@ func handleArticle(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 			return
 		}
 		logger.Debug("article: %s (rev: %d)", art.Slug, art.Rev)
+		fmt.Printf("[DEBUG] ArticleGet returning article %s tags: %v\n", art.Slug, art.Tags)
+		fmt.Printf("[DEBUG] ArticleGet returning article %s author: %s, published_at: %d\n", art.Slug, art.Author, art.PublishedAt)
 		respJson(w, art, http.StatusOK)
 	})
 }
@@ -466,8 +474,13 @@ func handleArticleUpdate(l *jst_log.Logger, repo articles.ArticleRepo) http.Hand
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
+		
+		fmt.Printf("[DEBUG] ArticleUpdate received data for %s:\n", art.Slug)
+		fmt.Printf("[DEBUG] ArticleUpdate received tags: %v\n", art.Tags)
+		fmt.Printf("[DEBUG] ArticleUpdate received author: %s\n", art.Author)
+		fmt.Printf("[DEBUG] ArticleUpdate received published_at: %d\n", art.PublishedAt)
 
-		// Update article using client's revision
+		// Update article using client's revision - preserve all fields
 		art, err = repo.Update(articles.Article{
 			Id:            idUuid,
 			StructVersion: 1,
@@ -476,6 +489,9 @@ func handleArticleUpdate(l *jst_log.Logger, repo articles.ArticleRepo) http.Hand
 			Title:         art.Title,
 			Subtitle:      art.Subtitle,
 			Leading:       art.Leading,
+			Author:        art.Author,        // Preserve author
+			PublishedAt:   art.PublishedAt,   // Preserve published date
+			Tags:          art.Tags,          // Preserve tags
 			Content:       art.Content,
 		})
 		if err != nil {

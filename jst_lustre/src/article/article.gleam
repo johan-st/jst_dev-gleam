@@ -322,14 +322,21 @@ pub fn article_encoder(article: Article) -> json.Json {
         Loaded(content) -> json.string(content)
         _ -> json.string("")
       }
+      let published_at_timestamp = case published_at {
+        Some(time) -> json.int(birl.to_unix_milli(time))
+        None -> json.int(0)
+      }
       json.object([
-        #("version", json.int(1)),
+        #("struct_version", json.int(1)),
         #("id", json.string(id)),
         #("revision", json.int(revision)),
         #("slug", json.string(slug)),
         #("title", json.string(title)),
         #("leading", json.string(leading)),
         #("subtitle", json.string(subtitle)),
+        #("author", json.string(author)),
+        #("published_at", published_at_timestamp),
+        #("tags", json.array(tags, json.string)),
         #("content", content_string),
         // #("draft", draft |> draft_encoder),
       ])
