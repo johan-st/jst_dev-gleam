@@ -6,6 +6,7 @@ import birl.{type Time}
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/order
 import gleam/string
 import gleam/uri.{type Uri}
 import lustre
@@ -112,6 +113,8 @@ type Msg {
   ArticleUpdateResponse(id: String, result: Result(Article, HttpError))
   ArticleDraftSaveClicked(article: Article)
   ArticleDraftDiscardClicked(article: Article)
+  ArticleCreateClicked
+  ArticleCreateResponse(result: Result(Article, HttpError))
   ArticleDeleteClicked(article: Article)
   ArticleDeleteResponse(id: String, result: Result(String, HttpError))
   ArticlePublishClicked(article: Article)
@@ -576,6 +579,66 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(Model(..model, edit_view_mode: new_mode), effect.none())
     }
     // ARTICLE ACTIONS
+    ArticleCreateClicked -> {
+      echo "article create clicked"
+      // Create a new article with default values
+      let new_article =
+        ArticleV1(
+          id: "",
+          // Will be set by server
+          slug: "new-article",
+          revision: 1,
+          author: "current-user",
+          // TODO: get from session
+          tags: [],
+          published_at: None,
+          title: "New Article",
+          subtitle: "A new article subtitle",
+          leading: "This is a new article. Start editing to customize it.",
+          content: Loaded(
+            "# New Article\n\nStart writing your article content here...",
+          ),
+          draft: None,
+        )
+      #(
+        model,
+        article.article_create(
+          ArticleCreateResponse,
+          new_article,
+          model.base_uri,
+        ),
+      )
+    }
+    ArticleCreateResponse(result) -> {
+      case result {
+        Ok(created_article) -> {
+          echo "article created successfully with id: " <> created_article.id
+          // Add the new article to the local state
+          let updated_articles = case model.articles {
+            Loaded(articles) -> Loaded([created_article, ..articles])
+            other -> other
+            // If articles aren't loaded, don't update
+          }
+          #(
+            Model(..model, articles: updated_articles),
+            // Navigate to edit the newly created article
+            modem.push(
+              routes.ArticleEdit(created_article.id)
+                |> routes.to_uri
+                |> uri.to_string,
+              None,
+              None,
+            ),
+          )
+        }
+        Error(err) -> {
+          echo "article creation error"
+          echo err
+          // TODO: Show user-friendly error message
+          #(model, effect.none())
+        }
+      }
+    }
     ArticleDeleteClicked(article) -> {
       echo "article delete clicked"
       #(
@@ -999,9 +1062,32 @@ fn view_article_listing(
   articles: List(Article),
   session: session.Session,
 ) -> List(Element(Msg)) {
+  let filtered_articles = case session {
+    session.Unauthenticated ->
+      articles
+      |> list.filter(fn(article) {
+        case article.published_at {
+          Some(_) -> True
+          None -> False
+        }
+      })
+    _ -> articles
+  }
+
   let articles_elements =
-    articles
-    |> list.sort(fn(a, b) { string.compare(a.slug, b.slug) })
+    filtered_articles
+    |> list.sort(fn(a, b) {
+      case a.published_at, b.published_at {
+        // Both unpublished - sort by slug
+        None, None -> string.compare(a.slug, b.slug)
+        // A is unpublished, B is published - A comes first
+        None, Some(_) -> order.Lt
+        // A is published, B is unpublished - B comes first  
+        Some(_), None -> order.Gt
+        // Both published - sort by date (most recent first)
+        Some(date_a), Some(date_b) -> birl.compare(date_b, date_a)
+      }
+    })
     |> list.map(fn(article) {
       case article {
         ArticleV1(
@@ -1015,9 +1101,9 @@ fn view_article_listing(
           draft: _,
           published_at: _,
           revision: _,
-          tags: _,
+          tags:,
         ) -> {
-          let article_uri = routes.Article(article.slug) |> routes.to_uri
+          let article_uri = routes.Article(slug) |> routes.to_uri
           html.article([attr.class("mt-14")], [
             html.a(
               [
@@ -1038,20 +1124,40 @@ fn view_article_listing(
                     ],
                     [html.text(title)],
                   ),
-                  case article.can_edit(article, session) {
-                    True -> view_edit_link(article, "edit")
-                    False -> element.none()
-                  },
+                  view_publication_status(article),
                 ]),
                 view_subtitle(subtitle, slug),
                 view_simple_paragraph(leading),
+                html.div([attr.class("flex justify-end mt-2")], [
+                  view_article_tags(tags),
+                ]),
               ],
             ),
           ])
         }
       }
     })
-  [view_title("Articles", "articles"), ..articles_elements]
+
+  let header_section = [
+    html.div([attr.class("flex justify-between items-center mb-4")], [
+      view_title("Articles", "articles"),
+      case session {
+        session.Authenticated(_) ->
+          html.button(
+            [
+              attr.class(
+                "text-gray-500 pe-4 text-underline pt-2 hover:text-teal-300 hover:border-teal-300 border-t border-gray-500 border-e",
+              ),
+              event.on_mouse_down(ArticleCreateClicked),
+            ],
+            [html.text("New")],
+          )
+        _ -> element.none()
+      },
+    ]),
+  ]
+
+  list.append(header_section, articles_elements)
 }
 
 fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
@@ -1084,7 +1190,7 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
           html.button(
             [
               attr.class(
-                "px-4 py-2 bg-pink-700 text-white rounded-md hover:bg-pink-600 transition-colors duration-200",
+                "px-4 py-2 bg-pink-700 text-white rounded-md hover:bg-pink-700 transition-colors duration-200",
               ),
               event.on_mouse_down(EditViewModeToggled),
             ],
@@ -1153,7 +1259,7 @@ fn view_edit_actions(draft: draft.Draft, article: Article) -> List(Element(Msg))
       ]),
       html.input([
         attr.class(
-          "w-full bg-zinc-800 border border-zinc-600 rounded-md p-2 font-light text-zinc-100 focus:border-pink-500 focus:ring-1 focus:ring-pink-500 focus:outline-none transition-colors duration-200",
+          "w-full bg-zinc-800 border border-zinc-600 rounded-md p-2 font-light text-zinc-100 focus:border-pink-700 focus:ring-1 focus:ring-pink-700 focus:outline-none transition-colors duration-200",
         ),
         attr.value(draft.slug(draft)),
         attr.id("edit-" <> article.slug <> "-" <> "Slug"),
@@ -1182,7 +1288,7 @@ fn view_edit_actions(draft: draft.Draft, article: Article) -> List(Element(Msg))
       html.textarea(
         [
           attr.class(
-            "w-full h-24 bg-zinc-800 border border-zinc-600 rounded-md p-2 font-bold text-zinc-100 resize-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500 focus:outline-none transition-colors duration-200",
+            "w-full h-24 bg-zinc-800 border border-zinc-600 rounded-md p-2 font-bold text-zinc-100 resize-none focus:border-pink-700 focus:ring-1 focus:ring-pink-700 focus:outline-none transition-colors duration-200",
           ),
           attr.value(draft.leading(draft)),
           attr.id("edit-" <> article.slug <> "-" <> "Leading"),
@@ -1200,7 +1306,7 @@ fn view_edit_actions(draft: draft.Draft, article: Article) -> List(Element(Msg))
       html.textarea(
         [
           attr.class(
-            "w-full h-96 bg-zinc-800 border border-zinc-600 rounded-md p-4 font-mono text-sm text-zinc-100 resize-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500 focus:outline-none transition-colors duration-200",
+            "w-full h-96 bg-zinc-800 border border-zinc-600 rounded-md p-4 font-mono text-sm text-zinc-100 resize-none focus:border-pink-700 focus:ring-1 focus:ring-pink-700 focus:outline-none transition-colors duration-200",
           ),
           attr.value(draft.content(draft)),
           event.on_input(ArticleDraftUpdatedContent(article, _)),
@@ -1250,7 +1356,7 @@ fn view_djot_quick_reference() -> Element(Msg) {
   html.div(
     [attr.class("mt-8 p-4 bg-zinc-800 rounded-lg border border-zinc-700")],
     [
-      html.h3([attr.class("text-lg text-pink-600 font-light")], [
+      html.h3([attr.class("text-lg text-pink-700 font-light")], [
         html.text("Djot Quick Reference"),
       ]),
       html.p([attr.class("text-zinc-300 mb-6")], [
@@ -1275,7 +1381,7 @@ fn view_djot_quick_reference() -> Element(Msg) {
         ],
         [
           html.div([], [
-            html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+            html.h4([attr.class("text-pink-700 font-medium mb-2")], [
               html.text("Headings"),
             ]),
             html.code([attr.class("text-zinc-300")], [
@@ -1285,7 +1391,7 @@ fn view_djot_quick_reference() -> Element(Msg) {
             ]),
           ]),
           html.div([], [
-            html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+            html.h4([attr.class("text-pink-700 font-medium mb-2")], [
               html.text("Text"),
             ]),
             html.code([attr.class("text-zinc-300")], [
@@ -1295,7 +1401,7 @@ fn view_djot_quick_reference() -> Element(Msg) {
             ]),
           ]),
           html.div([], [
-            html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+            html.h4([attr.class("text-pink-700 font-medium mb-2")], [
               html.text("Lists"),
             ]),
             html.code([attr.class("text-zinc-300")], [
@@ -1305,7 +1411,7 @@ fn view_djot_quick_reference() -> Element(Msg) {
             ]),
           ]),
           html.div([], [
-            html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+            html.h4([attr.class("text-pink-700 font-medium mb-2")], [
               html.text("Links"),
             ]),
             html.code([attr.class("text-zinc-300")], [
@@ -1315,7 +1421,7 @@ fn view_djot_quick_reference() -> Element(Msg) {
             ]),
           ]),
           html.div([], [
-            html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+            html.h4([attr.class("text-pink-700 font-medium mb-2")], [
               html.text("Code Blocks"),
             ]),
             html.code([attr.class("text-zinc-300")], [
@@ -1325,7 +1431,7 @@ fn view_djot_quick_reference() -> Element(Msg) {
             ]),
           ]),
           html.div([], [
-            html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+            html.h4([attr.class("text-pink-700 font-medium mb-2")], [
               html.text("Blockquotes"),
             ]),
             html.code([attr.class("text-zinc-300")], [
@@ -1368,19 +1474,19 @@ fn view_article_edit_input(
   let input_classes = case input_type {
     ArticleEditInputTypeSlug ->
       attr.class(
-        "w-full bg-zinc-800 border border-zinc-600 rounded-md p-2 font-light text-zinc-100 focus:border-pink-500 focus:ring-1 focus:ring-pink-500 focus:outline-none transition-colors duration-200",
+        "w-full bg-zinc-800 border border-zinc-600 rounded-md p-2 font-light text-zinc-100 focus:border-pink-700 focus:ring-1 focus:ring-pink-700 focus:outline-none transition-colors duration-200",
       )
     ArticleEditInputTypeTitle ->
       attr.class(
-        "w-full bg-zinc-800 border border-zinc-600 rounded-md p-2 text-3xl text-pink-700 font-light focus:border-pink-500 focus:ring-1 focus:ring-pink-500 focus:outline-none transition-colors duration-200",
+        "w-full bg-zinc-800 border border-zinc-600 rounded-md p-2 text-3xl text-pink-700 font-light focus:border-pink-700 focus:ring-1 focus:ring-pink-700 focus:outline-none transition-colors duration-200",
       )
     ArticleEditInputTypeSubtitle ->
       attr.class(
-        "w-full bg-zinc-800 border border-zinc-600 rounded-md p-2 text-md text-zinc-500 font-light focus:border-pink-500 focus:ring-1 focus:ring-pink-500 focus:outline-none transition-colors duration-200",
+        "w-full bg-zinc-800 border border-zinc-600 rounded-md p-2 text-md text-zinc-500 font-light focus:border-pink-700 focus:ring-1 focus:ring-pink-700 focus:outline-none transition-colors duration-200",
       )
     ArticleEditInputTypeLeading ->
       attr.class(
-        "w-full bg-zinc-800 border border-zinc-600 rounded-md p-2 font-bold text-zinc-100 focus:border-pink-500 focus:ring-1 focus:ring-pink-500 focus:outline-none transition-colors duration-200",
+        "w-full bg-zinc-800 border border-zinc-600 rounded-md p-2 font-bold text-zinc-100 focus:border-pink-700 focus:ring-1 focus:ring-pink-700 focus:outline-none transition-colors duration-200",
       )
   }
   html.div([attr.class("mb-4")], [
@@ -1412,6 +1518,7 @@ fn view_article(
       ]),
       view_subtitle(article.subtitle, article.slug),
       view_leading(article.leading, article.slug),
+      html.div([attr.class("mt-6 mb-8")], [view_article_tags(article.tags)]),
       ..content
     ]),
   ]
@@ -1470,19 +1577,54 @@ fn view_not_found(requested_uri: Uri) -> List(Element(Msg)) {
 
 // VIEW HELPERS ----------------------------------------------------------------
 
-fn view_edit_link(article: Article, text: String) -> Element(msg) {
-  html.a(
-    [
-      attr.class(
-        "text-zinc-500 px-3 py-1 rounded-md text-sm hover:text-teal-400 hover:bg-teal-900/30",
-      ),
-      attr.href(routes.to_string(routes.ArticleEdit(article.id))),
-    ],
-    [
-      html.span([attr.class("hidden sm:inline")], [html.text("✏")]),
-      html.text(text),
-    ],
-  )
+fn view_publication_status(article: Article) -> Element(msg) {
+  case article.published_at {
+    Some(published_time) -> {
+      let formatted_date = birl.to_naive_date_string(published_time)
+      html.span(
+        [
+          attr.class(
+            "text-xs text-zinc-500 pt-2 border-t border-r border-zinc-700 pr-2 group-hover:border-pink-700 transition-colors duration-25",
+          ),
+        ],
+        [html.text(formatted_date)],
+      )
+    }
+    None ->
+      html.span(
+        [
+          attr.class(
+            "text-xs text-zinc-500 pt-2 italic border-t border-r border-zinc-700 pr-2 group-hover:border-pink-700 transition-colors duration-25",
+          ),
+        ],
+        [html.text("draft")],
+      )
+  }
+}
+
+fn view_article_tags(tags: List(String)) -> Element(msg) {
+  case tags {
+    [] -> element.none()
+    _ ->
+      html.div(
+        [
+          attr.class(
+            "flex justify-end gap-0 flex-wrap border-b border-r border-zinc-700 pb-1 pr-2 group-hover:border-pink-700 transition-colors duration-25",
+          ),
+        ],
+        tags
+          |> list.map(fn(tag) {
+            html.span(
+              [
+                attr.class(
+                  "text-xs text-zinc-500 px-2 group-hover:border-pink-700 transition-colors duration-25",
+                ),
+              ],
+              [html.text(tag)],
+            )
+          }),
+      )
+  }
 }
 
 fn view_article_actions(
@@ -1608,7 +1750,7 @@ fn view_leading(text: String, slug: String) -> Element(msg) {
 fn view_h2(title: String) -> Element(msg) {
   html.h2(
     [
-      attr.class("text-2xl text-pink-600 font-light pt-16"),
+      attr.class("text-2xl text-pink-700 font-light pt-16"),
       attr.class("article-h2"),
     ],
     [html.text(title)],
@@ -1617,14 +1759,14 @@ fn view_h2(title: String) -> Element(msg) {
 
 // fn view_h3(title: String) -> Element(msg) {
 //   html.h3(
-//     [attr.class("text-xl text-pink-600 font-light"), attr.class("article-h3")],
+//     [attr.class("text-xl text-pink-700 font-light"), attr.class("article-h3")],
 //     [html.text(title)],
 //   )
 // }
 
 // fn view_h4(title: String) -> Element(msg) {
 //   html.h4(
-//     [attr.class("text-lg text-pink-600 font-light"), attr.class("article-h4")],
+//     [attr.class("text-lg text-pink-700 font-light"), attr.class("article-h4")],
 //     [html.text(title)],
 //   )
 // }
@@ -1745,7 +1887,7 @@ fn view_djot_demo(content: String) -> List(Element(Msg)) {
           html.textarea(
             [
               attr.class(
-                "w-full h-[400px] lg:h-[600px] bg-zinc-800 border border-zinc-600 rounded-lg p-4 font-mono text-sm text-zinc-100 resize-none focus:border-pink-500 focus:ring-1 focus:ring-pink-500 focus:outline-none transition-colors duration-200",
+                "w-full h-[400px] lg:h-[600px] bg-zinc-800 border border-zinc-600 rounded-lg p-4 font-mono text-sm text-zinc-100 resize-none focus:border-pink-700 focus:ring-1 focus:ring-pink-700 focus:outline-none transition-colors duration-200",
               ),
               attr.placeholder(
                 "# Start typing your article content here...\n\n## Headings\n\n- Lists\n- Work too\n\n**Bold** and *italic* text\n\n[Link text](url)",
@@ -1794,7 +1936,7 @@ fn view_djot_demo(content: String) -> List(Element(Msg)) {
     html.div(
       [attr.class("mt-8 p-4 bg-zinc-800 rounded-lg border border-zinc-700")],
       [
-        html.h3([attr.class("text-lg text-pink-600 font-light")], [
+        html.h3([attr.class("text-lg text-pink-700 font-light")], [
           html.text("Quick Reference"),
         ]),
         html.p([attr.class("text-zinc-300")], [
@@ -1824,7 +1966,7 @@ fn view_djot_demo(content: String) -> List(Element(Msg)) {
           ],
           [
             html.div([], [
-              html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+              html.h4([attr.class("text-pink-700 font-medium mb-2")], [
                 html.text("Headings"),
               ]),
               html.code([attr.class("text-zinc-300")], [
@@ -1834,7 +1976,7 @@ fn view_djot_demo(content: String) -> List(Element(Msg)) {
               ]),
             ]),
             html.div([], [
-              html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+              html.h4([attr.class("text-pink-700 font-medium mb-2")], [
                 html.text("Text"),
               ]),
               html.code([attr.class("text-zinc-300")], [
@@ -1844,7 +1986,7 @@ fn view_djot_demo(content: String) -> List(Element(Msg)) {
               ]),
             ]),
             html.div([], [
-              html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+              html.h4([attr.class("text-pink-700 font-medium mb-2")], [
                 html.text("Lists"),
               ]),
               html.code([attr.class("text-zinc-300")], [
@@ -1854,7 +1996,7 @@ fn view_djot_demo(content: String) -> List(Element(Msg)) {
               ]),
             ]),
             html.div([], [
-              html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+              html.h4([attr.class("text-pink-700 font-medium mb-2")], [
                 html.text("Links"),
               ]),
               html.code([attr.class("text-zinc-300")], [
@@ -1864,7 +2006,7 @@ fn view_djot_demo(content: String) -> List(Element(Msg)) {
               ]),
             ]),
             html.div([], [
-              html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+              html.h4([attr.class("text-pink-700 font-medium mb-2")], [
                 html.text("Code Blocks"),
               ]),
               html.code([attr.class("text-zinc-300")], [
@@ -1874,7 +2016,7 @@ fn view_djot_demo(content: String) -> List(Element(Msg)) {
               ]),
             ]),
             html.div([], [
-              html.h4([attr.class("text-pink-500 font-medium mb-2")], [
+              html.h4([attr.class("text-pink-700 font-medium mb-2")], [
                 html.text("Blockquotes"),
               ]),
               html.code([attr.class("text-zinc-300")], [

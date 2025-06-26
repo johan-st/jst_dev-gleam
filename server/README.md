@@ -33,6 +33,7 @@ title: Server README
 - [ ] do not store rev in kv value. It can cause confusion as we should rely on the nats kv revision number.
 - [ ] do not store id in kv value. It can cause confusion as we should rely on the nats kv key.
 - [ ] revisions increese globally. We should have one per article as well and use the global one to ensure we are not overwritting changes.
+- [ ] implement authorization on a per article basis.
 
 ### Bug
 

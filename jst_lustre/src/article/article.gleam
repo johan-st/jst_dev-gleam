@@ -264,14 +264,16 @@ pub fn article_decoder() -> decode.Decoder(Article) {
     "tags",
     decode.one_of(decode.list(decode.string), [decode.success([])]),
   )
-  use published_at_int <- decode.field(
+  use published_at <- decode.field(
     "published_at",
-    decode.optional(decode.int),
+    decode.int
+      |> decode.map(fn(i) {
+        case i {
+          0 -> None
+          _ -> Some(birl.from_unix_milli(i))
+        }
+      }),
   )
-  let published_at = case published_at_int {
-    Some(published_at_int) -> Some(birl.from_unix_milli(published_at_int))
-    None -> None
-  }
   use slug <- decode.field("slug", decode.string)
   use revision <- decode.field("revision", decode.int)
   use title <- decode.field("title", decode.string)
@@ -357,7 +359,7 @@ pub fn draft_update(article: Article, updater: fn(Draft) -> Draft) -> Article {
 //   |> dict.from_list
 // }
 
-// Loading ---------------------------------------------------------------------
+// Placeholders ----------------------------------------------------------------
 
 pub fn loading_article() -> Article {
   ArticleV1(
@@ -374,3 +376,20 @@ pub fn loading_article() -> Article {
     draft: None,
   )
 }
+
+fn article_new_placeholder(author: String) -> Article {
+  ArticleV1(
+    id: "-",
+    slug: "new_article",
+    revision: 0,
+    author: author,
+    tags: [],
+    published_at: None,
+    title: "New Article",
+    subtitle: "This is a new article",
+    leading: "This is a new article",
+    content: NotInitialized,
+    draft: None,
+  )
+}
+

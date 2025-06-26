@@ -387,37 +387,19 @@ func handleArticle(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 
 // handleArticleNew creates a handler for creating a new article
 func handleArticleNew(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
-	type ReqNew struct {
-		Slug     string `json:"slug"`
-		Title    string `json:"title"`
-		Subtitle string `json:"subtitle"`
-		Leading  string `json:"leading"`
-		Content  string `json:"content"`
-	}
 
 	logger := l.WithBreadcrumb("articles").WithBreadcrumb("new")
 	logger.Debug("ready")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var (
-			req ReqNew
 			art = articles.Article{}
 		)
 		logger.Debug("called")
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&art); err != nil {
 			logger.Warn("Failed to decode request", "error", err)
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
-		}
-		logger.Debug("decoded request")
-		art = articles.Article{
-			StructVersion: 1,
-			Rev:           1,
-			Slug:          req.Slug,
-			Title:         req.Title,
-			Subtitle:      req.Subtitle,
-			Leading:       req.Leading,
-			Content:       req.Content,
 		}
 		art_created, err := repo.Create(art)
 		if err != nil {
@@ -430,22 +412,13 @@ func handleArticleNew(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler
 			http.Error(w, "article was nil", http.StatusInternalServerError)
 			return
 		}
-		logger.Debug("created article with slug: %s", req.Slug)
+		logger.Debug("created article with slug: %s", art_created.Slug)
 		respJson(w, art_created, http.StatusOK)
 	})
 }
 
 // handleArticleUpdate creates a handler for updating an existing article
 func handleArticleUpdate(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
-	type ReqSave struct {
-		Rev      int    `json:"revision"`
-		Slug     string `json:"slug"`
-		Title    string `json:"title"`
-		Subtitle string `json:"subtitle"`
-		Leading  string `json:"leading"`
-		Content  string `json:"content"`
-	}
-
 	logger := l.WithBreadcrumb("articles").WithBreadcrumb("save")
 	logger.Debug("ready")
 
@@ -488,8 +461,7 @@ func handleArticleUpdate(l *jst_log.Logger, repo articles.ArticleRepo) http.Hand
 		}
 
 		// Decode request body
-		var req ReqSave
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&art); err != nil {
 			logger.Warn("Failed to decode request", "error", err)
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
@@ -499,12 +471,12 @@ func handleArticleUpdate(l *jst_log.Logger, repo articles.ArticleRepo) http.Hand
 		art, err = repo.Update(articles.Article{
 			Id:            idUuid,
 			StructVersion: 1,
-			Rev:           uint64(req.Rev), // Use client's revision, NATS will handle CAS (Compare and Swap)
-			Slug:          req.Slug,
-			Title:         req.Title,
-			Subtitle:      req.Subtitle,
-			Leading:       req.Leading,
-			Content:       req.Content,
+			Rev:           uint64(art.Rev), // Use client's revision, NATS will handle CAS (Compare and Swap)
+			Slug:          art.Slug,
+			Title:         art.Title,
+			Subtitle:      art.Subtitle,
+			Leading:       art.Leading,
+			Content:       art.Content,
 		})
 		if err != nil {
 			logger.Error("failed to save article in repo: %v", err)
@@ -512,7 +484,7 @@ func handleArticleUpdate(l *jst_log.Logger, repo articles.ArticleRepo) http.Hand
 			return
 		}
 
-		logger.Debug("updated article with slug: %s", req.Slug)
+		logger.Debug("updated article with slug: %s", art.Slug)
 		// Return the new revision number
 		respJson(w, art, http.StatusOK)
 	})

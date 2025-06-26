@@ -11,16 +11,21 @@ put {
 }
 
 params:path {
-  id: 61a3019a-bf16-4c75-b429-f3e1d72b6270
+  id: a27e20d2-2042-4fc6-a43d-d1ade0b03083
 }
 
 body:json {
   {
-    "revision": 29,
-    "slug": "slug_goes_here",
-    "title": "Bruno test 1",
-    "subtitle": "..or, smth.",
-    "leading": "bruno test one",
-    "content": "bob?"
+    "struct_version": 1,
+    "id": "a27e20d2-2042-4fc6-a43d-d1ade0b03083",
+    "revision": 85,
+    "slug": "test-article",
+    "title": "Test Article",
+    "subtitle": "..or, fitting all types of content into a single article",
+    "leading": "This is a test article.",
+    "author": "",
+    "published_at": 1700000000000,
+    "tags": ["first", "test", "bug"],
+    "content": "## list of Links\n\n- [404 page, internal link](/404_not-found)\n- [Gleam, external link](https://gleam.run)\n\nThis is a paragraph with a list inside it. It is [here](#booop) and this is the continuation of the paragraph.\n\n## Lists of paragraphs and lists\n\n- Item 1\n\n- Item 2\n\n- Item 3\n\n  - Item 3.1\n  - Item 3.2\n  - Item 3.3"
   }
 }

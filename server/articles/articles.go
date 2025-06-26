@@ -197,7 +197,8 @@ func (r *articleRepo) Update(art Article) (Article, error) {
 		return art, fmt.Errorf("marshal article: %w", err)
 	}
 
-	rev, err = r.kv.Update(r.ctx, art.Id.String(), data, uint64(art.Rev))
+	// rev, err = r.kv.Update(r.ctx, art.Id.String(), data, uint64(art.Rev)) // TODO: use CAS
+	rev, err = r.kv.Put(r.ctx, art.Id.String(), data)
 	if err != nil {
 		return art, fmt.Errorf("update article: %w", err)
 	}
