@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
@@ -58,7 +57,7 @@ type Article struct {
 	Subtitle      string    `json:"subtitle"`
 	Leading       string    `json:"leading"`
 	Author        string    `json:"author"`
-	PublishedAt   time.Time `json:"published_at"`
+	PublishedAt   int       `json:"published_at"` // unix timestamp in milliseconds
 	Tags          []string  `json:"tags"`
 	Content       string    `json:"content,omitempty"`
 }

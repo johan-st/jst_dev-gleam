@@ -249,7 +249,10 @@ pub fn article_delete(msg, id: String, base_uri: Uri) -> Effect(a) {
 // DECODE ----------------------------------------------------------------------
 
 fn metadata_decoder() -> decode.Decoder(List(Article)) {
-  use articles <- decode.field("articles", decode.list(article_decoder()))
+  use articles <- decode.field(
+    "articles",
+    decode.one_of(decode.list(article_decoder()), []),
+  )
   decode.success(articles)
 }
 
@@ -257,7 +260,10 @@ pub fn article_decoder() -> decode.Decoder(Article) {
   use _version <- decode.optional_field("version", 0, decode.int)
   use id <- decode.field("id", decode.string)
   use author <- decode.field("author", decode.string)
-  use tags <- decode.field("tags", decode.list(decode.string))
+  use tags <- decode.field(
+    "tags",
+    decode.one_of(decode.list(decode.string), [decode.success([])]),
+  )
   use published_at_int <- decode.field(
     "published_at",
     decode.optional(decode.int),
