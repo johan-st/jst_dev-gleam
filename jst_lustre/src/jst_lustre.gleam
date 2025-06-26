@@ -1674,7 +1674,7 @@ fn view_publication_status(article: Article) -> Element(msg) {
             "text-xs text-zinc-500 pt-2 italic border-t border-r border-zinc-700 pr-2 group-hover:border-pink-700 transition-colors duration-25",
           ),
         ],
-        [html.text("draft")],
+        [html.text("not published")],
       )
   }
 }
@@ -1686,7 +1686,7 @@ fn view_article_tags(tags: List(String)) -> Element(Msg) {
       html.div(
         [
           attr.class(
-            "flex justify-end align-end gap-0 flex-wrap border-b border-r border-zinc-700 pb-1 pr-2 hover:border-pink-700 transition-colors duration-25 max-w-max ml-auto mt-2",
+            "flex justify-end align-end gap-0 flex-wrap border-b border-r border-zinc-700 pb-1 pr-2 hover:border-pink-700 group-hover:border-pink-700 transition-colors duration-25 max-w-max ml-auto mt-2",
           ),
         ],
         tags
