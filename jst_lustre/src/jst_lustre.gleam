@@ -1713,7 +1713,7 @@ fn view_article_tags(tags: List(String)) -> Element(Msg) {
       html.div(
         [
           attr.class(
-            "flex justify-end align-end gap-0 flex-wrap border-b border-r border-zinc-700 pb-1 pr-2 hover:border-pink-700 group-hover:border-pink-700 transition-colors duration-25 w-full mt-2",
+            "flex justify-end align-end gap-0 ml-auto flex-wrap border-b border-r border-zinc-700 pb-1 pr-2 hover:border-pink-700 group-hover:border-pink-700 transition-colors duration-25 mt-2",
           ),
         ],
         tags
