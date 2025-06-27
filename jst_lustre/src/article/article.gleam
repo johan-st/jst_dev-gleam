@@ -5,11 +5,12 @@ import gleam/http as gleam_http
 import gleam/http/request
 import gleam/json
 import gleam/option.{type Option, None, Some}
+import gleam/order
 import gleam/uri.{type Uri}
 import lustre/effect.{type Effect}
 import utils/http.{type HttpError}
 import utils/remote_data.{type RemoteData, Loaded, NotInitialized}
-import utils/session.{type Session}
+import utils/session.{type Session, Authenticated, Unauthenticated}
 
 pub type Article {
   ArticleV1(
@@ -63,6 +64,24 @@ pub fn get_draft(article) -> Option(Draft) {
   }
 }
 
+pub fn published_at(article) -> Option(Time) {
+  case article {
+    ArticleV1(
+      id: _,
+      slug: _,
+      revision: _,
+      author: _,
+      tags: _,
+      published_at:,
+      title: _,
+      subtitle: _,
+      leading: _,
+      content: _,
+      draft: _,
+    ) -> published_at
+  }
+}
+
 pub fn to_draft(article: Article) -> Option(Draft) {
   case article {
     ArticleV1(
@@ -82,17 +101,26 @@ pub fn to_draft(article: Article) -> Option(Draft) {
   }
 }
 
-pub fn can_edit(_article: Article, session: Session) {
+pub fn can_view(article: Article, session: Session) -> Bool {
+  case published_at(article), session {
+    None, Unauthenticated -> False
+    Some(published_at), Unauthenticated ->
+      birl.compare(published_at, birl.now()) != order.Gt
+    _, Authenticated(_) -> True
+  }
+}
+
+pub fn can_edit(_article: Article, session: Session) -> Bool {
   session
   |> session.permission_any(["post_edit_any"])
 }
 
-pub fn can_delete(_article: Article, session: Session) {
+pub fn can_delete(_article: Article, session: Session) -> Bool {
   session
   |> session.permission_any(["post_edit_any"])
 }
 
-pub fn can_publish(_article: Article, session: Session) {
+pub fn can_publish(_article: Article, session: Session) -> Bool {
   session
   |> session.permission_any(["post_edit_any"])
 }
@@ -399,4 +427,3 @@ fn article_new_placeholder(author: String) -> Article {
     draft: None,
   )
 }
-

@@ -108,8 +108,13 @@ pub fn from_uri(
         remote_data.NotInitialized -> PageArticleListLoading
         remote_data.Errored(error) ->
           PageError(HttpError(error, "Failed to load article list"))
-        remote_data.Loaded(articles_list) ->
-          PageArticleList(articles_list, session)
+        remote_data.Loaded(articles_list)
+        | remote_data.Optimistic(articles_list) -> {
+          let allowed_articles =
+            articles_list
+            |> list.filter(article.can_view(_, session))
+          PageArticleList(allowed_articles, session)
+        }
       }
     }
     ["article", slug] -> {
@@ -119,13 +124,17 @@ pub fn from_uri(
           PageError(Other("articles not initialized"))
         remote_data.Errored(error) ->
           PageError(HttpError(error, "Failed to load articles"))
-        remote_data.Loaded(articles_list) -> {
-          case find_article_by_slug(articles_list, slug) {
+        remote_data.Loaded(articles_list)
+        | remote_data.Optimistic(articles_list) -> {
+          let allowed_articles =
+            articles_list
+            |> list.filter(article.can_view(_, session))
+          case find_article_by_slug(allowed_articles, slug) {
             Ok(article) -> PageArticle(article, session)
             Error(_) ->
               PageError(ArticleNotFound(
                 slug,
-                get_available_slugs(articles_list),
+                get_available_slugs(allowed_articles),
               ))
           }
         }
@@ -138,8 +147,12 @@ pub fn from_uri(
           PageError(Other("articles not initialized"))
         remote_data.Errored(error) ->
           PageError(HttpError(error, "Failed to load articles for editing"))
-        remote_data.Loaded(articles_list) -> {
-          case find_article_by_id(articles_list, id) {
+        remote_data.Loaded(articles_list)
+        | remote_data.Optimistic(articles_list) -> {
+          let allowed_articles =
+            articles_list
+            |> list.filter(article.can_view(_, session))
+          case find_article_by_id(allowed_articles, id) {
             Ok(article) -> {
               case article.can_edit(article, session), article.draft {
                 True, Some(_) -> PageArticleEdit(article)

@@ -1,33 +1,32 @@
-
-import gleam/list
-
 pub type RemoteData(a, err) {
   NotInitialized
   Pending
   Loaded(a)
+  Optimistic(a)
   Errored(err)
 }
 
-pub fn try_update(
-  remote_data: RemoteData(a, err),
-  update: fn(a) -> a,
+pub fn map(
+  data data: RemoteData(a, err),
+  with update_fn: fn(a) -> a,
 ) -> RemoteData(a, err) {
+  case data {
+    Loaded(a) -> Loaded(update_fn(a))
+    Optimistic(a) -> Optimistic(update_fn(a))
+    _ -> data
+  }
+}
+
+pub fn to_loaded(remote_data: RemoteData(a, err)) -> RemoteData(a, err) {
   case remote_data {
-    Loaded(a) -> Loaded(update(a))
+    Optimistic(a) -> Loaded(a)
     _ -> remote_data
   }
 }
 
-pub fn map_loaded(
-  remote_data data: RemoteData(List(a), err),
-  with with: fn(a) -> a,
-) -> RemoteData(List(a), err) {
-  case data {
-    Loaded(list) -> {
-      list
-      |> list.map(with)
-      |> Loaded
-    }
-    _ -> data
+pub fn to_optimistic(remote_data: RemoteData(a, err)) -> RemoteData(a, err) {
+  case remote_data {
+    Loaded(a) -> Optimistic(a)
+    _ -> remote_data
   }
 }

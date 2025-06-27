@@ -9,6 +9,9 @@ title: Server README
 - [ ] make a version that works with the nats global supercluster
 - [ ] clean up architecture from superflous code and logic
 - [ ] admin panel
+- [ ] updates to an article should not reset the draft.
+- [ ] implement optimistic updates (with visual feedback in UI)
+- [ ] Use exteranl NATS cluster for production. Local could be a leaf node or just for local development.
 
 ### `v0`
 

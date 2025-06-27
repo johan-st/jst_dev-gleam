@@ -24,7 +24,7 @@ import utils/http.{type HttpError}
 import utils/jot_to_lustre
 import utils/persist.{type PersistentModel, PersistentModelV0, PersistentModelV1}
 import utils/remote_data.{
-  type RemoteData, Errored, Loaded, NotInitialized, Pending,
+  type RemoteData, Errored, Loaded, NotInitialized, Optimistic, Pending,
 }
 import utils/session
 
@@ -284,23 +284,27 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           let assert True = id == article.id
           let updated_articles =
             model.articles
-            |> remote_data.map_loaded(with: fn(article_current) {
-              case id == article_current.id {
-                True -> article
-                False -> article_current
-              }
-            })
+            |> remote_data.map(
+              with: list.map(_, fn(article_current) {
+                case id == article_current.id {
+                  True -> article
+                  False -> article_current
+                }
+              }),
+            )
           #(Model(..model, articles: updated_articles), effect.none())
         }
         Error(err) -> {
           let updated_articles =
             model.articles
-            |> remote_data.map_loaded(with: fn(article_current) {
-              case id == article_current.id {
-                True -> ArticleV1(..article_current, content: Errored(err))
-                False -> article_current
-              }
-            })
+            |> remote_data.map(
+              with: list.map(_, fn(article_current) {
+                case id == article_current.id {
+                  True -> ArticleV1(..article_current, content: Errored(err))
+                  False -> article_current
+                }
+              }),
+            )
           #(Model(..model, articles: updated_articles), effect.none())
         }
       }
@@ -310,12 +314,14 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         NotInitialized -> {
           let updated_articles =
             model.articles
-            |> remote_data.map_loaded(with: fn(article_current) {
-              case article.id == article_current.id {
-                True -> ArticleV1(..article_current, content: Pending)
-                False -> article_current
-              }
-            })
+            |> remote_data.map(
+              with: list.map(_, fn(article_current) {
+                case article.id == article_current.id {
+                  True -> ArticleV1(..article_current, content: Pending)
+                  False -> article_current
+                }
+              }),
+            )
           #(
             Model(..model, articles: updated_articles),
             article.article_get(
@@ -333,7 +339,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             model.base_uri,
           ),
         )
-        Pending | Loaded(_) -> {
+        Pending | Loaded(_) | Optimistic(_) -> {
           #(model, effect.none())
         }
       }
@@ -361,9 +367,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           #(
             Model(
               ..model,
-              articles: remote_data.try_update(
+              articles: remote_data.map(
                 model.articles,
-                list.map(_, fn(article_current) {
+                with: list.map(_, fn(article_current) {
                   case article.id == article_current.id {
                     True -> updated_article
                     False -> article_current
@@ -381,9 +387,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       let updated_article =
         article.draft_update(article, fn(draft) { draft.set_title(draft, text) })
       let updated_articles =
-        remote_data.try_update(
+        remote_data.map(
           model.articles,
-          list.map(_, fn(article_current) {
+          with: list.map(_, fn(article_current) {
             case article.id == article_current.id {
               True -> updated_article
               False -> article_current
@@ -398,9 +404,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           draft.set_leading(draft, text)
         })
       let updated_articles =
-        remote_data.try_update(
+        remote_data.map(
           model.articles,
-          list.map(_, fn(article_current) {
+          with: list.map(_, fn(article_current) {
             case article.id == article_current.id {
               True -> updated_article
               False -> article_current
@@ -415,12 +421,15 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           draft.set_subtitle(draft, text)
         })
       let updated_articles =
-        remote_data.map_loaded(model.articles, fn(article_current) {
-          case article.id == article_current.id {
-            True -> updated_article
-            False -> article_current
-          }
-        })
+        remote_data.map(
+          model.articles,
+          with: list.map(_, fn(article_current) {
+            case article.id == article_current.id {
+              True -> updated_article
+              False -> article_current
+            }
+          }),
+        )
       #(Model(..model, articles: updated_articles), effect.none())
     }
     ArticleDraftUpdatedContent(article, content) -> {
@@ -431,9 +440,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(
         Model(
           ..model,
-          articles: remote_data.try_update(
+          articles: remote_data.map(
             model.articles,
-            list.map(_, fn(article_current) {
+            with: list.map(_, fn(article_current) {
               case article.id == article_current.id {
                 True -> updated_article
                 False -> article_current
@@ -448,7 +457,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ArticleDraftDiscardClicked(article) -> {
       echo "article draft discard clicked"
       let updated_articles =
-        remote_data.try_update(
+        remote_data.map(
           model.articles,
           list.map(_, fn(article_current) {
             case article.id == article_current.id {
@@ -482,7 +491,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               draft: None,
             )
           let updated_articles =
-            remote_data.try_update(
+            remote_data.map(
               model.articles,
               list.map(_, fn(article_current) {
                 case article.id == article_current.id {
@@ -515,7 +524,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       case result {
         Ok(saved_article) -> {
           let updated_articles =
-            remote_data.try_update(
+            remote_data.map(
               model.articles,
               list.map(_, fn(article_current) {
                 case id == article_current.id {
@@ -673,7 +682,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       case result {
         Ok(_) -> {
           let updated_articles =
-            remote_data.try_update(
+            remote_data.map(
               model.articles,
               list.filter(_, fn(article_current) { article_current.id != id }),
             )
@@ -878,23 +887,23 @@ fn page_from_model(model: Model) -> pages.Page {
     routes.Index -> pages.PageIndex
     routes.Articles -> {
       case model.articles {
-        remote_data.Pending -> pages.PageArticleListLoading
-        remote_data.NotInitialized ->
+        Pending -> pages.PageArticleListLoading
+        NotInitialized ->
           pages.PageError(pages.Other("articles not initialized"))
-        remote_data.Errored(error) ->
+        Errored(error) ->
           pages.PageError(pages.HttpError(error, "Failed to load article list"))
-        remote_data.Loaded(articles_list) ->
+        Loaded(articles_list) | Optimistic(articles_list) ->
           pages.PageArticleList(articles_list, model.session)
       }
     }
     routes.Article(slug) -> {
       case model.articles {
-        remote_data.Pending -> pages.PageArticleListLoading
-        remote_data.NotInitialized ->
+        Pending -> pages.PageArticleListLoading
+        NotInitialized ->
           pages.PageError(pages.Other("articles not initialized"))
-        remote_data.Errored(error) ->
+        Errored(error) ->
           pages.PageError(pages.HttpError(error, "Failed to load articles"))
-        remote_data.Loaded(articles_list) -> {
+        Loaded(articles_list) | Optimistic(articles_list) -> {
           case list.find(articles_list, fn(art) { art.slug == slug }) {
             Ok(article) -> pages.PageArticle(article, model.session)
             Error(_) ->
@@ -908,15 +917,15 @@ fn page_from_model(model: Model) -> pages.Page {
     }
     routes.ArticleEdit(id) -> {
       case model.articles {
-        remote_data.Pending -> pages.PageArticleListLoading
-        remote_data.NotInitialized ->
+        Pending -> pages.PageArticleListLoading
+        NotInitialized ->
           pages.PageError(pages.Other("articles not initialized"))
-        remote_data.Errored(error) ->
+        Errored(error) ->
           pages.PageError(pages.HttpError(
             error,
             "Failed to load articles for editing",
           ))
-        remote_data.Loaded(articles_list) -> {
+        Loaded(articles_list) | Optimistic(articles_list) -> {
           case list.find(articles_list, fn(art) { art.id == id }) {
             Ok(article) -> {
               case article.can_edit(article, model.session), article.draft {
@@ -1607,7 +1616,8 @@ fn view_article(
   let content: List(Element(Msg)) = case article.content {
     NotInitialized -> [view_error("content not initialized")]
     Pending -> [view_error("loading")]
-    Loaded(content_string) -> jot_to_lustre.to_lustre(content_string)
+    Loaded(content_string) | Optimistic(content_string) ->
+      jot_to_lustre.to_lustre(content_string)
     Errored(error) -> [view_error(error_string.http_error(error))]
   }
   [
@@ -1642,6 +1652,12 @@ fn view_article_not_found(
     Loaded(_articles) -> [
       view_title("Article not found", slug),
       view_simple_paragraph("The article you are looking for does not exist."),
+    ]
+    Optimistic(_articles) -> [
+      view_title("Article not found", slug),
+      view_simple_paragraph(
+        "The article you are looking for might not exist yet. Please check back later.",
+      ),
     ]
     Errored(error) -> [
       view_title("There was an error loading the article", slug),
