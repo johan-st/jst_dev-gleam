@@ -47,7 +47,7 @@ func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger
 	}
 
 	// Set up routes on the mux
-	routes(s.mux, l.WithBreadcrumb("route"), s.articleRepo, nc, jwtSecret)
+	routes(s.mux, l.WithBreadcrumb("route"), s.articleRepo, nc, s.embedFs, jwtSecret)
 
 	// Apply global middleware to create the final handler
 	// note: last added is first called
@@ -65,7 +65,7 @@ func (s *httpServer) Run(cleanShutdown *sync.WaitGroup) {
 	cleanShutdown.Add(1)
 
 	httpServer := &http.Server{
-		Addr:    net.JoinHostPort("", "8080"),
+		Addr:    net.JoinHostPort("0.0.0.0", "8080"),
 		Handler: s.handler, // Use the wrapped handler instead of s.mux
 	}
 	go func() {

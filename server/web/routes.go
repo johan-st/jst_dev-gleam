@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"jst_dev/server/articles"
 	"jst_dev/server/jst_log"
 	"jst_dev/server/who"
@@ -24,7 +25,7 @@ const (
 	audience   = "jst_dev.who"
 )
 
-func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc *nats.Conn, jwtSecret string) {
+func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc *nats.Conn, embeddedFS fs.FS, jwtSecret string) {
 
 	// Add routes with their respective handlers
 	mux.Handle("GET /api/articles", handleArticleList(l, repo))
@@ -41,8 +42,8 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 	mux.Handle("GET /api/auth", handleAuthCheck(l, nc, jwtSecret))
 
 	// web
-	mux.Handle("GET /static/", handleStaticDir(l, "web/static"))
-	mux.Handle("GET /", handleStaticFile(l, "web/static/index.html"))
+	mux.Handle("GET /", handleStaticFile(l, embeddedFS, "index.html"))
+	mux.Handle("GET /static/", handleStaticFS(l, embeddedFS))
 
 	// DEV routes
 	// mux.Handle("GET /dev/seed", handleSeed(l, repo))   // TODO: remove this
@@ -632,25 +633,51 @@ func handleArticleRevision(l *jst_log.Logger, repo articles.ArticleRepo) http.Ha
 	})
 }
 
-func handleStaticFile(l *jst_log.Logger, filename string) http.Handler {
+func handleStaticFile(l *jst_log.Logger, embeddedFSs fs.FS, filename string) http.Handler {
 
 	logger := l.WithBreadcrumb("static").WithBreadcrumb(filename)
-	logger.Debug("ready")
+
+	// Check if file exists and log size, panic if not found
+	info, err := fs.Stat(embeddedFSs, filename)
+	if err != nil {
+		logger.Error("static file not found: %s", filename)
+		panic(fmt.Sprintf("static file not found: %s", filename))
+	}
+	logger.Debug("ready - file size: %d bytes", info.Size())
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger.Debug("called")
-		http.ServeFile(w, r, filename)
+		http.ServeFileFS(w, r, embeddedFSs, filename)
 	})
 }
 
-func handleStaticDir(l *jst_log.Logger, dirname string) http.Handler {
+func handleStaticFS(l *jst_log.Logger, embeddedFS fs.FS) http.Handler {
 
-	logger := l.WithBreadcrumb("static").WithBreadcrumb(dirname)
+	logger := l.WithBreadcrumb("static")
+
+	err := fs.WalkDir(embeddedFS, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			info, err := d.Info()
+			if err != nil {
+				logger.Warn("failed to get info for file %s: %v", path, err)
+				return nil
+			}
+			logger.Debug("found file: %s (size: %d bytes)", path, info.Size())
+		}
+		return nil
+	})
+	if err != nil {
+		logger.Error("failed to walk directory: %v", err)
+		panic(fmt.Sprintf("failed to walk directory: %v", err))
+	}
 	logger.Debug("ready")
 
 	return http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger.Debug("called")
-		http.ServeFile(w, r, dirname+"/"+r.URL.Path)
+		http.ServeFileFS(w, r, embeddedFS, "/"+r.URL.Path)
 	}))
 }
 

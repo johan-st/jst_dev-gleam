@@ -1,0 +1,29 @@
+# flyctl launch added from .gitignore
+**\.env
+**\.creds
+data
+**\node_modules
+
+# flyctl launch added from jst_lustre\.gitignore
+jst_lustre\**\*.beam
+jst_lustre\**\*.ez
+jst_lustre\build
+jst_lustre\**\erl_crash.dump
+
+jst_lustre\priv\static\jst_lustre.mjs
+jst_lustre\priv\static\jst_lustre.min.mjs
+jst_lustre\priv\static\jst_lustre.css
+jst_lustre\priv\static\jst_lustre.min.css
+
+# flyctl launch added from server\.gitignore
+server\**\.env
+
+# nats credentials
+server\**\*.creds
+
+# nats persistent data
+server\data
+
+# build, test, run etc..
+server\tmp
+fly.toml
