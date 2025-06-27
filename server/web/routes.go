@@ -41,8 +41,8 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 	mux.Handle("GET /api/auth", handleAuthCheck(l, nc, jwtSecret))
 
 	// DEV routes
-	mux.Handle("GET /dev/seed", handleSeed(l, repo))   // TODO: remove this
-	mux.Handle("GET /dev/purge", handlePurge(l, repo)) // TODO: remove this
+	// mux.Handle("GET /dev/seed", handleSeed(l, repo))   // TODO: remove this
+	// mux.Handle("GET /dev/purge", handlePurge(l, repo)) // TODO: remove this
 	mux.Handle("/", handleProxy(l.WithBreadcrumb("proxy_frontend"), "http://127.0.0.1:1234"))
 }
 
@@ -76,8 +76,7 @@ func cors(l *jst_log.Logger, next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
-
-func authJwt(jwtSecret string, next http.Handler) http.Handler {
+func authJwtDummy(jwtSecret string, next http.Handler) http.Handler {
 	if jwtSecret == "" {
 		panic("no jwt secret specified")
 	}
@@ -89,28 +88,40 @@ func authJwt(jwtSecret string, next http.Handler) http.Handler {
 			ID:          "TEST_USER",
 			Permissions: []whoApi.Permission{whoApi.PermissionPostEditAny},
 		})
-		// jwtCookie, err := r.Cookie(cookieAuth)
-		// if err != nil {
-		// 	next.ServeHTTP(w, r)
-		// 	return
-		// }
-		// if jwtCookie == nil {
-		// 	next.ServeHTTP(w, r)
-		// 	return
-		// }
-		// if jwtCookie.Value == "" {
-		// 	next.ServeHTTP(w, r)
-		// 	return
-		// }
-		// subject, permissions, err := whoApi.JwtVerify(jwtSecret, audience, jwtCookie.Value)
-		// if err != nil {
-		// 	next.ServeHTTP(w, r)
-		// 	return
-		// }
-		// ctx := context.WithValue(r.Context(), who.UserKey, whoApi.User{
-		// 	ID:          subject,
-		// 	Permissions: permissions,
-		// })
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func authJwt(jwtSecret string, next http.Handler) http.Handler {
+	if jwtSecret == "" {
+		panic("no jwt secret specified")
+	}
+	if next == nil {
+		panic("next handler is nil")
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		jwtCookie, err := r.Cookie(cookieAuth)
+		if err != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if jwtCookie == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if jwtCookie.Value == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		subject, permissions, err := whoApi.JwtVerify(jwtSecret, audience, jwtCookie.Value)
+		if err != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		ctx := context.WithValue(r.Context(), who.UserKey, whoApi.User{
+			ID:          subject,
+			Permissions: permissions,
+		})
 
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -349,12 +360,12 @@ func handleArticleList(l *jst_log.Logger, repo articles.ArticleRepo) http.Handle
 			return
 		}
 		logger.Debug("articles count: %d", len(articles))
-		
+
 		// Debug log each article's tags
 		for i, art := range articles {
 			fmt.Printf("[DEBUG] ArticleList article %d: %s tags: %v\n", i, art.Slug, art.Tags)
 		}
-		
+
 		respJson(w, Resp{Articles: articles}, http.StatusOK)
 	})
 }
@@ -474,7 +485,7 @@ func handleArticleUpdate(l *jst_log.Logger, repo articles.ArticleRepo) http.Hand
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
-		
+
 		fmt.Printf("[DEBUG] ArticleUpdate received data for %s:\n", art.Slug)
 		fmt.Printf("[DEBUG] ArticleUpdate received tags: %v\n", art.Tags)
 		fmt.Printf("[DEBUG] ArticleUpdate received author: %s\n", art.Author)
@@ -489,9 +500,9 @@ func handleArticleUpdate(l *jst_log.Logger, repo articles.ArticleRepo) http.Hand
 			Title:         art.Title,
 			Subtitle:      art.Subtitle,
 			Leading:       art.Leading,
-			Author:        art.Author,        // Preserve author
-			PublishedAt:   art.PublishedAt,   // Preserve published date
-			Tags:          art.Tags,          // Preserve tags
+			Author:        art.Author,      // Preserve author
+			PublishedAt:   art.PublishedAt, // Preserve published date
+			Tags:          art.Tags,        // Preserve tags
 			Content:       art.Content,
 		})
 		if err != nil {
