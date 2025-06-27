@@ -2,19 +2,13 @@ import article/article.{
   type Article, ArticleV1, article_decoder, article_encoder,
 }
 
-import birl.{type Time}
-import gleam/dynamic
-import gleam/dynamic/decode
-import gleam/int
-import gleam/io
+import birl
 import gleam/json
-import gleam/list
-import gleam/option.{type Option, None, Some}
-import gleam/string
-import gleam/uri
+import gleam/option.{None, Some}
+// import gleam/string
+// import gleam/uri
 import gleeunit/should
 import qcheck as qc
-import qcheck/random.{type Seed, random_seed, seed}
 import utils/http
 import utils/remote_data.{
   type RemoteData, Errored, Loaded, NotInitialized, Pending,
@@ -135,33 +129,33 @@ fn generator_remote_data(
 
 // helpers
 
-fn generator_uri() -> qc.Generator(uri.Uri) {
-  use scheme, host, path <- qc.map3(
-    qc.from_generators(qc.constant("http") |> qc.option_from(), [
-      qc.constant("https") |> qc.option_from(),
-    ]),
-    generator_uri_host(),
-    generator_uri_path(),
-  )
-  uri.Uri(scheme, None, Some(host), None, path, None, None)
-}
+// fn generator_uri() -> qc.Generator(uri.Uri) {
+//   use scheme, host, path <- qc.map3(
+//     qc.from_generators(qc.constant("http") |> qc.option_from(), [
+//       qc.constant("https") |> qc.option_from(),
+//     ]),
+//     generator_uri_host(),
+//     generator_uri_path(),
+//   )
+//   uri.Uri(scheme, None, Some(host), None, path, None, None)
+// }
 
-fn generator_uri_host() -> qc.Generator(String) {
-  use domain, tld <- qc.map2(
-    qc.non_empty_string_from(qc.alphanumeric_ascii_codepoint()),
-    qc.from_generators(qc.constant("com"), [
-      qc.fixed_length_string_from(qc.alphanumeric_ascii_codepoint(), 2),
-      qc.fixed_length_string_from(qc.alphanumeric_ascii_codepoint(), 3),
-    ]),
-  )
-  domain <> "." <> tld
-}
+// fn generator_uri_host() -> qc.Generator(String) {
+//   use domain, tld <- qc.map2(
+//     qc.non_empty_string_from(qc.alphanumeric_ascii_codepoint()),
+//     qc.from_generators(qc.constant("com"), [
+//       qc.fixed_length_string_from(qc.alphanumeric_ascii_codepoint(), 2),
+//       qc.fixed_length_string_from(qc.alphanumeric_ascii_codepoint(), 3),
+//     ]),
+//   )
+//   domain <> "." <> tld
+// }
 
-fn generator_uri_path() -> qc.Generator(String) {
-  qc.list_from(qc.string_from(qc.alphanumeric_ascii_codepoint()))
-  |> qc.map(string.join(_, "/"))
-  |> qc.map(fn(path) { "/" <> path })
-}
+// fn generator_uri_path() -> qc.Generator(String) {
+//   qc.list_from(qc.string_from(qc.alphanumeric_ascii_codepoint()))
+//   |> qc.map(string.join(_, "/"))
+//   |> qc.map(fn(path) { "/" <> path })
+// }
 
 pub fn map11(
   g1: qc.Generator(a),
@@ -192,25 +186,27 @@ pub fn map11(
 
 pub fn test_tags_consistency_between_metadata_and_full_article() {
   // Test article with specific tags
-  let test_article = ArticleV1(
-    id: "test-id-123",
-    slug: "test-article",
-    revision: 1,
-    author: "test-author",
-    tags: ["gleam", "test", "bug-fix"],
-    published_at: Some(birl.from_unix_milli(1700000000000)),
-    title: "Test Article",
-    subtitle: "Test subtitle",
-    leading: "Test leading text",
-    content: NotInitialized,
-    draft: None,
-  )
+  let test_article =
+    ArticleV1(
+      id: "test-id-123",
+      slug: "test-article",
+      revision: 1,
+      author: "test-author",
+      tags: ["gleam", "test", "bug-fix"],
+      published_at: Some(birl.from_unix_milli(1_700_000_000_000)),
+      title: "Test Article",
+      subtitle: "Test subtitle",
+      leading: "Test leading text",
+      content: NotInitialized,
+      draft: None,
+    )
 
   // Test article when loaded with full content
-  let full_article = ArticleV1(
-    ..test_article,
-    content: Loaded("# Test Content\n\nThis is test content."),
-  )
+  let full_article =
+    ArticleV1(
+      ..test_article,
+      content: Loaded("# Test Content\n\nThis is test content."),
+    )
 
   // Both should have the same tags
   should.equal(test_article.tags, full_article.tags)
@@ -219,19 +215,20 @@ pub fn test_tags_consistency_between_metadata_and_full_article() {
 }
 
 pub fn test_article_roundtrip_preserves_tags() {
-  let original_article = ArticleV1(
-    id: "test-id-456",
-    slug: "roundtrip-test",
-    revision: 2,
-    author: "test-author",
-    tags: ["preservation", "tags", "roundtrip"],
-    published_at: Some(birl.from_unix_milli(1700000000000)),
-    title: "Roundtrip Test",
-    subtitle: "Testing tag preservation",
-    leading: "This tests that tags are preserved",
-    content: Loaded("# Content\n\nTest content here."),
-    draft: None,
-  )
+  let original_article =
+    ArticleV1(
+      id: "test-id-456",
+      slug: "roundtrip-test",
+      revision: 2,
+      author: "test-author",
+      tags: ["preservation", "tags", "roundtrip"],
+      published_at: Some(birl.from_unix_milli(1_700_000_000_000)),
+      title: "Roundtrip Test",
+      subtitle: "Testing tag preservation",
+      leading: "This tests that tags are preserved",
+      content: Loaded("# Content\n\nTest content here."),
+      draft: None,
+    )
 
   // Encode to JSON and decode back
   let assert Ok(roundtrip_article) =
@@ -243,7 +240,7 @@ pub fn test_article_roundtrip_preserves_tags() {
   // Tags should be preserved
   should.equal(original_article.tags, roundtrip_article.tags)
   should.equal(roundtrip_article.tags, ["preservation", "tags", "roundtrip"])
-  
+
   // All other fields should also be preserved
   should.equal(original_article.id, roundtrip_article.id)
   should.equal(original_article.author, roundtrip_article.author)

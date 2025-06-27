@@ -412,18 +412,18 @@ pub fn loading_article() -> Article {
   )
 }
 
-fn article_new_placeholder(author: String) -> Article {
-  ArticleV1(
-    id: "-",
-    slug: "new_article",
-    revision: 0,
-    author: author,
-    tags: [],
-    published_at: None,
-    title: "New Article",
-    subtitle: "This is a new article",
-    leading: "This is a new article",
-    content: NotInitialized,
-    draft: None,
-  )
-}
+// fn article_new_placeholder(author: String) -> Article {
+//   ArticleV1(
+//     id: "-",
+//     slug: "new_article",
+//     revision: 0,
+//     author: author,
+//     tags: [],
+//     published_at: None,
+//     title: "New Article",
+//     subtitle: "This is a new article",
+//     leading: "This is a new article",
+//     content: NotInitialized,
+//     draft: None,
+//   )
+// }

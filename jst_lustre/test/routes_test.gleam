@@ -1,10 +1,6 @@
-import article/article.{ArticleV1}
-
-import gleam/option.{None}
 import gleam/uri
 import gleeunit/should
 import routes/routes
-import utils/remote_data.{Loaded}
 
 pub fn route_url_test() {
   let article_id = "test-id"

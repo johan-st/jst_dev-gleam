@@ -40,10 +40,15 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 	mux.Handle("GET /api/auth/logout", handleAuthLogout(l, nc))
 	mux.Handle("GET /api/auth", handleAuthCheck(l, nc, jwtSecret))
 
+	// web
+	mux.Handle("GET /static/", handleStaticDir(l, "web/static"))
+	mux.Handle("GET /", handleStaticFile(l, "web/static/index.html"))
+
 	// DEV routes
 	// mux.Handle("GET /dev/seed", handleSeed(l, repo))   // TODO: remove this
 	// mux.Handle("GET /dev/purge", handlePurge(l, repo)) // TODO: remove this
-	mux.Handle("/", handleProxy(l.WithBreadcrumb("proxy_frontend"), "http://127.0.0.1:1234"))
+	// mux.Handle("/", handleProxy(l.WithBreadcrumb("proxy_frontend"), "http://127.0.0.1:1234"))
+
 }
 
 // --- MIDDLEWARE ---
@@ -625,6 +630,28 @@ func handleArticleRevision(l *jst_log.Logger, repo articles.ArticleRepo) http.Ha
 		logger.Debug("article: %s (rev: %d)", art.Slug, art.Rev)
 		respJson(w, art, http.StatusOK)
 	})
+}
+
+func handleStaticFile(l *jst_log.Logger, filename string) http.Handler {
+
+	logger := l.WithBreadcrumb("static").WithBreadcrumb(filename)
+	logger.Debug("ready")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Debug("called")
+		http.ServeFile(w, r, filename)
+	})
+}
+
+func handleStaticDir(l *jst_log.Logger, dirname string) http.Handler {
+
+	logger := l.WithBreadcrumb("static").WithBreadcrumb(dirname)
+	logger.Debug("ready")
+
+	return http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Debug("called")
+		http.ServeFile(w, r, dirname+"/"+r.URL.Path)
+	}))
 }
 
 // --- HELPERS ---

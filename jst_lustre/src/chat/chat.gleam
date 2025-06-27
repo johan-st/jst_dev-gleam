@@ -1,6 +1,5 @@
-import gleam/dynamic/decode
 import gleam/list
-import lustre/attribute.{type Attribute}
+import lustre/attribute
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
@@ -21,9 +20,9 @@ type Contact {
 }
 
 pub opaque type Msg {
-  SendMessage(content: String)
-  SendMessageResult(result: Result(Nil, Nil))
-  GotMessage(message: ChatMsg)
+  // SendMessage(content: String)
+  // SendMessageResult(result: Result(Nil, Nil))
+  // GotMessage(message: ChatMsg)
   CloseChat
   OpenChat
 }
@@ -80,10 +79,10 @@ pub fn update(msg: Msg, model: Model) -> #(Model, Effect(Msg)) {
     OpenChat -> {
       #(Model(..model, is_open: True), effect.none())
     }
-    _ -> {
-      echo msg
-      todo as "chat.Msg not implemented"
-    }
+    // _ -> {
+    //   echo msg
+    //   todo as "chat.Msg not implemented"
+    // }
   }
 }
 
@@ -93,7 +92,7 @@ pub fn view(msg, model: Model) -> List(Element(msg)) {
   [view_open_button(msg), view_drawer(msg, model)]
 }
 
-fn view_tabs(msg, model: Model) -> Element(msg) {
+fn view_tabs(_msg, _model: Model) -> Element(msg) {
   html.div([attribute.class("px-6")], [
     // <!-- Tab component -->
     html.nav([attribute.class("-mb-px flex space-x-6")], [
@@ -191,7 +190,7 @@ fn view_contacts(msg, model: Model) -> Element(msg) {
   )
 }
 
-fn view_contact(msg, contact: Contact) -> Element(msg) {
+fn view_contact(_msg, contact: Contact) -> Element(msg) {
   html.li([], [
     html.div([attribute.class("group relative flex items-center px-5 py-6")], [
       html.a([attribute.class("-m-1 block flex-1 p-1")], [

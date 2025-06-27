@@ -3,7 +3,7 @@ import gleam/http as gleam_http
 import gleam/http/request
 import gleam/json
 import gleam/list
-import gleam/option.{type Option, None, Some}
+import gleam/option.{None, Some}
 import gleam/uri.{type Uri}
 import lustre/effect.{type Effect}
 import utils/http
@@ -34,7 +34,12 @@ pub fn permission_any(session: Session, any: List(String)) -> Bool {
 
 // EFFECTS ---------------------------------------------------------------------
 
-pub fn login(msg, username: String, password: String, base_uri: Uri) -> Effect(msg) {
+pub fn login(
+  msg,
+  username: String,
+  password: String,
+  base_uri: Uri,
+) -> Effect(msg) {
   let scheme = case base_uri.scheme {
     Some("http") -> gleam_http.Http
     Some("https") -> gleam_http.Https

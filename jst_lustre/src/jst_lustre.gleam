@@ -2,7 +2,7 @@
 
 import article/article.{type Article, ArticleV1}
 import article/draft
-import birl.{type Time}
+import birl
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -249,7 +249,10 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                 article.article_get(ArticleGot(id, _), id, model.base_uri),
               )
             }
-            Ok(_) -> todo as "article exists. content is pending or loading."
+            Ok(_) -> {
+              echo "article exists. content is pending or loading."
+              #(model, effect.none())
+            }
             Error(Nil) -> #(
               model,
               modem.push(
@@ -810,7 +813,7 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
     }
     routes.Index -> #(Model(..model, route:), effect.none())
     routes.DjotDemo -> #(Model(..model, route:), effect.none())
-    routes.NotFound(uri) -> #(Model(..model, route:), effect.none())
+    routes.NotFound(_uri) -> #(Model(..model, route:), effect.none())
   }
 }
 
@@ -1869,15 +1872,6 @@ fn view_leading(text: String, slug: String) -> Element(msg) {
   )
 }
 
-fn view_h2(title: String) -> Element(msg) {
-  html.h2(
-    [
-      attr.class("text-2xl text-pink-700 font-light pt-16"),
-      attr.class("article-h2"),
-    ],
-    [html.text(title)],
-  )
-}
 
 // fn view_h3(title: String) -> Element(msg) {
 //   html.h3(
@@ -1912,48 +1906,30 @@ fn view_link(url: Uri, title: String) -> Element(Msg) {
   )
 }
 
-fn view_link_external(url: Uri, title: String) -> Element(Msg) {
-  html.a(
-    [
-      attr.href(uri.to_string(url)),
-      attr.class("text-pink-700 hover:underline cursor-pointer"),
-      attr.target("_blank"),
-    ],
-    [html.text(title)],
-  )
-}
+// fn view_link_external(url: Uri, title: String) -> Element(Msg) {
+//   html.a(
+//     [
+//       attr.href(uri.to_string(url)),
+//       attr.class("text-pink-700 hover:underline cursor-pointer"),
+//       attr.target("_blank"),
+//     ],
+//     [html.text(title)],
+//   )
+// }
 
-fn view_link_missing(url: Uri, title: String) -> Element(Msg) {
-  html.a(
-    [
-      event.on_mouse_down(UserMouseDownNavigation(url)),
-      attr.href(uri.to_string(url)),
-      attr.class("hover:underline cursor-pointer"),
-    ],
-    [
-      html.span([attr.class("text-orange-500")], [html.text("broken link: ")]),
-      html.text(title),
-    ],
-  )
-}
-
-// Content rendering functions removed - now using Djot parsing
-
-// Helper function to create add content buttons
-fn view_add_content_button(label: String, click_message: Msg) -> Element(Msg) {
-  html.button(
-    [
-      attr.class(
-        "px-3 py-2 bg-zinc-700 text-zinc-300 rounded-md hover:bg-zinc-600 text-sm transition-colors",
-      ),
-      event.on_mouse_down(click_message),
-    ],
-    [
-      html.span([attr.class("text-teal-400")], [html.text("+")]),
-      html.text(label),
-    ],
-  )
-}
+// fn view_link_missing(url: Uri, title: String) -> Element(Msg) {
+//   html.a(
+//     [
+//       event.on_mouse_down(UserMouseDownNavigation(url)),
+//       attr.href(uri.to_string(url)),
+//       attr.class("hover:underline cursor-pointer"),
+//     ],
+//     [
+//       html.span([attr.class("text-orange-500")], [html.text("broken link: ")]),
+//       html.text(title),
+//     ],
+//   )
+// }
 
 // Content editor functions removed - now using simple Djot textarea
 
@@ -1975,12 +1951,12 @@ fn view_internal_link(uri: Uri, content: List(Element(Msg))) -> Element(Msg) {
   )
 }
 
-fn view_authentication_required(action: String) -> List(Element(Msg)) {
-  [
-    view_title("Authentication Required", "auth-required"),
-    view_simple_paragraph("You need to be logged in to " <> action),
-  ]
-}
+// fn view_authentication_required(action: String) -> List(Element(Msg)) {
+//   [
+//     view_title("Authentication Required", "auth-required"),
+//     view_simple_paragraph("You need to be logged in to " <> action),
+//   ]
+// }
 
 fn view_djot_demo(content: String) -> List(Element(Msg)) {
   let preview_content = case content {
