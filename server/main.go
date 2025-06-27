@@ -11,6 +11,7 @@ import (
 
 	"jst_dev/server/articles"
 	"jst_dev/server/jst_log"
+	"jst_dev/server/talk"
 	web "jst_dev/server/web"
 	"jst_dev/server/who"
 
@@ -45,7 +46,7 @@ func main() {
 // It loads configuration, sets up logging, starts embedded messaging, blog, HTTP, and user management services, and waits for OS interrupts to trigger a coordinated shutdown. Returns an error if any service fails to initialize or start.
 func run(
 	ctx context.Context,
-	// args []string, // The arguments passed in when executing your program. It’s also used for parsing flags.
+	// args []string, // The arguments passed in when executing your program. It's also used for parsing flags.
 	// stdin io.Reader, // For reading input
 	// stdout io.Writer, // For writing output
 	// stderr io.Writer, // For writing error logs
@@ -57,10 +58,10 @@ func run(
 	defer cancel()
 
 	// - conf
-	// conf, err := loadConf()
-	// if err != nil {
-	// 	return fmt.Errorf("load conf: %w", err)
-	// }
+	conf, err := loadConf()
+	if err != nil {
+		return fmt.Errorf("load conf: %w", err)
+	}
 
 	// - logger (create)
 	lRoot := jst_log.NewLogger(SHARED_ENV_AppName, jst_log.DefaultSubjects())
@@ -72,19 +73,23 @@ func run(
 
 	// - talk
 	l.Debug("starting talk")
-	// nc, err := talk.EmbeddedServer(
-	// 	context.Background(),
-	// 	conf.Talk,
-	// 	lRoot.WithBreadcrumb("talk"),
-	// )
+	var nc *nats.Conn
+	if conf.Flags.natsEmbedded {
+		nc, err = talk.EmbeddedServer(
+			context.Background(),
+			conf.Talk,
+			lRoot.WithBreadcrumb("talk"),
+		)
+	} else {
+		l.Info("connecting to nats..")
+		nc, err = nats.Connect("tls://connect.ngs.global", nats.UserCredentials(".creds"))
+		if err != nil {
+			nc, err = nats.Connect("tls://connect.ngs.global", nats.UserJWTAndSeed(conf.NatsJWT, conf.NatsSeed))
 
-	nc, err := nats.Connect("tls://connect.ngs.global", nats.UserCredentials(".creds"))
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("connect to NATS: %w", err)
-	}
-
-	if err != nil {
-		return fmt.Errorf("TALK, connection: %v", err)
 	}
 	defer nc.Close()
 
