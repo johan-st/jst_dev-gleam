@@ -21,6 +21,7 @@ gleam test
 - Add proper error messages for article loading failures. (MID)
 - Consider adding timestamps to article. (LOW)
 - Consider implementing progressive loading or article metadata. (LOW)
+- history is duplicated and not handled well. (i.e. when navigating to the current page) (LOW)
 
 ### Done
 
