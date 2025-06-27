@@ -963,7 +963,7 @@ fn view_header(model: Model) -> Element(Msg) {
           ]),
           html.div([attr.class("flex items-center space-x-8")], [
             // Desktop navigation
-            html.ul([attr.class("hidden md:flex space-x-8 pr-2")], [
+            html.ul([attr.class("hidden sm:flex space-x-8 pr-2")], [
               view_header_link(
                 target: routes.Articles,
                 current: model.route,
@@ -1022,6 +1022,26 @@ fn view_header(model: Model) -> Element(Msg) {
                     ],
                     [
                       html.div([attr.class("py-1")], [
+                        html.ul(
+                          [attr.class("sm:hidden flex flex-col gap-2 px-4")],
+                          [
+                            view_header_link(
+                              target: routes.Articles,
+                              current: model.route,
+                              label: "Articles",
+                            ),
+                            view_header_link(
+                              target: routes.About,
+                              current: model.route,
+                              label: "About",
+                            ),
+                            view_header_link(
+                              target: routes.DjotDemo,
+                              current: model.route,
+                              label: "Djot Demo",
+                            ),
+                          ],
+                        ),
                         html.button(
                           [
                             attr.class(
@@ -1226,7 +1246,7 @@ fn view_article_listing(
           html.button(
             [
               attr.class(
-                "text-gray-500 pe-4 text-underline pt-2 hover:text-teal-300 hover:border-teal-300 border-t border-gray-500 border-e",
+                "text-gray-500 pe-4 text-underline pt-2 hover:text-teal-300 hover:border-teal-300 border-t border-zinc-700 border-e",
               ),
               event.on_mouse_down(ArticleCreateClicked),
             ],
@@ -1746,7 +1766,7 @@ fn view_article_actions(
         html.button(
           [
             attr.class(
-              "text-gray-500 pe-4 text-underline pb-2 hover:text-teal-300 hover:border-teal-300 border-b border-gray-500",
+              "text-gray-500 pe-4 text-underline pb-2 hover:text-teal-300 hover:border-teal-300 border-b border-zinc-700",
             ),
             event.on_mouse_down(
               UserMouseDownNavigation(
@@ -1758,12 +1778,12 @@ fn view_article_actions(
         )
       False -> element.none()
     },
-    case can_publish {
+    case can_publish && { article.published_at == None } {
       True ->
         html.button(
           [
             attr.class(
-              "text-gray-500 pe-4 text-underline pb-2 hover:text-green-300 hover:border-green-300 border-b border-gray-500",
+              "text-gray-500 pe-4 text-underline pb-2 hover:text-green-300 hover:border-green-300 border-b border-zinc-700",
             ),
             event.on_mouse_down(ArticlePublishClicked(article)),
           ],
@@ -1771,12 +1791,12 @@ fn view_article_actions(
         )
       False -> element.none()
     },
-    case can_publish {
+    case can_publish && { article.published_at != None } {
       True ->
         html.button(
           [
             attr.class(
-              "text-gray-500 pe-4 text-underline pb-2 hover:text-yellow-300 hover:border-yellow-300 border-b border-gray-500",
+              "text-gray-500 pe-4 text-underline pb-2 hover:text-yellow-300 hover:border-yellow-300 border-b border-zinc-700",
             ),
             event.on_mouse_down(ArticleUnpublishClicked(article)),
           ],
@@ -1789,7 +1809,7 @@ fn view_article_actions(
         html.button(
           [
             attr.class(
-              "text-gray-500 pe-4 text-underline pb-2 hover:text-red-400 hover:border-red-400 border-b border-gray-500",
+              "text-gray-500 pe-4 text-underline pb-2 hover:text-red-400 hover:border-red-400 border-b border-zinc-700",
             ),
             event.on_mouse_down(ArticleDeleteClicked(article)),
           ],
