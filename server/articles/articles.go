@@ -432,7 +432,8 @@ func setup(ctx context.Context, nc *nats.Conn) (jetstream.KeyValue, error) {
 	kv, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{
 		Bucket:       "article",
 		Description:  "articles in json format",
-		MaxValueSize: 1024 * 1024 * 5, // 5MB
+		MaxValueSize: 1024 * 1024 * 5,  // 5 MB
+		MaxBytes:     1024 * 1024 * 50, // 50 MB,
 		History:      64,
 		// TTL: 24 * time.Hour,
 		Storage: jetstream.FileStorage,
@@ -441,7 +442,7 @@ func setup(ctx context.Context, nc *nats.Conn) (jetstream.KeyValue, error) {
 		// RePublish: &jetstream.RePublish{},
 		// Mirror: &jetstream.StreamSource{},
 		// Sources: []*jetstream.StreamSource{},
-		// Compression: true,
+		Compression: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("kv create: %w", err)

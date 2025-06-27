@@ -11,9 +11,10 @@ import (
 
 	"jst_dev/server/articles"
 	"jst_dev/server/jst_log"
-	"jst_dev/server/talk"
 	web "jst_dev/server/web"
 	"jst_dev/server/who"
+
+	"github.com/nats-io/nats.go"
 )
 
 const (
@@ -56,10 +57,10 @@ func run(
 	defer cancel()
 
 	// - conf
-	conf, err := loadConf()
-	if err != nil {
-		return fmt.Errorf("load conf: %w", err)
-	}
+	// conf, err := loadConf()
+	// if err != nil {
+	// 	return fmt.Errorf("load conf: %w", err)
+	// }
 
 	// - logger (create)
 	lRoot := jst_log.NewLogger(SHARED_ENV_AppName, jst_log.DefaultSubjects())
@@ -71,11 +72,17 @@ func run(
 
 	// - talk
 	l.Debug("starting talk")
-	nc, err := talk.EmbeddedServer(
-		context.Background(),
-		conf.Talk,
-		lRoot.WithBreadcrumb("talk"),
-	)
+	// nc, err := talk.EmbeddedServer(
+	// 	context.Background(),
+	// 	conf.Talk,
+	// 	lRoot.WithBreadcrumb("talk"),
+	// )
+
+	nc, err := nats.Connect("tls://connect.ngs.global", nats.UserCredentials(".creds"))
+	if err != nil {
+		return fmt.Errorf("connect to NATS: %w", err)
+	}
+
 	if err != nil {
 		return fmt.Errorf("TALK, connection: %v", err)
 	}
@@ -97,7 +104,7 @@ func run(
 	// 	return fmt.Errorf("start blog: %w", err)
 	// }
 
-	// - who 
+	// - who
 	l.Debug("starting who")
 	whoConf := &who.Conf{
 		Logger:    lRoot.WithBreadcrumb("who"),

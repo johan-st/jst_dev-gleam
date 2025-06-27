@@ -52,10 +52,11 @@ func (b *Blog) Start(ctx context.Context) error {
 	}
 	b.ctx = ctx
 
-	kv, err := b.js.CreateKeyValue(ctx, jetstream.KeyValueConfig{
+	kv, err := b.js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{
 		Bucket:       "blog",
 		Description:  "blog articles formated as markdown",
-		MaxValueSize: 1024 * 1024 * 5, // 5MB
+		MaxValueSize: 1024 * 1024 * 5,  // 5 MB
+		MaxBytes:     1024 * 1024 * 50, // 50 MB
 		History:      64,
 		// TTL: 24 * time.Hour,
 		Storage: jetstream.FileStorage,
@@ -64,7 +65,7 @@ func (b *Blog) Start(ctx context.Context) error {
 		// RePublish: &jetstream.RePublish{},
 		// Mirror: &jetstream.StreamSource{},
 		// Sources: []*jetstream.StreamSource{},
-		// Compression: true,
+		Compression: true,
 	})
 	if err != nil {
 		// TODO: if err is bucket already exists we should try to update the config

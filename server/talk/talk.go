@@ -131,11 +131,3 @@ func subscriptions(nc *nats.Conn, l *jst_log.Logger) error {
 
 	return nil
 }
-
-// func GlobalNats(conf confNatsGlobal) (*nats.Conn, error) {
-// 	nc, err := nats.Connect(conf.Url, nats.UserCredentials(conf.Creds))
-// 	if err != nil {
-// 		return nil, fmt.Errorf("connect to NATS: %w", err)
-// 	}
-// 	return nc, nil
-// }

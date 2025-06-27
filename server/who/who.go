@@ -100,8 +100,10 @@ func (w *Who) Start(ctx context.Context) error {
 		Bucket:       "who_users",
 		Description:  "who users by id",
 		Storage:      jetstream.FileStorage,
-		MaxValueSize: 1024 * 1024 * 1, // 1MB
+		MaxValueSize: 1024 * 1024 * 1,  // 1 MB
+		MaxBytes:     1024 * 1024 * 50, // 50 MB,
 		History:      64,
+		Compression:  true,
 	}
 	kv, err := js.CreateOrUpdateKeyValue(w.ctx, confKv)
 	if err != nil {
