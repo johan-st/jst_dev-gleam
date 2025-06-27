@@ -41,6 +41,7 @@ title: Server README
 ### Bug
 
 - [ ] Initial load on a missing article results in the article metadata not being put into the model.. repro: reload on a missing article. go to article listing. It should show "loading...".
+- [ ] /static/ does not handle redirects propperly
 
 ## Bechmarking
 
