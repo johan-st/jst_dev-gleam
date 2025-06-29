@@ -21,7 +21,6 @@ import (
 )
 
 const UserKey = "who_user"
-const hashSalt = "jst_dev_salt"
 const jwtExpiresAfterTime = time.Hour * 12
 
 var PermissionsAll = []api.Permission{
@@ -68,7 +67,7 @@ func New(ctx context.Context, c *Conf) (*Who, error) {
 	}
 
 	hash = sha512.New()
-	_, err = hash.Write([]byte(hashSalt))
+	_, err = hash.Write([]byte(c.HashSalt))
 	if err != nil {
 		return nil, fmt.Errorf("failed to write hash salt: %w", err)
 	}

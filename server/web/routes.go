@@ -29,7 +29,7 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 
 	// Add routes with their respective handlers
 	mux.Handle("GET /api/articles", handleArticleList(l, repo))
-	mux.Handle("POST /api/articles", handleArticleNew(l, repo))
+	mux.Handle("POST /api/articles", handleArticleNew(l, repo, nc))
 	mux.Handle("GET /api/articles/{id}", handleArticle(l, repo))
 	mux.Handle("PUT /api/articles/{id}", handleArticleUpdate(l, repo))
 	mux.Handle("DELETE /api/articles/{id}", handleArticleDelete(l, repo))
@@ -99,6 +99,11 @@ func authJwtDummy(jwtSecret string, next http.Handler) http.Handler {
 	})
 }
 
+// authJwt middleware validates JWT tokens from cookies and sets user context
+//
+// get user with:
+//
+//	user, ok := r.Context().Value(who.UserKey).(whoApi.User)
 func authJwt(jwtSecret string, next http.Handler) http.Handler {
 	if jwtSecret == "" {
 		panic("no jwt secret specified")
@@ -137,6 +142,7 @@ func authJwt(jwtSecret string, next http.Handler) http.Handler {
 // --- HANDLERS ---
 
 // handleProxy proxies requests to the target URL
+//
 // NOTE: this handler uses the the logger that is passed without adding any breadcrumbs
 func handleProxy(l *jst_log.Logger, targetUrl string) http.Handler {
 
@@ -405,21 +411,57 @@ func handleArticle(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 }
 
 // handleArticleNew creates a handler for creating a new article
-func handleArticleNew(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
-
+// We do not use any information from the Post request body when
+// creating the new article.
+func handleArticleNew(l *jst_log.Logger, repo articles.ArticleRepo, nc *nats.Conn) http.Handler {
 	logger := l.WithBreadcrumb("articles").WithBreadcrumb("new")
 	logger.Debug("ready")
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var (
-			art = articles.Article{}
+			art     articles.Article
+			// whoResp whoApi.UserFullResponse
 		)
 		logger.Debug("called")
-		if err := json.NewDecoder(r.Body).Decode(&art); err != nil {
-			logger.Warn("Failed to decode request", "error", err)
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
+
+		// get and check user permissions
+		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		if !ok {
+			logger.Warn("user not found in context")
+			http.Error(w, "not allowed", http.StatusForbidden)
 			return
 		}
+		if !user.Permissions.Includes(whoApi.PermissionPostEditAny) {
+			logger.Warn("user does not have create_article permission")
+			http.Error(w, "not allowed", http.StatusForbidden)
+			return
+		}
+
+		// get full user
+		whoReq, err := json.Marshal(whoApi.UserGetRequest{
+			ID: user.ID,
+		})
+		msg, err := nc.Request(
+			whoApi.Subj.UserGroup+"."+whoApi.Subj.UserGet,
+			whoReq,
+			5*time.Second,
+		)
+		if err != nil {
+			logger.Error("failed to get user data: %w", err)
+			http.Error(w, "failed to get user data", http.StatusInternalServerError)
+			return
+		}
+		err = json.Unmarshal(msg.Data, &user)
+		if err != nil {
+			logger.Error("failed to unmarshal user data: %v", err)
+			http.Error(w, "failed to unmarshal user data", http.StatusInternalServerError)
+			return
+		}
+
+		// build article and save it in repo
+		art.Id = uuid.New()
+		art.Slug = art.Id.String()
+		art.Author = user.Username
+		art.Tags = []string{"new"}
 		art_created, err := repo.Create(art)
 		if err != nil {
 			logger.Error("failed to Create new article in repo: %v", err)
@@ -431,6 +473,8 @@ func handleArticleNew(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler
 			http.Error(w, "article was nil", http.StatusInternalServerError)
 			return
 		}
+
+		// log and respond
 		logger.Debug("created article with slug: %s", art_created.Slug)
 		respJson(w, art_created, http.StatusOK)
 	})

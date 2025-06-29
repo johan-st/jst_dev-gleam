@@ -7,6 +7,7 @@ import (
 	"github.com/golang-jwt/jwt"
 )
 
+// the NATS subject used by this package
 var Subj = struct {
 	// users
 	UserGroup  string
@@ -48,15 +49,15 @@ type User struct {
 	Revision    uint64
 	Username    string
 	Email       string
-	Permissions []Permission
+	Permissions Permissions
 }
 
 type UserFullResponse struct {
-	ID          string       `json:"id"`
-	Revision    uint64       `json:"revision"`
-	Username    string       `json:"username"`
-	Email       string       `json:"email"`
-	Permissions []Permission `json:"permissions"`
+	ID          string      `json:"id"`
+	Revision    uint64      `json:"revision"`
+	Username    string      `json:"username"`
+	Email       string      `json:"email"`
+	Permissions Permissions `json:"permissions"`
 }
 
 type UserCreateRequest struct {
@@ -96,6 +97,7 @@ type UserDeleteResponse struct {
 
 // Permission represents actions that are allowed for the resource.
 type Permission string
+type Permissions []Permission
 
 const (
 	// post
@@ -111,40 +113,59 @@ const (
 	// PermissionUserRevokeAny  Permission = "user_revoke_any"
 )
 
+// Includes checks if all provided permissions are in the given permission
+func (ps Permissions) Includes(perm1 Permission, perms ...Permission) bool {
+	needed := append([]Permission{perm1}, perms...)
+	for _, p := range needed {
+		found := false
+		for _, existing := range ps {
+			if existing == p {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+
 type PermissionsListResponse struct {
-	Permissions []Permission `json:"permissions"`
+	Permissions Permissions `json:"permissions"`
 }
 
 type PermissionsGrantRequest struct {
-	ID          string       `json:"id"`
-	Permissions []Permission `json:"permissions"`
+	ID          string      `json:"id"`
+	Permissions Permissions `json:"permissions"`
 }
 type PermissionsGrantResponse struct {
-	ID      string       `json:"id"`
-	Added   []Permission `json:"added"`
-	Existed []Permission `json:"existed"`
+	ID      string      `json:"id"`
+	Added   Permissions `json:"added"`
+	Existed Permissions `json:"existed"`
 }
 
 type PermissionsRevokeRequest struct {
-	ID          string       `json:"id"`
-	Permissions []Permission `json:"permissions"`
+	ID          string      `json:"id"`
+	Permissions Permissions `json:"permissions"`
 }
 type PermissionsRevokeResponse struct {
-	ID      string       `json:"id"`
-	Removed []Permission `json:"removed"`
-	Missing []Permission `json:"missing"`
+	ID      string      `json:"id"`
+	Removed Permissions `json:"removed"`
+	Missing Permissions `json:"missing"`
 }
 
 type PermissionsCheckRequest struct {
-	ID          string       `json:"id"`
-	Permissions []Permission `json:"permissions"`
+	ID          string      `json:"id"`
+	Permissions Permissions `json:"permissions"`
 }
 type PermissionsCheckResponse struct {
-	ID          string       `json:"id"`
-	Permissions []Permission `json:"permissions"`
-	AllGranted  bool         `json:"allGranted"`
-	Granted     []Permission `json:"granted"`
-	Missing     []Permission `json:"missing"`
+	ID          string      `json:"id"`
+	Permissions Permissions `json:"permissions"`
+	AllGranted  bool        `json:"allGranted"`
+	Granted     Permissions `json:"granted"`
+	Missing     Permissions `json:"missing"`
 }
 
 // AUTH
@@ -155,17 +176,17 @@ type AuthRequest struct {
 }
 
 type AuthResponse struct {
-	Subject     string       `json:"subject"`
-	Token       string       `json:"token"`
-	ExpiresAt   int64         `json:"expiresAt"`
-	Permissions []Permission `json:"permissions"`
+	Subject     string      `json:"subject"`
+	Token       string      `json:"token"`
+	ExpiresAt   int64       `json:"expiresAt"`
+	Permissions Permissions `json:"permissions"`
 }
 
 // JwtClaims is the claims for the JWT token.
 //
 // This is ment to be imported and used inside of the who service but also needs to be available in the api package.
 type JwtClaims struct {
-	Permissions []Permission `json:"perm"`
+	Permissions Permissions `json:"perm"`
 	jwt.StandardClaims
 }
 
@@ -175,7 +196,7 @@ type JwtClaims struct {
 //
 // JwtVerify verifies a JWT token using the provided secret and returns the subject and associated permissions.
 // Returns an error if the token is invalid or the claims cannot be parsed.
-func JwtVerify(secret, audienceName, tokenStr string) (string, []Permission, error) {
+func JwtVerify(secret, audienceName, tokenStr string) (string, Permissions, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &JwtClaims{}, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
