@@ -31,6 +31,7 @@ title: Server README
 - [ ] support publish/unpublish
 - [ ] add a "delete" button
 - [ ] add a "history" button
+- [ ] Reevaluate `whoApi`/`who/api`. It could be more intuitive.
 
 ### `later`
 
