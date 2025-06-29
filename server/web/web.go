@@ -30,7 +30,7 @@ var embedded embed.FS
 
 // New initializes and returns a new httpServer instance with embedded static files and an article repository.
 // Returns nil if the static files or article repository cannot be initialized.
-func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger, articleRepo articles.ArticleRepo) *httpServer {
+func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger, articleRepo articles.ArticleRepo, dev bool) *httpServer {
 	fs, err := fs.Sub(embedded, "static")
 	if err != nil {
 		l.Error("Failed to load static folder")
@@ -47,7 +47,7 @@ func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger
 	}
 
 	// Set up routes on the mux
-	routes(s.mux, l.WithBreadcrumb("route"), s.articleRepo, nc, s.embedFs, jwtSecret)
+	routes(s.mux, l.WithBreadcrumb("route"), s.articleRepo, nc, s.embedFs, jwtSecret, dev)
 
 	// Apply global middleware to create the final handler
 	// note: last added is first called
@@ -61,7 +61,7 @@ func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger
 	return s
 }
 
-func (s *httpServer) Run(cleanShutdown *sync.WaitGroup) {
+func (s *httpServer) Run(cleanShutdown *sync.WaitGroup, port string) {
 	cleanShutdown.Add(1)
 
 	httpServer := &http.Server{

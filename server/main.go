@@ -18,11 +18,6 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-const (
-	SHARED_ENV_AppName   = "local-dev"
-	SHARED_ENV_jwtSecret = "jst_dev_secret"
-)
-
 // main is the entry point of the server application, initializing the context and running the server.
 // If an error occurs during startup or execution, it prints the error to standard error and exits with status code 1.
 func main() {
@@ -64,7 +59,7 @@ func run(
 	}
 
 	// - logger (create)
-	lRoot := jst_log.NewLogger(SHARED_ENV_AppName, jst_log.DefaultSubjects())
+	lRoot := jst_log.NewLogger(conf.AppName, jst_log.DefaultSubjects())
 	l := lRoot.WithBreadcrumb("main")
 
 	// - context
@@ -74,7 +69,7 @@ func run(
 	// - talk
 	l.Debug("starting talk")
 	var nc *nats.Conn
-	if conf.Flags.natsEmbedded {
+	if conf.Flags.NatsEmbedded {
 		nc, err = talk.EmbeddedServer(
 			context.Background(),
 			conf.Talk,
@@ -82,11 +77,19 @@ func run(
 		)
 	} else {
 		l.Info("connecting to nats..")
-		nc, err = nats.Connect("tls://connect.ngs.global", nats.UserCredentials(".creds"))
-		if err != nil {
-			nc, err = nats.Connect("tls://connect.ngs.global", nats.UserJWTAndSeed(conf.NatsJWT, conf.NatsSeed))
+		// nc, err = nats.Connect(
+		// 	"tls://connect.ngs.global",
+		// 	// nats.UserCredentials(".creds"),
+		// 	nats.Name(os.Getenv("FLY_APP_NAME")+"-"+os.Getenv("PRIMARY_REGION")),
+		// )
+		// if err != nil {
+		nc, err = nats.Connect("tls://connect.ngs.global",
+			nats.UserJWTAndSeed(
+				conf.NatsJWT,
+				conf.NatsNKEY,
+			))
 
-		}
+		// }
 	}
 	if err != nil {
 		return fmt.Errorf("connect to NATS: %w", err)
@@ -95,7 +98,7 @@ func run(
 
 	// - logger (connect)
 	lRoot.Connect(nc)
-	jst_log.StdOut(nc, "log."+SHARED_ENV_AppName, jst_log.DefaultSubjects(), jst_log.LogLevelDebug)
+	jst_log.StdOut(nc, "log."+conf.AppName, jst_log.DefaultSubjects(), jst_log.LogLevelDebug)
 	time.Sleep(1 * time.Millisecond)
 
 	// - blog
@@ -114,7 +117,7 @@ func run(
 	whoConf := &who.Conf{
 		Logger:    lRoot.WithBreadcrumb("who"),
 		NatsConn:  nc,
-		JwtSecret: []byte(SHARED_ENV_jwtSecret),
+		JwtSecret: []byte(conf.WebJwtSecret),
 		HashSalt:  "jst_dev_salt",
 	}
 	whoSvc, err := who.New(ctx, whoConf)
@@ -135,8 +138,8 @@ func run(
 
 	// - web
 	l.Debug("http server, start")
-	httpServer := web.New(ctx, nc, SHARED_ENV_jwtSecret, lRoot.WithBreadcrumb("http"), articleRepo)
-	go httpServer.Run(cleanShutdown)
+	httpServer := web.New(ctx, nc, conf.WebJwtSecret, lRoot.WithBreadcrumb("http"), articleRepo, conf.Flags.ProxyFrontend)
+	go httpServer.Run(cleanShutdown, conf.WebPort)
 
 	// ------------------------------------------------------------
 	// RUNNING

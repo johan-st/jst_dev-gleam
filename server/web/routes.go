@@ -25,7 +25,7 @@ const (
 	audience   = "jst_dev.who"
 )
 
-func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc *nats.Conn, embeddedFS fs.FS, jwtSecret string) {
+func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc *nats.Conn, embeddedFS fs.FS, jwtSecret string, dev bool) {
 
 	// Add routes with their respective handlers
 	mux.Handle("GET /api/articles", handleArticleList(l, repo))
@@ -37,19 +37,21 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 	mux.Handle("GET /api/articles/{id}/revisions/{revision}", handleArticleRevision(l, repo))
 
 	// auth
-	mux.Handle("POST /api/auth", handleAuth(l, nc))
+	mux.Handle("POST /api/auth", handleAuth(l, nc, jwtSecret))
 	mux.Handle("GET /api/auth/logout", handleAuthLogout(l, nc))
 	mux.Handle("GET /api/auth", handleAuthCheck(l, nc, jwtSecret))
 
 	// web
-	mux.Handle("GET /", handleStaticFile(l, embeddedFS, "index.html"))
-	mux.Handle("GET /static/", handleStaticFS(l, embeddedFS))
+	if dev {
+		// DEV routes
+		mux.Handle("GET /dev/seed", handleSeed(l, repo))   // TODO: remove this
+		mux.Handle("GET /dev/purge", handlePurge(l, repo)) // TODO: remove this
+		mux.Handle("/", handleProxy(l.WithBreadcrumb("proxy_frontend"), "http://127.0.0.1:1234"))
+	} else {
+		mux.Handle("GET /", handleStaticFile(l, embeddedFS, "index.html"))
+		mux.Handle("GET /static/", handleStaticFS(l, embeddedFS))
 
-	// DEV routes
-	// mux.Handle("GET /dev/seed", handleSeed(l, repo))   // TODO: remove this
-	// mux.Handle("GET /dev/purge", handlePurge(l, repo)) // TODO: remove this
-	// mux.Handle("/", handleProxy(l.WithBreadcrumb("proxy_frontend"), "http://127.0.0.1:1234"))
-
+	}
 }
 
 // --- MIDDLEWARE ---
@@ -66,14 +68,13 @@ func logger(l *jst_log.Logger, next http.Handler) http.Handler {
 	})
 }
 
-func cors(l *jst_log.Logger, next http.Handler) http.Handler {
+func cors(_ *jst_log.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
 		if origin == "http://localhost:8080" || origin == "http://127.0.0.1:8080" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 		} else {
-			l.Warn("dangerously setting origin to %s", origin)
-			w.Header().Set("Access-Control-Allow-Origin", "https://taylor.gazelle-chicken.ts.net")
+			w.Header().Set("Access-Control-Allow-Origin", "https://server-small-dream-1266.fly.dev")
 		}
 
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -166,7 +167,7 @@ func handleProxy(l *jst_log.Logger, targetUrl string) http.Handler {
 
 // - auth
 
-func handleAuth(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+func handleAuth(l *jst_log.Logger, nc *nats.Conn, jwtSecret string) http.Handler {
 	type Req struct {
 		Email    string `json:"email,omitempty"`
 		Username string `json:"username,omitempty"`
@@ -206,8 +207,9 @@ func handleAuth(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		}
 
 		whoReq = whoApi.AuthRequest{
-			Username: "johan-st",
-			Password: "password",
+			Username: req.Username,
+			Email:    req.Email,
+			Password: req.Password,
 		}
 		whoBytes, err = json.Marshal(whoReq)
 		if err != nil {
@@ -233,7 +235,7 @@ func handleAuth(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		}
 
 		l.Debug("token: %s\n", whoResp.Token)
-		subject, permissions, err := whoApi.JwtVerify("jst_dev_secret", audience, whoResp.Token)
+		subject, permissions, err := whoApi.JwtVerify(jwtSecret, audience, whoResp.Token)
 		if err != nil {
 			l.Debug("error verifying jwt: %s\n", err)
 			http.Error(w, "error verifying jwt", http.StatusInternalServerError)
@@ -366,12 +368,6 @@ func handleArticleList(l *jst_log.Logger, repo articles.ArticleRepo) http.Handle
 			return
 		}
 		logger.Debug("articles count: %d", len(articles))
-
-		// Debug log each article's tags
-		for i, art := range articles {
-			fmt.Printf("[DEBUG] ArticleList article %d: %s tags: %v\n", i, art.Slug, art.Tags)
-		}
-
 		respJson(w, Resp{Articles: articles}, http.StatusOK)
 	})
 }
@@ -404,8 +400,6 @@ func handleArticle(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 			return
 		}
 		logger.Debug("article: %s (rev: %d)", art.Slug, art.Rev)
-		fmt.Printf("[DEBUG] ArticleGet returning article %s tags: %v\n", art.Slug, art.Tags)
-		fmt.Printf("[DEBUG] ArticleGet returning article %s author: %s, published_at: %d\n", art.Slug, art.Author, art.PublishedAt)
 		respJson(w, art, http.StatusOK)
 	})
 }
@@ -491,11 +485,6 @@ func handleArticleUpdate(l *jst_log.Logger, repo articles.ArticleRepo) http.Hand
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
-
-		fmt.Printf("[DEBUG] ArticleUpdate received data for %s:\n", art.Slug)
-		fmt.Printf("[DEBUG] ArticleUpdate received tags: %v\n", art.Tags)
-		fmt.Printf("[DEBUG] ArticleUpdate received author: %s\n", art.Author)
-		fmt.Printf("[DEBUG] ArticleUpdate received published_at: %d\n", art.PublishedAt)
 
 		// Update article using client's revision - preserve all fields
 		art, err = repo.Update(articles.Article{

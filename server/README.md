@@ -12,6 +12,7 @@ title: Server README
 - [ ] updates to an article should not reset the draft.
 - [ ] implement optimistic updates (with visual feedback in UI)
 - [ ] Use exteranl NATS cluster for production. Local could be a leaf node or just for local development.
+- [ ] (!) Reevaluate including the .creds file.
 
 ### `v0`
 
@@ -42,6 +43,7 @@ title: Server README
 
 - [ ] Initial load on a missing article results in the article metadata not being put into the model.. repro: reload on a missing article. go to article listing. It should show "loading...".
 - [ ] /static/ does not handle redirects propperly
+- [ ] "USER_NOT_FOUND" results in a 500 from http handler. It expects json..
 
 ## Bechmarking
 

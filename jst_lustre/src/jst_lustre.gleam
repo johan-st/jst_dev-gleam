@@ -1269,7 +1269,41 @@ fn view_article_listing(
     ]),
   ]
 
-  list.append(header_section, articles_elements)
+  // Show helpful message when no articles are available
+  let content_section = case articles_elements {
+    [] -> [
+      html.div([attr.class("mt-14 text-center")], [
+        html.div([attr.class("border-l border-zinc-700 pl-4 py-8")], [
+          html.h3([attr.class("text-xl text-zinc-500 font-light mb-4")], [
+            html.text("No articles yet"),
+          ]),
+          case session {
+            session.Authenticated(_) -> 
+              html.div([attr.class("space-y-4")], [
+                view_simple_paragraph("Ready to share your thoughts? Create your first article to get started."),
+                html.button(
+                  [
+                    attr.class(
+                      "inline-block px-6 py-2 bg-pink-700 text-white rounded-md hover:bg-pink-600 transition-colors duration-200 font-medium",
+                    ),
+                    event.on_mouse_down(ArticleCreateClicked),
+                  ],
+                  [html.text("Create Your First Article")],
+                ),
+              ])
+            _ -> 
+              html.div([attr.class("space-y-4")], [
+                view_simple_paragraph("No published articles are available yet."),
+                view_simple_paragraph("Check back later for new content!"),
+              ])
+          },
+        ]),
+      ]),
+    ]
+    _ -> articles_elements
+  }
+
+  list.append(header_section, content_section)
 }
 
 fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
