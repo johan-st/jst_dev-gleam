@@ -4,20 +4,21 @@ title: Server README
 
 ## TODOs
 
-- [ ] json files for cli nats requests **(in progress)**
 - [ ] have local logging be disconnected from nats
-- [ ] make a version that works with the nats global supercluster
-- [ ] clean up architecture from superflous code and logic
-- [ ] admin panel
-- [ ] updates to an article should not reset the draft.
 - [ ] implement optimistic updates (with visual feedback in UI)
-- [ ] Use exteranl NATS cluster for production. Local could be a leaf node or just for local development.
-- [ ] (!) Reevaluate including the .creds file.
+- [ ] clean up architecture from superflous code and logic
+
+### done
+
+- [x] make a version that works with the nats global supercluster
+- [x] (!) Reevaluate including the .creds file.
+  - Will not include. Using jwt and nkey in env
 
 ### `v0`
 
 - [ ] fix editing of articles
 - [ ] seed initial admin somehow (from environment?)
+  - `cat usersCreate.json | nats req svc.who.users.create 
 - [ ] clean up and protect api endpoints
 - [ ] check auth and permissions on api endpoints
 - [ ] fail creation if slug is not unique (alt. create with id as slug)
@@ -25,6 +26,7 @@ title: Server README
 
 ### `v0.1`
 
+- [ ] updates to an article should not reset the draft.
 - [ ] build some tests for critical functionality
   - [ ] testdata should be populated from a series of json files in the testdata directory that are to be used with the nats cli. We could then have a script that requests each service to create the data we want for local development.
 - [ ] add "new" article button
@@ -33,12 +35,18 @@ title: Server README
 - [ ] add a "history" button
 - [ ] Reevaluate `whoApi`/`who/api`. It could be more intuitive.
 
+
 ### `later`
 
 - [ ] do not store rev in kv value. It can cause confusion as we should rely on the nats kv revision number.
 - [ ] do not store id in kv value. It can cause confusion as we should rely on the nats kv key.
 - [ ] revisions increese globally. We should have one per article as well and use the global one to ensure we are not overwritting changes.
 - [ ] implement authorization on a per article basis.
+- [ ] admin panel
+- [ ] json files for cli nats requests **(in progress)**
+- [ ] preload data on mobile (not just on hover)
+- [ ] one go-routine per connected client
+  - [ ] isolate it
 
 ### Bug
 
