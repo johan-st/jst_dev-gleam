@@ -49,6 +49,7 @@ type Model {
     djot_demo_content: String,
     edit_view_mode: EditViewMode,
     profile_menu_open: Bool,
+    notice: String,
   )
 }
 
@@ -70,6 +71,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
       djot_demo_content: initial_djot,
       edit_view_mode: EditViewModeEdit,
       profile_menu_open: False,
+      notice: "",
     )
   let effect_modem =
     modem.init(fn(uri) {
@@ -548,7 +550,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     // AUTH
     AuthLoginClicked(username, password) -> {
       #(
-        model,
+        Model(..model, notice: "login clicked", session: session.Pending),
         session.login(AuthLoginResponse, username, password, model.base_uri),
       )
     }
@@ -557,7 +559,14 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         Ok(session) -> #(Model(..model, session: session), effect.none())
         Error(err) -> {
           echo err
-          #(Model(..model, session: session.Unauthenticated), effect.none())
+          #(
+            Model(
+              ..model,
+              session: session.Unauthenticated,
+              notice: "login err resp",
+            ),
+            effect.none(),
+          )
         }
       }
     }
@@ -571,17 +580,27 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(Model(..model, session: session.Unauthenticated), effect.none())
     }
     AuthCheckClicked -> {
-      #(model, session.auth_check(AuthCheckResponse, model.base_uri))
+      #(
+        Model(..model, notice: "auth check.."),
+        session.auth_check(AuthCheckResponse, model.base_uri),
+      )
     }
     AuthCheckResponse(result) -> {
       case result {
         Ok(session) -> {
-          #(Model(..model, session:), effect.none())
+          #(Model(..model, session:, notice: "auth check ok"), effect.none())
         }
         Error(err) -> {
           echo "session check response error"
           echo err
-          #(Model(..model, session: session.Unauthenticated), effect.none())
+          #(
+            Model(
+              ..model,
+              session: session.Unauthenticated,
+              notice: "auth check err",
+            ),
+            effect.none(),
+          )
         }
       }
     }
@@ -857,6 +876,7 @@ fn view(model: Model) -> Element(Msg) {
             ),
           ],
           [
+            // view_notice(model.notice),
             view_header(model),
             html.main([attr.class("mx-auto px-10 py-10")], content),
           ],
@@ -872,6 +892,7 @@ fn view(model: Model) -> Element(Msg) {
             ),
           ],
           [
+            // view_notice(model.notice),
             view_header(model),
             html.main(
               [attr.class("max-w-screen-md mx-auto px-10 py-10")],
@@ -953,6 +974,13 @@ fn page_from_model(model: Model) -> pages.Page {
     routes.DjotDemo -> pages.PageDjotDemo(model.djot_demo_content)
     routes.About -> pages.PageAbout
     routes.NotFound(uri) -> pages.PageNotFound(uri)
+  }
+}
+
+fn view_notice(notice: String) -> Element(Msg) {
+  case notice {
+    "" -> element.none()
+    notice -> html.span([], [html.text(notice)])
   }
 }
 
@@ -1054,39 +1082,44 @@ fn view_header(model: Model) -> Element(Msg) {
                             ),
                           ],
                         ),
-                        html.button(
-                          [
-                            attr.class(
-                              "block w-full text-left px-4 py-2 text-sm text-zinc-200 hover:bg-green-800 transition-colors cursor-pointe",
-                            ),
-                            attr.classes([
-                              #(
-                                "hidden",
-                                model.session != session.Unauthenticated,
-                              ),
-                            ]),
-                            event.on_mouse_down(AuthLoginClicked(
-                              "johan-st",
-                              "password",
-                            )),
-                          ],
-                          [html.text("Login")],
-                        ),
-                        html.button(
-                          [
-                            attr.class(
-                              "block w-full text-left px-4 py-2 text-sm text-zinc-200 hover:bg-orange-800 transition-colors cursor-pointe",
-                            ),
-                            attr.classes([
-                              #(
-                                "hidden",
-                                model.session == session.Unauthenticated,
-                              ),
-                            ]),
-                            event.on_mouse_down(AuthLogoutClicked),
-                          ],
-                          [html.text("Logout")],
-                        ),
+                        case model.session {
+                          session.Unauthenticated -> {
+                            html.button(
+                              [
+                                attr.class(
+                                  "block w-full text-left px-4 py-2 text-sm text-zinc-200 hover:bg-green-800 transition-colors cursor-pointe",
+                                ),
+                                event.on_mouse_down(AuthLoginClicked(
+                                  "johan-st",
+                                  "password",
+                                )),
+                              ],
+                              [html.text("Login")],
+                            )
+                          }
+                          session.Pending -> {
+                            html.button(
+                              [
+                                attr.class(
+                                  "block w-full text-left px-4 py-2 text-sm bg-zinc-700 text-zinc-400 hover:bg-orange-800 transition-colors cursor-not-allowed opacity-60",
+                                ),
+                                event.on_mouse_down(AuthLogoutClicked),
+                              ],
+                              [html.text("logging in..")],
+                            )
+                          }
+                          session.Authenticated(_auth_sess) -> {
+                            html.button(
+                              [
+                                attr.class(
+                                  "block w-full text-left px-4 py-2 text-sm text-zinc-200 hover:bg-orange-800 transition-colors cursor-pointe",
+                                ),
+                                event.on_mouse_down(AuthLogoutClicked),
+                              ],
+                              [html.text("Logout")],
+                            )
+                          }
+                        },
                         html.button(
                           [
                             attr.class(
@@ -1225,20 +1258,22 @@ fn view_article_listing(
               ],
               [
                 html.div([attr.class("flex justify-between gap-4")], [
-                  html.h3(
-                    [
-                      attr.id("article-title-" <> slug),
-                      attr.class("article-title"),
-                      attr.class("text-xl text-pink-600 font-light group-hover:text-pink-500 transition-colors"),
-                    ],
-                    [html.text(title)],
-                  ),
+                  html.div([attr.class("flex flex-col")], [
+                    html.h3(
+                      [
+                        attr.id("article-title-" <> slug),
+                        attr.class("article-title"),
+                        attr.class("text-xl text-pink-700 font-light"),
+                      ],
+                      [html.text(title)],
+                    ),
+                    view_subtitle(subtitle, slug),
+                  ]),
                   html.div([attr.class("flex flex-col items-end")], [
                     view_publication_status(article),
                     view_author(article.author),
                   ]),
                 ]),
-                view_subtitle(subtitle, slug),
                 view_simple_paragraph(leading),
                 html.div([attr.class("flex justify-end mt-2")], [
                   view_article_tags(tags),
@@ -1278,9 +1313,11 @@ fn view_article_listing(
             html.text("No articles yet"),
           ]),
           case session {
-            session.Authenticated(_) -> 
+            session.Authenticated(_) ->
               html.div([attr.class("space-y-4")], [
-                view_simple_paragraph("Ready to share your thoughts? Create your first article to get started."),
+                view_simple_paragraph(
+                  "Ready to share your thoughts? Create your first article to get started.",
+                ),
                 html.button(
                   [
                     attr.class(
@@ -1291,9 +1328,11 @@ fn view_article_listing(
                   [html.text("Create Your First Article")],
                 ),
               ])
-            _ -> 
+            _ ->
               html.div([attr.class("space-y-4")], [
-                view_simple_paragraph("No published articles are available yet."),
+                view_simple_paragraph(
+                  "No published articles are available yet.",
+                ),
                 view_simple_paragraph("Check back later for new content!"),
               ])
           },
@@ -1905,7 +1944,6 @@ fn view_leading(text: String, slug: String) -> Element(msg) {
     [html.text(text)],
   )
 }
-
 
 // fn view_h3(title: String) -> Element(msg) {
 //   html.h3(

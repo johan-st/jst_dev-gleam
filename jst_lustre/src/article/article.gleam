@@ -103,10 +103,9 @@ pub fn to_draft(article: Article) -> Option(Draft) {
 
 pub fn can_view(article: Article, session: Session) -> Bool {
   case published_at(article), session {
-    None, Unauthenticated -> False
-    Some(published_at), Unauthenticated ->
-      birl.compare(published_at, birl.now()) != order.Gt
+    Some(_), _ -> True
     _, Authenticated(_) -> True
+    _, _ -> False
   }
 }
 

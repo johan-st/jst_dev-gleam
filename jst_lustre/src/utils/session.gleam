@@ -9,6 +9,7 @@ import lustre/effect.{type Effect}
 import utils/http
 
 pub type Session {
+  Pending
   Unauthenticated
   Authenticated(session: SessionAuthenticated)
 }
@@ -21,8 +22,9 @@ pub opaque type SessionAuthenticated {
 
 pub fn permissions(session: Session) -> List(String) {
   case session {
-    Authenticated(SessionAuthenticated(_, _, permissions)) -> permissions
+    Pending -> []
     Unauthenticated -> []
+    Authenticated(SessionAuthenticated(_, _, permissions)) -> permissions
   }
 }
 
