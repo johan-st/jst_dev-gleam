@@ -17,12 +17,15 @@ title: Server README
 ### `v0`
 
 - [ ] fix editing of articles
-- [ ] seed initial admin somehow (from environment?)
-  - `cat usersCreate.json | nats req svc.who.users.create 
 - [ ] clean up and protect api endpoints
 - [ ] check auth and permissions on api endpoints
-- [ ] fail creation if slug is not unique (alt. create with id as slug)
+- [ ] fail update if slug is not unique.
 - [ ] after delete, we can still access the article history (revisions). Should we show deleted articles to logged in users?
+
+#### done
+
+- [x] seed initial admin somehow (from environment?)
+  - `cat usersCreate.json | nats req svc.who.users.create
 
 ### `v0.1`
 
