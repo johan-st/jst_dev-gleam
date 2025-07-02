@@ -462,6 +462,10 @@ func handleArticleNew(l *jst_log.Logger, repo articles.ArticleRepo, nc *nats.Con
 		art.Slug = art.Id.String()
 		art.Author = user.Username
 		art.Tags = []string{"new"}
+		art.Content = "no content yet"
+		art.Title = "new article"
+		art.Subtitle = ""
+		art.Leading = "One paragraph summary/ eyecatching synopsis."
 		art_created, err := repo.Create(art)
 		if err != nil {
 			logger.Error("failed to Create new article in repo: %v", err)
