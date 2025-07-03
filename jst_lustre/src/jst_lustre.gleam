@@ -21,6 +21,7 @@ import pages/pages
 import routes/routes.{type Route}
 import utils/error_string
 import utils/http.{type HttpError}
+import utils/icon
 import utils/jot_to_lustre
 import utils/persist.{type PersistentModel, PersistentModelV0, PersistentModelV1}
 import utils/remote_data.{
@@ -31,8 +32,8 @@ import utils/session
 // MAIN ------------------------------------------------------------------------
 
 pub fn main() {
-  let app = lustre.application(init, update, view)
-  // let app = lustre.application(init, update_with_localstorage, view)
+  // let app = lustre.application(init, update, view)
+  let app = lustre.application(init, update_with_localstorage, view)
   let assert Ok(_) = lustre.start(app, "#app", Nil)
 
   Nil
@@ -50,6 +51,7 @@ type Model {
     edit_view_mode: EditViewMode,
     profile_menu_open: Bool,
     notice: String,
+    debug_use_local_storage: Bool,
   )
 }
 
@@ -72,6 +74,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
       edit_view_mode: EditViewModeEdit,
       profile_menu_open: False,
       notice: "",
+      debug_use_local_storage: True,
     )
   let effect_modem =
     modem.init(fn(uri) {
@@ -104,6 +107,7 @@ type Msg {
   ProfileMenuToggled
   // MESSAGES
   // UserMessageDismissed(msg: UserMessage)
+  NoticeCleared
   // LOCALSTORAGE
   PersistGotModel(opt: Option(PersistentModel))
   // ARTICLES
@@ -139,42 +143,43 @@ type Msg {
   DjotDemoContentUpdated(content: String)
   // EDIT VIEW TOGGLE
   EditViewModeToggled
+  // DEBUG
+  DebugToggleLocalStorage
 }
 
-// fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
-//   let #(new_model, effect) = update(model, msg)
-//   let persistent_model = fn(model: Model) -> PersistentModel {
-//     PersistentModelV1(
-//       version: 1,
-//       articles: case model.articles {
-//         NotInitialized -> []
-//         Pending -> []
-//         Loaded(articles) -> articles |> dict.to_list
-//         Errored(_) -> []
-//       }
-//         |> list.map(fn(tuple) {
-//           let #(_id, article) = tuple
-//           article
-//         }),
-//     )
-//   }
-//   case msg {
-//     ArticleMetaGot(_) -> {
-//       persist.localstorage_set(
-//         persist.model_localstorage_key,
-//         persist.encode(persistent_model(new_model)),
-//       )
-//     }
-//     ArticleGot(_, _) -> {
-//       persist.localstorage_set(
-//         persist.model_localstorage_key,
-//         persist.encode(persistent_model(new_model)),
-//       )
-//     }
-//     _ -> Nil
-//   }
-//   #(new_model, effect)
-// }
+fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
+  case model.debug_use_local_storage {
+    True -> {
+      let #(new_model, effect) = update(model, msg)
+      let persistent_model = fn(model: Model) -> PersistentModel {
+        PersistentModelV1(version: 1, articles: case model.articles {
+          NotInitialized -> []
+          Pending -> []
+          Loaded(articles) -> articles
+          Optimistic(_) -> []
+          Errored(_) -> []
+        })
+      }
+      case msg {
+        ArticleMetaGot(_) -> {
+          persist.localstorage_set(
+            persist.model_localstorage_key,
+            persist.encode(persistent_model(new_model)),
+          )
+        }
+        ArticleGot(_, _) -> {
+          persist.localstorage_set(
+            persist.model_localstorage_key,
+            persist.encode(persistent_model(new_model)),
+          )
+        }
+        _ -> Nil
+      }
+      #(new_model, effect)
+    }
+    False -> update(model, msg)
+  }
+}
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
@@ -193,6 +198,10 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         Model(..model, profile_menu_open: !model.profile_menu_open),
         effect.none(),
       )
+    }
+    // Messages
+    NoticeCleared -> {
+      #(Model(..model, notice: ""), effect.none())
     }
     // Browser Persistance
     PersistGotModel(opt:) -> {
@@ -493,7 +502,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               leading: draft.leading(current_draft),
               subtitle: draft.subtitle(current_draft),
               content: Loaded(draft.content(current_draft)),
-              draft: None,
+              draft: Some(current_draft),
             )
           let updated_articles =
             remote_data.map(
@@ -550,20 +559,23 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     // AUTH
     AuthLoginClicked(username, password) -> {
       #(
-        Model(..model, notice: "login clicked", session: session.Pending),
+        Model(..model, notice: "login, CLICK", session: session.Pending),
         session.login(AuthLoginResponse, username, password, model.base_uri),
       )
     }
     AuthLoginResponse(session_result) -> {
       case session_result {
-        Ok(session) -> #(Model(..model, session: session), effect.none())
+        Ok(session) -> #(
+          Model(..model, session: session, notice: "login, OK"),
+          effect.none(),
+        )
         Error(err) -> {
           echo err
           #(
             Model(
               ..model,
               session: session.Unauthenticated,
-              notice: "login err resp",
+              notice: "login, ERROR",
             ),
             effect.none(),
           )
@@ -581,14 +593,14 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     AuthCheckClicked -> {
       #(
-        Model(..model, notice: "auth check.."),
+        Model(..model, notice: "auth check, CLICK"),
         session.auth_check(AuthCheckResponse, model.base_uri),
       )
     }
     AuthCheckResponse(result) -> {
       case result {
         Ok(session) -> {
-          #(Model(..model, session:, notice: "auth check ok"), effect.none())
+          #(Model(..model, session:, notice: "auth check, OK"), effect.none())
         }
         Error(err) -> {
           echo "session check response error"
@@ -597,7 +609,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             Model(
               ..model,
               session: session.Unauthenticated,
-              notice: "auth check err",
+              notice: "auth check, ERROR",
             ),
             effect.none(),
           )
@@ -740,6 +752,12 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         ),
       )
     }
+    DebugToggleLocalStorage -> {
+      #(
+        Model(..model, debug_use_local_storage: !model.debug_use_local_storage),
+        effect.none(),
+      )
+    }
   }
 }
 
@@ -876,7 +894,7 @@ fn view(model: Model) -> Element(Msg) {
             ),
           ],
           [
-            // view_notice(model.notice),
+            view_notice(model.notice),
             view_header(model),
             html.main([attr.class("mx-auto px-10 py-10")], content),
           ],
@@ -892,7 +910,7 @@ fn view(model: Model) -> Element(Msg) {
             ),
           ],
           [
-            // view_notice(model.notice),
+            view_notice(model.notice),
             view_header(model),
             html.main(
               [attr.class("max-w-screen-md mx-auto px-10 py-10")],
@@ -980,7 +998,16 @@ fn page_from_model(model: Model) -> pages.Page {
 fn view_notice(notice: String) -> Element(Msg) {
   case notice {
     "" -> element.none()
-    notice -> html.span([], [html.text(notice)])
+    notice ->
+      html.div(
+        [
+          event.on_click(NoticeCleared),
+          attr.class(
+            "h-5 w-full cursor-pointer bg-zinc-700 text-mono text-zinc-200 text-xs px-8",
+          ),
+        ],
+        [html.text(notice)],
+      )
   }
 }
 
@@ -1129,6 +1156,44 @@ fn view_header(model: Model) -> Element(Msg) {
                           ],
                           [html.text("Check")],
                         ),
+                        case model.debug_use_local_storage {
+                          True ->
+                            html.button(
+                              [
+                                attr.class(
+                                  "block w-full text-left px-4 py-2 text-sm text-zinc-200 hover:bg-orange-800 transition-colors cursor-pointe",
+                                ),
+                                event.on_mouse_down(DebugToggleLocalStorage),
+                              ],
+                              [
+                                html.div([attr.class("flex justify-between")], [
+                                  html.text("LocalStorage"),
+                                  icon.view(
+                                    [attr.class("w-6 text-green-400")],
+                                    icon.Checkmark,
+                                  ),
+                                ]),
+                              ],
+                            )
+                          False ->
+                            html.button(
+                              [
+                                attr.class(
+                                  "block w-full text-left px-4 py-2 text-sm text-zinc-200 hover:bg-green-800 transition-colors cursor-pointe",
+                                ),
+                                event.on_mouse_down(DebugToggleLocalStorage),
+                              ],
+                              [
+                                html.div([attr.class("flex justify-between ")], [
+                                  html.text("LocalStorage"),
+                                  icon.view(
+                                    [attr.class("w-6 text-orange-400")],
+                                    icon.Close,
+                                  ),
+                                ]),
+                              ],
+                            )
+                        },
                       ]),
                     ],
                   )

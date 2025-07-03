@@ -8,7 +8,7 @@ title: Server README
 - [ ] implement optimistic updates (with visual feedback in UI)
 - [ ] clean up architecture from superflous code and logic
 
-### done
+### done-TODOs
 
 - [x] make a version that works with the nats global supercluster
 - [x] (!) Reevaluate including the .creds file.
@@ -22,7 +22,7 @@ title: Server README
 - [ ] fail update if slug is not unique.
 - [ ] after delete, we can still access the article history (revisions). Should we show deleted articles to logged in users?
 
-#### done
+#### done-v0
 
 - [x] seed initial admin somehow (from environment?)
   - `cat usersCreate.json | nats req svc.who.users.create
