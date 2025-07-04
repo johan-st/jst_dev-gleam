@@ -920,6 +920,8 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
       }
     }
     routes.Index -> #(Model(..model, route:), effect.none())
+    routes.UrlShortIndex -> #(Model(..model, route:), effect.none())
+    routes.UrlShortInfo(_) -> #(Model(..model, route:), effect.none())
     routes.DjotDemo -> #(Model(..model, route:), effect.none())
     routes.NotFound(_uri) -> #(Model(..model, route:), effect.none())
   }
@@ -953,6 +955,8 @@ fn view(model: Model) -> Element(Msg) {
       }
     }
     pages.PageAbout -> view_about()
+    pages.PageUrlShortIndex -> view_url_index()
+    pages.PageUrlShortInfo(short:) -> todo as "short info"
     pages.PageDjotDemo(content) -> view_djot_demo(content)
     pages.PageNotFound(uri) -> view_not_found(uri)
   }
@@ -1061,6 +1065,8 @@ fn page_from_model(model: Model) -> pages.Page {
         }
       }
     }
+    routes.UrlShortIndex -> pages.PageUrlShortIndex
+    routes.UrlShortInfo(short) -> pages.PageUrlShortInfo(short)
     routes.DjotDemo -> pages.PageDjotDemo(model.djot_demo_content)
     routes.About -> pages.PageAbout
     routes.NotFound(uri) -> pages.PageNotFound(uri)
@@ -1121,6 +1127,12 @@ fn view_header(model: Model) -> Element(Msg) {
                 attributes: [],
               ),
               view_header_link(
+                target: routes.UrlShortIndex,
+                current: model.route,
+                label: "Short Urls",
+                attributes: [],
+              ),
+              view_header_link(
                 target: routes.DjotDemo,
                 current: model.route,
                 label: "Djot Demo",
@@ -1171,6 +1183,12 @@ fn view_header(model: Model) -> Element(Msg) {
                               target: routes.About,
                               current: model.route,
                               label: "About",
+                              attributes: top_nav_attributes_small,
+                            ),
+                            view_header_link(
+                              target: routes.UrlShortIndex,
+                              current: model.route,
+                              label: "Short urls",
                               attributes: top_nav_attributes_small,
                             ),
                             view_header_link(
@@ -1906,6 +1924,48 @@ fn view_about() -> List(Element(Msg)) {
       "If you enjoy these glimpses into my mind, feel free to come back
        semi-regularly. But not too regularly, you creep.",
     ),
+  ]
+}
+
+fn view_url_index() -> List(Element(Msg)) {
+  [
+    view_title("URL Shortener", "url-shortener"),
+    view_simple_paragraph(
+      "URL shortening service coming soon. This feature is currently under development.",
+    ),
+    html.div([attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")], [
+      html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
+        html.text("Planned Features"),
+      ]),
+      html.ul([attr.class("list-disc list-inside space-y-2 text-zinc-300")], [
+        html.li([], [html.text("Create short URLs")]),
+        html.li([], [html.text("Track click analytics")]),
+        html.li([], [html.text("Custom short codes")]),
+        html.li([], [html.text("URL expiration")]),
+      ]),
+    ]),
+  ]
+}
+
+fn view_url_info(short: String) -> List(Element(Msg)) {
+  [
+    view_title("URL Info", "url-info"),
+    view_simple_paragraph("Information about short URL: " <> short),
+    html.div([attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")], [
+      html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
+        html.text("URL Details"),
+      ]),
+      html.div([attr.class("space-y-2 text-zinc-300")], [
+        html.div([], [
+          html.span([attr.class("text-zinc-500")], [html.text("Short Code: ")]),
+          html.span([attr.class("font-mono")], [html.text(short)]),
+        ]),
+        html.div([], [
+          html.span([attr.class("text-zinc-500")], [html.text("Status: ")]),
+          html.span([attr.class("text-orange-400")], [html.text("Not implemented yet")]),
+        ]),
+      ]),
+    ]),
   ]
 }
 

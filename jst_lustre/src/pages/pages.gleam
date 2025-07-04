@@ -20,6 +20,10 @@ pub type Page {
   PageArticleList(articles: List(Article), session: Session)
   PageArticleListLoading
 
+  // Url Shortener pages
+  PageUrlShortIndex
+  PageUrlShortInfo(short: String)
+
   // Error states  
   PageError(error: PageError)
 
@@ -63,6 +67,15 @@ pub fn to_uri(page: Page) -> Uri {
       let assert Ok(uri) = uri.parse("/article/" <> article.id <> "/edit")
       uri
     }
+    PageUrlShortIndex -> {
+      let assert Ok(uri) = uri.parse("/url/")
+      uri
+    }
+    PageUrlShortInfo(short:) -> {
+      let assert Ok(uri) = uri.parse("/url/")
+      uri
+    }
+
     PageError(error) -> {
       case error {
         ArticleNotFound(slug, _) -> {
@@ -184,6 +197,8 @@ pub fn from_route(
         }
         routes.About -> PageAbout
         routes.DjotDemo -> PageDjotDemo("")
+        routes.UrlShortIndex -> PageUrlShortIndex
+        routes.UrlShortInfo(short) -> PageUrlShortInfo(short)
         routes.NotFound(uri) -> PageNotFound(uri)
       }
     }

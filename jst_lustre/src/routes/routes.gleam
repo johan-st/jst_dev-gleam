@@ -8,6 +8,10 @@ pub type Route {
   About
   DjotDemo
 
+  // URL SHORTENER 
+  UrlShortIndex
+  UrlShortInfo(String)
+
   /// It's good practice to store whatever `Uri` we failed to match in case we
   /// want to log it or hint to the user that maybe they made a typo.
   NotFound(uri: Uri)
@@ -17,14 +21,12 @@ pub fn from_uri(uri: Uri) -> Route {
   case uri.path_segments(uri.path) {
     [] | [""] -> Index
     ["articles"] -> Articles
-    ["article", slug] -> {
-      Article(slug)
-    }
-    ["article", id, "edit"] -> {
-      ArticleEdit(id)
-    }
+    ["article", slug] -> Article(slug)
+    ["article", id, "edit"] -> ArticleEdit(id)
     ["about"] -> About
     ["djot-demo"] -> DjotDemo
+    ["url"] -> UrlShortIndex
+    ["url", uid] -> UrlShortInfo(uid)
     _ -> NotFound(uri)
   }
 }
@@ -37,6 +39,8 @@ pub fn to_string(route: Route) -> String {
     Article(slug) -> "/article/" <> slug
     ArticleEdit(id) -> "/article/" <> id <> "/edit"
     DjotDemo -> "/djot-demo/"
+    UrlShortIndex -> "/url/"
+    UrlShortInfo(short) -> "/url/" <> short
     NotFound(uri) -> "/404?uri=" <> uri.to_string(uri)
   }
 }

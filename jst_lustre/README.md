@@ -11,6 +11,7 @@ gleam test
 
 ## TODO
 
+- Clean up routes/pages code. I have duplicate code and it is unclear if all is used
 - try listening to nats for articles
 - add states for initial load of article meta and local storage data
 - make sure load and navigation are handled the same way. There are currentlly some inconsistencies. (e.g. navigating by link to "/article/test-article#booop" vs loading the same page)
