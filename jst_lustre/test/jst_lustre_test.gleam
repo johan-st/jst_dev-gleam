@@ -21,9 +21,9 @@ pub fn hello_world_test() {
 }
 
 pub fn model_encoder_and_decoder_test() {
-  let model_v0 = PersistentModelV0(version: 0)
+  let model_v0 = PersistentModelV0
   let model_v1 =
-    PersistentModelV1(version: 1, articles: [
+    PersistentModelV1(articles: [
       ArticleV1(
         id: "1",
         slug: "test",
@@ -100,9 +100,8 @@ pub fn model_encoder_and_decoder_test() {
 
   // Compare each article in the model separately to handle content states correctly
   case dec_v1 {
-    PersistentModelV0(_) -> should.fail()
-    PersistentModelV1(version, articles) -> {
-      version |> should.equal(1)
+    PersistentModelV0-> should.fail()
+    PersistentModelV1(articles) -> {
       case articles {
         [a1, a2, a3, a4] -> {
           // Article 1 - Loaded content

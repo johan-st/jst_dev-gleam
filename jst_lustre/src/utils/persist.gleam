@@ -7,16 +7,16 @@ import lustre/effect
 pub const model_localstorage_key = "jst_lustre_state"
 
 pub type PersistentModel {
-  PersistentModelV0(version: Int)
-  PersistentModelV1(version: Int, articles: List(Article))
+  PersistentModelV0
+  PersistentModelV1(articles: List(Article))
 }
 
 pub fn encode(model: PersistentModel) -> String {
   let json_value = case model {
-    PersistentModelV0(_version) -> {
+    PersistentModelV0 -> {
       json.object([#("version", json.int(0))])
     }
-    PersistentModelV1(_version, articles:) -> {
+    PersistentModelV1(articles:) -> {
       json.object([
         #("version", json.int(1)),
         #("articles", json.array(articles, article.article_encoder)),
@@ -29,16 +29,15 @@ pub fn encode(model: PersistentModel) -> String {
 pub fn decoder() -> Decoder(PersistentModel) {
   use version <- decode.field("version", decode.int)
   case version {
-    0 -> decode.success(PersistentModelV0(version: 0))
+    0 -> decode.success(PersistentModelV0)
     1 -> {
       use articles <- decode.field(
         "articles",
         decode.list(article.article_decoder()),
       )
-      decode.success(PersistentModelV1(version: 1, articles: articles))
+      decode.success(PersistentModelV1(articles: articles))
     }
-    _ ->
-      decode.failure(PersistentModelV0(version: 0), "Unsupported model version")
+    _ -> decode.failure(PersistentModelV0, "Unsupported model version")
   }
 }
 

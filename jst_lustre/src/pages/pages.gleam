@@ -2,12 +2,15 @@ import article/article.{type Article}
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/uri.{type Uri}
+import routes/routes.{type Route}
 import utils/http.{type HttpError}
 import utils/remote_data.{type RemoteData}
 import utils/session.{type Session}
 
 // Improved Page type with better state management
 pub type Page {
+  Loading(Route)
+
   // Home/Index pages
   PageIndex
 
@@ -37,6 +40,9 @@ pub type PageError {
 
 pub fn to_uri(page: Page) -> Uri {
   case page {
+    Loading(route) -> {
+      routes.to_uri(route)
+    }
     PageIndex -> {
       let assert Ok(uri) = uri.parse("/")
       uri
@@ -95,85 +101,92 @@ pub fn to_uri(page: Page) -> Uri {
   }
 }
 
-pub fn from_uri(
-  uri: Uri,
+pub fn from_route(
+  loading: Bool,
+  route: Route,
   session: Session,
   articles: RemoteData(List(Article), HttpError),
 ) -> Page {
-  case uri.path_segments(uri.path) {
-    [] | [""] -> PageIndex
-    ["articles"] -> {
-      case articles {
-        remote_data.Pending -> PageArticleListLoading
-        remote_data.NotInitialized -> PageArticleListLoading
-        remote_data.Errored(error) ->
-          PageError(HttpError(error, "Failed to load article list"))
-        remote_data.Loaded(articles_list)
-        | remote_data.Optimistic(articles_list) -> {
-          let allowed_articles =
-            articles_list
-            |> list.filter(article.can_view(_, session))
-          PageArticleList(allowed_articles, session)
-        }
-      }
-    }
-    ["article", slug] -> {
-      case articles {
-        remote_data.Pending -> PageArticleListLoading
-        remote_data.NotInitialized ->
-          PageError(Other("articles not initialized"))
-        remote_data.Errored(error) ->
-          PageError(HttpError(error, "Failed to load articles"))
-        remote_data.Loaded(articles_list)
-        | remote_data.Optimistic(articles_list) -> {
-          let allowed_articles =
-            articles_list
-            |> list.filter(article.can_view(_, session))
-          case find_article_by_slug(allowed_articles, slug) {
-            Ok(article) -> PageArticle(article, session)
-            Error(_) ->
-              PageError(ArticleNotFound(
-                slug,
-                get_available_slugs(allowed_articles),
-              ))
+  case loading {
+    True -> Loading(route)
+    False -> {
+      case route {
+        routes.Index -> PageIndex
+        routes.Articles -> {
+          case articles {
+            remote_data.Pending -> PageArticleListLoading
+            remote_data.NotInitialized -> PageArticleListLoading
+            remote_data.Errored(error) ->
+              PageError(HttpError(error, "Failed to load article list"))
+            remote_data.Loaded(articles_list)
+            | remote_data.Optimistic(articles_list) -> {
+              let allowed_articles =
+                articles_list
+                |> list.filter(article.can_view(_, session))
+              PageArticleList(allowed_articles, session)
+            }
           }
         }
-      }
-    }
-    ["article", id, "edit"] -> {
-      case articles {
-        remote_data.Pending -> PageArticleListLoading
-        remote_data.NotInitialized ->
-          PageError(Other("articles not initialized"))
-        remote_data.Errored(error) ->
-          PageError(HttpError(error, "Failed to load articles for editing"))
-        remote_data.Loaded(articles_list)
-        | remote_data.Optimistic(articles_list) -> {
-          let allowed_articles =
-            articles_list
-            |> list.filter(article.can_view(_, session))
-          case find_article_by_id(allowed_articles, id) {
-            Ok(article) -> {
-              case article.can_edit(article, session), article.draft {
-                True, Some(_) -> PageArticleEdit(article)
-                True, None ->
-                  PageArticleEdit(
-                    article.ArticleV1(
-                      ..article,
-                      draft: article.to_draft(article),
-                    ),
-                  )
-                False, _ -> PageError(AuthenticationRequired("edit article"))
+        routes.Article(slug) -> {
+          case articles {
+            remote_data.Pending -> PageArticleListLoading
+            remote_data.NotInitialized ->
+              PageError(Other("articles not initialized"))
+            remote_data.Errored(error) ->
+              PageError(HttpError(error, "Failed to load articles"))
+            remote_data.Loaded(articles_list)
+            | remote_data.Optimistic(articles_list) -> {
+              let allowed_articles =
+                articles_list
+                |> list.filter(article.can_view(_, session))
+              case find_article_by_slug(allowed_articles, slug) {
+                Ok(article) -> PageArticle(article, session)
+                Error(_) ->
+                  PageError(ArticleNotFound(
+                    slug,
+                    get_available_slugs(allowed_articles),
+                  ))
               }
             }
-            Error(_) -> PageError(ArticleEditNotFound(id))
           }
         }
+        routes.ArticleEdit(id) -> {
+          case articles {
+            remote_data.Pending -> PageArticleListLoading
+            remote_data.NotInitialized ->
+              PageError(Other("articles not initialized"))
+            remote_data.Errored(error) ->
+              PageError(HttpError(error, "Failed to load articles for editing"))
+            remote_data.Loaded(articles_list)
+            | remote_data.Optimistic(articles_list) -> {
+              let allowed_articles =
+                articles_list
+                |> list.filter(article.can_view(_, session))
+              case find_article_by_id(allowed_articles, id) {
+                Ok(article) -> {
+                  case article.can_edit(article, session), article.draft {
+                    True, Some(_) -> PageArticleEdit(article)
+                    True, None ->
+                      PageArticleEdit(
+                        article.ArticleV1(
+                          ..article,
+                          draft: article.to_draft(article),
+                        ),
+                      )
+                    False, _ ->
+                      PageError(AuthenticationRequired("edit article"))
+                  }
+                }
+                Error(_) -> PageError(ArticleEditNotFound(id))
+              }
+            }
+          }
+        }
+        routes.About -> PageAbout
+        routes.DjotDemo -> PageDjotDemo("")
+        routes.NotFound(uri) -> PageNotFound(uri)
       }
     }
-    ["about"] -> PageAbout
-    ["djot-demo"] -> PageDjotDemo("")
-    _ -> PageNotFound(uri)
   }
 }
 

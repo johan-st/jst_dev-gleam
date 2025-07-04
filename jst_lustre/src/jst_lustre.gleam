@@ -10,7 +10,7 @@ import gleam/order
 import gleam/string
 import gleam/uri.{type Uri}
 import lustre
-import lustre/attribute as attr
+import lustre/attribute.{type Attribute} as attr
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
@@ -64,6 +64,13 @@ fn init(_) -> #(Model, Effect(Msg)) {
   // if this failes we have no app to run..
   let assert Ok(uri) = modem.initial_uri()
 
+  let local_storage_effect =
+    persist.localstorage_get(
+      persist.model_localstorage_key,
+      persist.decoder(),
+      GotLocalModelResult,
+    )
+
   let model =
     Model(
       route: routes.from_uri(uri),
@@ -81,12 +88,14 @@ fn init(_) -> #(Model, Effect(Msg)) {
       uri
       |> UserNavigatedTo
     })
-  let #(model_nav, effect_nav) = update_navigation(model, uri)
+
+  // let #(model_nav, effect_nav) = update_navigation(model, uri)
   #(
-    model_nav,
+    model,
     effect.batch([
       effect_modem,
-      effect_nav,
+      local_storage_effect,
+      // effect_nav,
       session.auth_check(AuthCheckResponse, model.base_uri),
     ]),
   )
@@ -145,6 +154,7 @@ type Msg {
   EditViewModeToggled
   // DEBUG
   DebugToggleLocalStorage
+  GotLocalModelResult(res: Option(PersistentModel))
 }
 
 fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -152,7 +162,7 @@ fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     True -> {
       let #(new_model, effect) = update(model, msg)
       let persistent_model = fn(model: Model) -> PersistentModel {
-        PersistentModelV1(version: 1, articles: case model.articles {
+        PersistentModelV1(articles: case model.articles {
           NotInitialized -> []
           Pending -> []
           Loaded(articles) -> articles
@@ -183,6 +193,34 @@ fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
+    // LOCAL MODEL
+    GotLocalModelResult(res) -> {
+      echo "GotLocalModelResult called"
+      echo res
+      let uri = routes.to_uri(model.route)
+      case res {
+        Some(persistent_model) -> {
+          case persistent_model {
+            PersistentModelV0 -> update_navigation(model, uri)
+            PersistentModelV1(articles:) ->
+              update_navigation(
+                Model(
+                  ..model,
+                  debug_use_local_storage: True,
+                  articles: Loaded(articles),
+                ),
+                uri,
+              )
+          }
+        }
+        None -> {
+          Model(..model, debug_use_local_storage: False)
+          |> update_navigation(uri)
+          |> fetch_articles_model()
+        }
+      }
+    }
+
     // NAVIGATION
     UserNavigatedTo(uri) -> {
       update_navigation(model, uri)
@@ -206,10 +244,10 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     // Browser Persistance
     PersistGotModel(opt:) -> {
       case opt {
-        Some(PersistentModelV1(_, articles)) -> {
+        Some(PersistentModelV1(articles)) -> {
           #(Model(..model, articles: Loaded(articles)), effect.none())
         }
-        Some(PersistentModelV0(_)) -> {
+        Some(PersistentModelV0) -> {
           #(model, effect.none())
         }
         None -> {
@@ -753,12 +791,45 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       )
     }
     DebugToggleLocalStorage -> {
+      // Fells a bit wierd to call a function just for the side-effect and not use the result.. 
+      case model.debug_use_local_storage {
+        True -> persist.localstorage_set(persist.model_localstorage_key, "")
+        False -> {
+          let persistent_model = {
+            PersistentModelV1(articles: case model.articles {
+              NotInitialized -> []
+              Pending -> []
+              Loaded(articles) -> articles
+              Optimistic(_) -> []
+              Errored(_) -> []
+            })
+          }
+          persist.localstorage_set(
+            persist.model_localstorage_key,
+            persist.encode(persistent_model),
+          )
+        }
+      }
       #(
         Model(..model, debug_use_local_storage: !model.debug_use_local_storage),
         effect.none(),
       )
     }
   }
+}
+
+fn fetch_articles_model(model_effect_touple) -> #(Model, Effect(Msg)) {
+  echo "fetch_articles_model called"
+  let #(model, effect) = model_effect_touple
+
+  let model = Model(..model, articles: remote_data.Pending)
+  let effect =
+    effect.batch([
+      effect,
+      article.article_metadata_get(ArticleMetaGot, model.base_uri),
+    ])
+
+  #(model, effect)
 }
 
 fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
@@ -859,6 +930,7 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
 fn view(model: Model) -> Element(Msg) {
   let page = page_from_model(model)
   let content = case page {
+    pages.Loading(_) -> view_loading()
     pages.PageIndex -> view_index()
     pages.PageArticleList(articles, session) ->
       view_article_listing(articles, session)
@@ -1013,6 +1085,11 @@ fn view_notice(notice: String) -> Element(Msg) {
 
 // VIEW HEADER ----------------------------------------------------------------
 fn view_header(model: Model) -> Element(Msg) {
+  let top_nav_attributes_small = [
+    attr.class(
+      "block w-full text-left px-4 py-2 text-sm text-zinc-200 hover:bg-teal-800 transition-colors cursor-pointe",
+    ),
+  ]
   html.nav(
     [attr.class("py-2 border-b bg-zinc-800 border-pink-700 font-mono relative")],
     [
@@ -1035,16 +1112,19 @@ fn view_header(model: Model) -> Element(Msg) {
                 target: routes.Articles,
                 current: model.route,
                 label: "Articles",
+                attributes: [],
               ),
               view_header_link(
                 target: routes.About,
                 current: model.route,
                 label: "About",
+                attributes: [],
               ),
               view_header_link(
                 target: routes.DjotDemo,
                 current: model.route,
                 label: "Djot Demo",
+                attributes: [],
               ),
             ]),
             // Hamburger menu for auth actions
@@ -1057,25 +1137,10 @@ fn view_header(model: Model) -> Element(Msg) {
                   event.on_mouse_down(ProfileMenuToggled),
                 ],
                 [
-                  html.svg(
-                    [
-                      attr.attribute("fill", "none"),
-                      attr.attribute("viewBox", "0 0 24 24"),
-                      attr.attribute("stroke-width", "1.5"),
-                      attr.attribute("stroke", "currentColor"),
-                      attr.class("w-6 h-6"),
-                    ],
-                    [
-                      svg.path([
-                        attr.attribute("stroke-linecap", "round"),
-                        attr.attribute("stroke-linejoin", "round"),
-                        attr.attribute(
-                          "d",
-                          "M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5",
-                        ),
-                      ]),
-                    ],
-                  ),
+                  case model.profile_menu_open {
+                    True -> icon.view([attr.class("w-6 h-6")], icon.Close)
+                    False -> icon.view([attr.class("w-6 h-6")], icon.Menu)
+                  },
                 ],
               ),
               // Dropdown menu
@@ -1090,22 +1155,29 @@ fn view_header(model: Model) -> Element(Msg) {
                     [
                       html.div([attr.class("py-1")], [
                         html.ul(
-                          [attr.class("sm:hidden flex flex-col gap-2 px-4")],
+                          [
+                            attr.class(
+                              "sm:hidden flex flex-col border-b border-zinc-400",
+                            ),
+                          ],
                           [
                             view_header_link(
                               target: routes.Articles,
                               current: model.route,
                               label: "Articles",
+                              attributes: top_nav_attributes_small,
                             ),
                             view_header_link(
                               target: routes.About,
                               current: model.route,
                               label: "About",
+                              attributes: top_nav_attributes_small,
                             ),
                             view_header_link(
                               target: routes.DjotDemo,
                               current: model.route,
                               label: "Djot Demo",
+                              attributes: top_nav_attributes_small,
                             ),
                           ],
                         ),
@@ -1211,9 +1283,10 @@ fn view_header_link(
   target to: Route,
   current curr: Route,
   label text: String,
+  attributes extra_attr: List(Attribute(Msg)),
 ) -> Element(Msg) {
   html.li(
-    [
+    list.append(extra_attr, [
       attr.classes([
         #(
           "border-transparent border-b-2 hover:border-pink-700 cursor-pointer",
@@ -1222,7 +1295,7 @@ fn view_header_link(
         #("text-pink-700", routes.is_sub(route: to, maybe_sub: curr)),
       ]),
       event.on_mouse_down(UserMouseDownNavigation(to |> routes.to_uri)),
-    ],
+    ]),
     [view_internal_link(to |> routes.to_uri, [html.text(text)])],
   )
 }
@@ -1263,6 +1336,10 @@ fn view_index() -> List(Element(Msg)) {
         father and a husband. I'm also a software developer and a writer.",
     ),
   ]
+}
+
+fn view_loading() -> List(Element(Msg)) {
+  [view_title("Loading", "loading"), view_simple_paragraph("Loading...")]
 }
 
 fn view_article_listing(
