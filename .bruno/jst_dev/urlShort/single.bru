@@ -1,0 +1,11 @@
+meta {
+  name: single
+  type: http
+  seq: 2
+}
+
+get {
+  url: http://localhost:8080/api/url/{{id}}
+  body: json
+  auth: inherit
+}

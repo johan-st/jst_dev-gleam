@@ -1,0 +1,18 @@
+meta {
+  name: new withshortCode
+  type: http
+  seq: 4
+}
+
+post {
+  url: http://localhost:8080/api/url
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "shortCode": "johan-1",
+    "targetUrl": "https://example.com"
+  }
+}

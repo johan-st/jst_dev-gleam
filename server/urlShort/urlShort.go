@@ -1,11 +1,12 @@
-package shorturl
+package urlShort
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"jst_dev/server/jst_log"
-	"jst_dev/server/short_url/api"
+	"jst_dev/server/urlShort/api"
 	"strings"
 	"time"
 
@@ -58,11 +59,11 @@ func (s *ShortUrlService) Start(ctx context.Context) error {
 	}
 
 	confKv := jetstream.KeyValueConfig{
-		Bucket:       "shorturl_urls",
+		Bucket:       "url_short",
 		Description:  "short url mappings",
 		Storage:      jetstream.FileStorage,
-		MaxValueSize: 128 * 1024 * 1,  // 128 KB
-		MaxBytes:     1024 * 1024 * 50, // 50 MB
+		MaxValueSize: 1 * 1024,       // 1 KB
+		MaxBytes:     50 * 1024 * 1024, // 50 MB
 		History:      1,
 		Compression:  false,
 	}
@@ -194,20 +195,21 @@ func (s *ShortUrlService) handleShortUrlCreate() micro.HandlerFunc {
 			return
 		}
 		if reqData.ShortCode == "" {
-			l.Warn("short code is empty")
-			req.Error("INVALID_REQUEST", "short code is empty", []byte("short code is empty"))
-			return
+			l.Debug("short code is empty, generating one")
+			reqData.ShortCode = s.generateUniqueShortCode()
+			if reqData.ShortCode == "" {
+				l.Error("failed to generate unique short code after 10000 attempts")
+				req.Error("SERVER_ERROR", "unable to generate unique short code", []byte("short code generation failed"))
+				return
+			}
+			l.Debug("generated short code: %s", reqData.ShortCode)
 		}
 		if reqData.TargetURL == "" {
 			l.Warn("target URL is empty")
 			req.Error("INVALID_REQUEST", "target URL is empty", []byte("target URL is empty"))
 			return
 		}
-		if reqData.CreatedBy == "" {
-			l.Warn("created by is empty")
-			req.Error("INVALID_REQUEST", "created by is empty", []byte("created by is empty"))
-			return
-		}
+		// Note: CreatedBy is now optional - will be handled by the web layer
 
 		// Check if short code already exists
 		existing := s.shortUrlByShortCode(reqData.ShortCode)
@@ -224,7 +226,6 @@ func (s *ShortUrlService) handleShortUrlCreate() micro.HandlerFunc {
 			return
 		}
 
-		s.shortUrls = append(s.shortUrls, *shortUrl)
 		req.RespondJSON(shortUrl.ShortUrl)
 	}
 }
@@ -312,7 +313,7 @@ func (s *ShortUrlService) handleShortUrlUpdate() micro.HandlerFunc {
 		if reqData.IsActive != nil {
 			shortUrl.IsActive = *reqData.IsActive
 		}
-		shortUrl.UpdatedAt = time.Now()
+		shortUrl.UpdatedAt = time.Now().Unix()
 
 		userBytes, err = json.Marshal(shortUrl)
 		if err != nil {
@@ -484,21 +485,22 @@ func (s *ShortUrlService) shortUrlCreate(shortCode, targetURL, createdBy string)
 		rev       uint64
 	)
 
-	if shortCode == "" || targetURL == "" || createdBy == "" {
-		return nil, fmt.Errorf("short code, target URL and created by are required")
+	if shortCode == "" || targetURL == "" {
+		return nil, fmt.Errorf("short code and target URL are required")
 	}
 
 	// Normalize short code
 	shortCode = strings.ToLower(strings.TrimSpace(shortCode))
 
+	nowUnix := time.Now().Unix()
 	shortUrl = &ShortUrl{
 		ShortUrl: api.ShortUrl{
 			ID:          uuid.New().String(),
 			ShortCode:   shortCode,
 			TargetURL:   targetURL,
 			CreatedBy:   createdBy,
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+			CreatedAt:   nowUnix,
+			UpdatedAt:   nowUnix,
 			AccessCount: 0,
 			IsActive:    true,
 		},
@@ -556,7 +558,7 @@ func (s *ShortUrlService) IncrementAccessCount(shortCode string) error {
 	}
 
 	shortUrl.AccessCount++
-	shortUrl.UpdatedAt = time.Now()
+	shortUrl.UpdatedAt = time.Now().Unix()
 
 	shortUrlBytes, err := json.Marshal(shortUrl)
 	if err != nil {
@@ -568,5 +570,58 @@ func (s *ShortUrlService) IncrementAccessCount(shortCode string) error {
 	}
 
 	return nil
+}
+
+// generateShortCode creates a random 4-character alphanumeric short code
+func (s *ShortUrlService) generateShortCode() string {
+	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+	const length = 4
+	
+	bytes := make([]byte, length)
+	rand.Read(bytes)
+	
+	result := make([]byte, length)
+	for i := range result {
+		result[i] = charset[bytes[i]%byte(len(charset))]
+	}
+	
+	return string(result)
+}
+
+// generateUniqueShortCode generates a unique short code, starting with 4 chars and increasing length if needed
+func (s *ShortUrlService) generateUniqueShortCode() string {
+	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+	maxTotalAttempts := 10000
+	totalAttempts := 0
+	
+	// Start with 4 characters
+	length := 4
+	
+	for totalAttempts < maxTotalAttempts {
+		// Try up to 100 attempts at current length
+		for i := 0; i < 100 && totalAttempts < maxTotalAttempts; i++ {
+			totalAttempts++
+			
+			// Generate random code at current length
+			bytes := make([]byte, length)
+			rand.Read(bytes)
+			
+			result := make([]byte, length)
+			for j := range result {
+				result[j] = charset[bytes[j]%byte(len(charset))]
+			}
+			
+			shortCode := string(result)
+			if s.shortUrlByShortCode(shortCode) == nil {
+				return shortCode
+			}
+		}
+		
+		// If we hit 100 attempts at current length, try one character longer
+		length++
+	}
+	
+	// If we've exhausted all attempts, fail
+	return ""
 }
 

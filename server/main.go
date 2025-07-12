@@ -11,8 +11,8 @@ import (
 
 	"jst_dev/server/articles"
 	"jst_dev/server/jst_log"
-	shorturl "jst_dev/server/short_url"
 	"jst_dev/server/talk"
+	"jst_dev/server/urlShort"
 	web "jst_dev/server/web"
 	"jst_dev/server/who"
 
@@ -132,11 +132,11 @@ func run(
 
 	// - short url
 	l.Debug("starting short url service")
-	shortUrlConf := &shorturl.Conf{
-		Logger:   lRoot.WithBreadcrumb("shorturl"),
+	shortUrlConf := &urlShort.Conf{
+		Logger:   lRoot.WithBreadcrumb("urlshort"),
 		NatsConn: nc,
 	}
-	shortUrlSvc, err := shorturl.New(ctx, shortUrlConf)
+	shortUrlSvc, err := urlShort.New(ctx, shortUrlConf)
 	if err != nil {
 		return fmt.Errorf("new short url: %w", err)
 	}

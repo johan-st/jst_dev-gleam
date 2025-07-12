@@ -76,14 +76,14 @@ if err != nil {
 
 ```go
 type ShortUrl struct {
-    ID          string    `json:"id"`
-    ShortCode   string    `json:"shortCode"`
-    TargetURL   string    `json:"targetUrl"`
-    CreatedBy   string    `json:"createdBy"`
-    CreatedAt   time.Time `json:"createdAt"`
-    UpdatedAt   time.Time `json:"updatedAt"`
-    AccessCount int64     `json:"accessCount"`
-    IsActive    bool      `json:"isActive"`
+    ID          string `json:"id"`
+    ShortCode   string `json:"shortCode"`
+    TargetURL   string `json:"targetUrl"`
+    CreatedBy   string `json:"createdBy"`
+    CreatedAt   int64  `json:"createdAt"`   // Unix seconds
+    UpdatedAt   int64  `json:"updatedAt"`   // Unix seconds
+    AccessCount int64  `json:"accessCount"`
+    IsActive    bool   `json:"isActive"`
 }
 ```
 
@@ -91,7 +91,7 @@ type ShortUrl struct {
 
 Run tests with:
 ```bash
-go test -v ./server/short_url
+go test -v ./urlShort
 ```
 
 Tests require a NATS server running on the default URL (`nats://localhost:4222`).
@@ -101,7 +101,12 @@ Tests require a NATS server running on the default URL (`nats://localhost:4222`)
 The service uses NATS JetStream Key-Value store with:
 - Bucket: `url_short`
 - Storage: File-based
-- Max value size: 125KB
+- Max value size: 1KB
 - Max bucket size: 50MB
 - History: 1 entries
-- Compression: enabled 
+- Compression: disabled
+
+## TODO
+
+- when responding and redirecting we should rely on the local shortCodes and urls to maintaion speed. We should also post a message (access log) to a topic (which is read at most once) and the reader should update the access count in the KV.
+  

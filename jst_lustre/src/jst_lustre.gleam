@@ -28,6 +28,7 @@ import utils/remote_data.{
   type RemoteData, Errored, Loaded, NotInitialized, Optimistic, Pending,
 }
 import utils/session
+import utils/short_url.{type ShortUrl, type ShortUrlCreateRequest, type ShortUrlListResponse}
 
 // MAIN ------------------------------------------------------------------------
 
@@ -47,6 +48,9 @@ type Model {
     route: Route,
     session: session.Session,
     articles: RemoteData(List(Article), HttpError),
+    short_urls: RemoteData(List(ShortUrl), HttpError),
+    short_url_form_short_code: String,
+    short_url_form_target_url: String,
     djot_demo_content: String,
     edit_view_mode: EditViewMode,
     profile_menu_open: Bool,
@@ -76,6 +80,9 @@ fn init(_) -> #(Model, Effect(Msg)) {
       route: routes.from_uri(uri),
       session: session.Unauthenticated,
       articles: NotInitialized,
+      short_urls: NotInitialized,
+      short_url_form_short_code: "",
+      short_url_form_target_url: "",
       base_uri: uri,
       djot_demo_content: initial_djot,
       edit_view_mode: EditViewModeEdit,
@@ -150,6 +157,14 @@ type Msg {
   // ChatMsg(msg: chat.Msg)
   // DJOT DEMO
   DjotDemoContentUpdated(content: String)
+  // SHORT URLS
+  ShortUrlCreateClicked(short_code: String, target_url: String)
+  ShortUrlCreateResponse(result: Result(ShortUrl, HttpError))
+  ShortUrlListGot(result: Result(ShortUrlListResponse, HttpError))
+  ShortUrlDeleteClicked(id: String)
+  ShortUrlDeleteResponse(id: String, result: Result(String, HttpError))
+  ShortUrlFormShortCodeUpdated(text: String)
+  ShortUrlFormTargetUrlUpdated(text: String)
   // EDIT VIEW TOGGLE
   EditViewModeToggled
   // DEBUG
@@ -790,6 +805,81 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         ),
       )
     }
+    // SHORT URLS
+    ShortUrlCreateClicked(short_code, target_url) -> {
+      case model.session {
+        session.Authenticated(_session_data) -> {
+          let req = short_url.ShortUrlCreateRequest(
+            short_code: short_code,
+            target_url: target_url,
+            created_by: "user", // TODO: get from session
+          )
+          #(
+            model,
+            short_url.create_short_url(ShortUrlCreateResponse, uri.to_string(model.base_uri), req),
+          )
+        }
+        _ -> #(model, effect.none())
+      }
+    }
+    ShortUrlCreateResponse(result) -> {
+      case result {
+        Ok(short_url) -> {
+          let updated_short_urls = case model.short_urls {
+            NotInitialized -> Loaded([short_url])
+            Pending -> Loaded([short_url])
+            Loaded(urls) -> Loaded([short_url, ..urls])
+            Optimistic(_) -> Loaded([short_url])
+            Errored(_) -> Loaded([short_url])
+          }
+          #(Model(..model, short_urls: updated_short_urls), effect.none())
+        }
+        Error(err) -> {
+          #(Model(..model, short_urls: Errored(err)), effect.none())
+        }
+      }
+    }
+    ShortUrlListGot(result) -> {
+      case result {
+        Ok(response) -> {
+          #(Model(..model, short_urls: Loaded(response.short_urls)), effect.none())
+        }
+        Error(err) -> {
+          #(Model(..model, short_urls: Errored(err)), effect.none())
+        }
+      }
+    }
+    ShortUrlDeleteClicked(id) -> {
+      #(
+        model,
+        short_url.delete_short_url(
+          fn(result) { ShortUrlDeleteResponse(id, result) },
+          uri.to_string(model.base_uri),
+          id,
+        ),
+      )
+    }
+    ShortUrlDeleteResponse(id, result) -> {
+      case result {
+        Ok(_) -> {
+          let updated_short_urls = case model.short_urls {
+            NotInitialized -> NotInitialized
+            Pending -> Pending
+            Loaded(urls) -> Loaded(list.filter(urls, fn(url) { url.id != id }))
+            Optimistic(_) -> NotInitialized
+            Errored(_) -> NotInitialized
+          }
+          #(Model(..model, short_urls: updated_short_urls), effect.none())
+        }
+        Error(_) -> #(model, effect.none())
+      }
+    }
+    ShortUrlFormShortCodeUpdated(text) -> {
+      #(Model(..model, short_url_form_short_code: text), effect.none())
+    }
+    ShortUrlFormTargetUrlUpdated(text) -> {
+      #(Model(..model, short_url_form_target_url: text), effect.none())
+    }
     DebugToggleLocalStorage -> {
       // Fells a bit wierd to call a function just for the side-effect and not use the result.. 
       case model.debug_use_local_storage {
@@ -955,7 +1045,7 @@ fn view(model: Model) -> Element(Msg) {
       }
     }
     pages.PageAbout -> view_about()
-    pages.PageUrlShortIndex -> view_url_index()
+    pages.PageUrlShortIndex -> view_url_index(model)
     pages.PageUrlShortInfo(short:) -> todo as "short info"
     pages.PageDjotDemo(content) -> view_djot_demo(content)
     pages.PageNotFound(uri) -> view_not_found(uri)
@@ -1927,24 +2017,67 @@ fn view_about() -> List(Element(Msg)) {
   ]
 }
 
-fn view_url_index() -> List(Element(Msg)) {
+fn view_url_index(model: Model) -> List(Element(Msg)) {
   [
     view_title("URL Shortener", "url-shortener"),
     view_simple_paragraph(
-      "URL shortening service coming soon. This feature is currently under development.",
+      "Create and manage short URLs for easy sharing.",
     ),
-    html.div([attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")], [
-      html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
-        html.text("Planned Features"),
-      ]),
-      html.ul([attr.class("list-disc list-inside space-y-2 text-zinc-300")], [
-        html.li([], [html.text("Create short URLs")]),
-        html.li([], [html.text("Track click analytics")]),
-        html.li([], [html.text("Custom short codes")]),
-        html.li([], [html.text("URL expiration")]),
-      ]),
-    ]),
+    view_url_create_form(model),
+    view_url_list(),
   ]
+}
+
+fn view_url_create_form(model: Model) -> Element(Msg) {
+  html.div([attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")], [
+    html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
+      html.text("Create Short URL"),
+    ]),
+    html.div([attr.class("space-y-4")], [
+      html.div([], [
+        html.label([attr.class("block text-sm font-medium text-zinc-300 mb-2")], [
+          html.text("Short Code"),
+        ]),
+        html.input([
+          attr.class("w-full px-3 py-2 bg-zinc-700 border border-zinc-600 rounded-md text-zinc-100 focus:outline-none focus:border-pink-500"),
+          attr.placeholder("Enter short code"),
+          attr.type_("text"),
+          attr.value(model.short_url_form_short_code),
+          event.on_input(ShortUrlFormShortCodeUpdated),
+        ]),
+      ]),
+      html.div([], [
+        html.label([attr.class("block text-sm font-medium text-zinc-300 mb-2")], [
+          html.text("Target URL"),
+        ]),
+        html.input([
+          attr.class("w-full px-3 py-2 bg-zinc-700 border border-zinc-600 rounded-md text-zinc-100 focus:outline-none focus:border-pink-500"),
+          attr.placeholder("https://example.com"),
+          attr.type_("url"),
+          attr.value(model.short_url_form_target_url),
+          event.on_input(ShortUrlFormTargetUrlUpdated),
+        ]),
+      ]),
+      html.button(
+        [
+          attr.class("w-full px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700 transition-colors"),
+          event.on_mouse_down(ShortUrlCreateClicked("test", "https://example.com")),
+        ],
+        [html.text("Create Short URL")],
+      ),
+    ]),
+  ])
+}
+
+fn view_url_list() -> Element(Msg) {
+  html.div([attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")], [
+    html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
+      html.text("Your Short URLs"),
+    ]),
+    html.div([attr.class("text-zinc-400")], [
+      html.text("No short URLs created yet."),
+    ]),
+  ])
 }
 
 fn view_url_info(short: String) -> List(Element(Msg)) {

@@ -7,7 +7,7 @@ import (
 	"io/fs"
 	"jst_dev/server/articles"
 	"jst_dev/server/jst_log"
-	shortUrlApi "jst_dev/server/short_url/api"
+	shortUrlApi "jst_dev/server/urlShort/api"
 	"jst_dev/server/who"
 	whoApi "jst_dev/server/who/api"
 	"net/http"
@@ -43,11 +43,11 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 	mux.Handle("GET /api/auth", handleAuthCheck(l, nc, jwtSecret))
 
 	// short urls
-	mux.Handle("GET /api/shorturls", handleShortUrlList(l, nc))
-	mux.Handle("POST /api/shorturls", handleShortUrlCreate(l, nc))
-	mux.Handle("GET /api/shorturls/{id}", handleShortUrlGet(l, nc))
-	mux.Handle("PUT /api/shorturls/{id}", handleShortUrlUpdate(l, nc))
-	mux.Handle("DELETE /api/shorturls/{id}", handleShortUrlDelete(l, nc))
+	mux.Handle("GET /api/url", handleShortUrlList(l, nc))
+	mux.Handle("POST /api/url", handleShortUrlCreate(l, nc))
+	mux.Handle("GET /api/url/{id}", handleShortUrlGet(l, nc))
+	mux.Handle("PUT /api/url/{id}", handleShortUrlUpdate(l, nc))
+	mux.Handle("DELETE /api/url/{id}", handleShortUrlDelete(l, nc))
 	mux.Handle("GET /u/{shortCode}", handleShortUrlRedirect(l, nc))
 	mux.Handle("GET u.jst.dev/{shortCode}", handleShortUrlRedirect(l, nc))
 	mux.Handle("GET url.jst.dev/{shortCode}", handleShortUrlRedirect(l, nc))
@@ -314,7 +314,7 @@ func handleAuthCheck(l *jst_log.Logger, _ *nats.Conn, _ string) http.Handler {
 
 		respJson(w, Resp{
 			Subject:     user.ID,
-			ExpiresAt:   time.Now().Add(30 * time.Minute).Unix(), // Use int64
+			ExpiresAt:   time.Now().Add(30 * time.Minute).Unix(), // Unix seconds
 			Permissions: user.Permissions,
 		}, http.StatusOK)
 	})
@@ -739,12 +739,12 @@ func handleShortUrlList(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		logger.Debug("called")
 
 		// Get user from context
-		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
-		if !ok {
-			logger.Warn("user not found in context")
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
+		// user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		// if !ok {
+		// 	logger.Warn("user not found in context")
+		// 	http.Error(w, "unauthorized", http.StatusUnauthorized)
+		// 	return
+		// }
 
 		// Parse query parameters
 		createdBy := r.URL.Query().Get("createdBy")
@@ -764,9 +764,9 @@ func handleShortUrlList(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		}
 
 		// If no createdBy specified, use current user
-		if createdBy == "" {
-			createdBy = user.ID
-		}
+		// if createdBy == "" {
+		// 	createdBy = user.ID
+		// }
 
 		// Create request
 		req := shortUrlApi.ShortUrlListRequest{
@@ -815,14 +815,6 @@ func handleShortUrlCreate(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger.Debug("called")
 
-		// Get user from context
-		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
-		if !ok {
-			logger.Warn("user not found in context")
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-
 		// Parse request body
 		var req shortUrlApi.ShortUrlCreateRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -831,14 +823,16 @@ func handleShortUrlCreate(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 			return
 		}
 
-		// Set created by to current user
-		req.CreatedBy = user.ID
+		// Get user from context and set created by
+		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		if ok && user.ID != "" {
+			req.CreatedBy = user.ID
+			logger.Debug("using authenticated user: %s", user.ID)
+		} else {
+			logger.Debug("no authenticated user, createdBy will be empty")
+		}
 
 		// Validate required fields
-		if req.ShortCode == "" {
-			http.Error(w, "short code is required", http.StatusBadRequest)
-			return
-		}
 		if req.TargetURL == "" {
 			http.Error(w, "target URL is required", http.StatusBadRequest)
 			return
@@ -964,12 +958,12 @@ func handleShortUrlUpdate(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		logger.Debug("called")
 
 		// Get user from context
-		_, ok := r.Context().Value(who.UserKey).(whoApi.User)
-		if !ok {
-			logger.Warn("user not found in context")
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
+		// _, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		// if !ok {
+		// 	logger.Warn("user not found in context")
+		// 	http.Error(w, "unauthorized", http.StatusUnauthorized)
+		// 	return
+		// }
 
 		id := r.PathValue("id")
 		if id == "" {
@@ -1047,12 +1041,12 @@ func handleShortUrlDelete(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		logger.Debug("called")
 
 		// Get user from context
-		_, ok := r.Context().Value(who.UserKey).(whoApi.User)
-		if !ok {
-			logger.Warn("user not found in context")
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
+		// _, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		// if !ok {
+		// 	logger.Warn("user not found in context")
+		// 	http.Error(w, "unauthorized", http.StatusUnauthorized)
+		// 	return
+		// }
 
 		id := r.PathValue("id")
 		if id == "" {

@@ -1,9 +1,5 @@
 package api
 
-import (
-	"time"
-)
-
 // the NATS subject used by this package
 var Subj = struct {
 	// short urls
@@ -27,20 +23,20 @@ var Subj = struct {
 
 // SHORT URL
 type ShortUrl struct {
-	ID          string    `json:"id"`
-	ShortCode   string    `json:"shortCode"`
-	TargetURL   string    `json:"targetUrl"`
-	CreatedBy   string    `json:"createdBy"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
-	AccessCount int64     `json:"accessCount"`
-	IsActive    bool      `json:"isActive"`
+	ID          string `json:"id"`
+	ShortCode   string `json:"shortCode"`
+	TargetURL   string `json:"targetUrl"`
+	CreatedBy   string `json:"createdBy"`
+	CreatedAt   int64  `json:"createdAt"`   // Unix seconds
+	UpdatedAt   int64  `json:"updatedAt"`   // Unix seconds
+	AccessCount int64  `json:"accessCount"`
+	IsActive    bool   `json:"isActive"`
 }
 
 type ShortUrlCreateRequest struct {
-	ShortCode string `json:"shortCode"`
+	ShortCode string `json:"shortCode,omitempty"` // Optional: if empty, a 4-character code will be auto-generated
 	TargetURL string `json:"targetUrl"`
-	CreatedBy string `json:"createdBy"`
+	CreatedBy string `json:"createdBy,omitempty"` // Optional: if empty and user is authenticated, will use user's ID
 }
 
 type ShortUrlGetRequest struct {
