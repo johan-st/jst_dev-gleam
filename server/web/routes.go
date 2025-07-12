@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"jst_dev/server/articles"
 	"jst_dev/server/jst_log"
+	shortUrlApi "jst_dev/server/short_url/api"
 	"jst_dev/server/who"
 	whoApi "jst_dev/server/who/api"
 	"net/http"
@@ -41,6 +42,16 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 	mux.Handle("GET /api/auth/logout", handleAuthLogout(l, nc))
 	mux.Handle("GET /api/auth", handleAuthCheck(l, nc, jwtSecret))
 
+	// short urls
+	mux.Handle("GET /api/shorturls", handleShortUrlList(l, nc))
+	mux.Handle("POST /api/shorturls", handleShortUrlCreate(l, nc))
+	mux.Handle("GET /api/shorturls/{id}", handleShortUrlGet(l, nc))
+	mux.Handle("PUT /api/shorturls/{id}", handleShortUrlUpdate(l, nc))
+	mux.Handle("DELETE /api/shorturls/{id}", handleShortUrlDelete(l, nc))
+	mux.Handle("GET /u/{shortCode}", handleShortUrlRedirect(l, nc))
+	mux.Handle("GET u.jst.dev/{shortCode}", handleShortUrlRedirect(l, nc))
+	mux.Handle("GET url.jst.dev/{shortCode}", handleShortUrlRedirect(l, nc))
+
 	// web
 	if dev {
 		// DEV routes
@@ -48,9 +59,8 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 		mux.Handle("GET /dev/purge", handlePurge(l, repo)) // TODO: remove this
 		mux.Handle("/", handleProxy(l.WithBreadcrumb("proxy_frontend"), "http://127.0.0.1:1234"))
 	} else {
-		mux.Handle("GET /", handleStaticFile(l, embeddedFS, "index.html"))
-		mux.Handle("GET /static/", handleStaticFS(l, embeddedFS))
-
+		mux.Handle("GET /", handleStaticFsFile(l, embeddedFS, "index.html"))
+		mux.Handle("GET /static/", handleStaticFs(l, embeddedFS))
 	}
 }
 
@@ -418,7 +428,7 @@ func handleArticleNew(l *jst_log.Logger, repo articles.ArticleRepo, nc *nats.Con
 	logger.Debug("ready")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var (
-			art     articles.Article
+			art articles.Article
 			// whoResp whoApi.UserFullResponse
 		)
 		logger.Debug("called")
@@ -670,7 +680,7 @@ func handleArticleRevision(l *jst_log.Logger, repo articles.ArticleRepo) http.Ha
 	})
 }
 
-func handleStaticFile(l *jst_log.Logger, embeddedFSs fs.FS, filename string) http.Handler {
+func handleStaticFsFile(l *jst_log.Logger, embeddedFSs fs.FS, filename string) http.Handler {
 
 	logger := l.WithBreadcrumb("static").WithBreadcrumb(filename)
 
@@ -688,7 +698,7 @@ func handleStaticFile(l *jst_log.Logger, embeddedFSs fs.FS, filename string) htt
 	})
 }
 
-func handleStaticFS(l *jst_log.Logger, embeddedFS fs.FS) http.Handler {
+func handleStaticFs(l *jst_log.Logger, embeddedFS fs.FS) http.Handler {
 
 	logger := l.WithBreadcrumb("static")
 
@@ -716,6 +726,483 @@ func handleStaticFS(l *jst_log.Logger, embeddedFS fs.FS) http.Handler {
 		logger.Debug("called")
 		http.ServeFileFS(w, r, embeddedFS, "/"+r.URL.Path)
 	}))
+}
+
+// - short urls
+
+// handleShortUrlList creates a handler for listing short URLs
+func handleShortUrlList(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+	logger := l.WithBreadcrumb("shorturls").WithBreadcrumb("list")
+	logger.Debug("ready")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Debug("called")
+
+		// Get user from context
+		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		if !ok {
+			logger.Warn("user not found in context")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// Parse query parameters
+		createdBy := r.URL.Query().Get("createdBy")
+		limit := 50
+		offset := 0
+		if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+			if l, err := fmt.Sscanf(limitStr, "%d", &limit); err != nil || l != 1 {
+				http.Error(w, "invalid limit parameter", http.StatusBadRequest)
+				return
+			}
+		}
+		if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
+			if o, err := fmt.Sscanf(offsetStr, "%d", &offset); err != nil || o != 1 {
+				http.Error(w, "invalid offset parameter", http.StatusBadRequest)
+				return
+			}
+		}
+
+		// If no createdBy specified, use current user
+		if createdBy == "" {
+			createdBy = user.ID
+		}
+
+		// Create request
+		req := shortUrlApi.ShortUrlListRequest{
+			CreatedBy: createdBy,
+			Limit:     limit,
+			Offset:    offset,
+		}
+
+		reqBytes, err := json.Marshal(req)
+		if err != nil {
+			logger.Error("failed to marshal request: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Send request to short URL service
+		msg, err := nc.Request(
+			shortUrlApi.Subj.ShortUrlGroup+"."+shortUrlApi.Subj.ShortUrlList,
+			reqBytes,
+			5*time.Second,
+		)
+		if err != nil {
+			logger.Error("failed to request short urls: %v", err)
+			http.Error(w, "failed to get short urls", http.StatusInternalServerError)
+			return
+		}
+
+		// Parse response
+		var resp shortUrlApi.ShortUrlListResponse
+		if err := json.Unmarshal(msg.Data, &resp); err != nil {
+			logger.Error("failed to unmarshal response: %v", err)
+			http.Error(w, "failed to parse response", http.StatusInternalServerError)
+			return
+		}
+
+		logger.Debug("found %d short urls", len(resp.ShortUrls))
+		respJson(w, resp, http.StatusOK)
+	})
+}
+
+// handleShortUrlCreate creates a handler for creating new short URLs
+func handleShortUrlCreate(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+	logger := l.WithBreadcrumb("shorturls").WithBreadcrumb("create")
+	logger.Debug("ready")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Debug("called")
+
+		// Get user from context
+		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		if !ok {
+			logger.Warn("user not found in context")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// Parse request body
+		var req shortUrlApi.ShortUrlCreateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			logger.Warn("failed to decode request: %v", err)
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		// Set created by to current user
+		req.CreatedBy = user.ID
+
+		// Validate required fields
+		if req.ShortCode == "" {
+			http.Error(w, "short code is required", http.StatusBadRequest)
+			return
+		}
+		if req.TargetURL == "" {
+			http.Error(w, "target URL is required", http.StatusBadRequest)
+			return
+		}
+
+		reqBytes, err := json.Marshal(req)
+		if err != nil {
+			logger.Error("failed to marshal request: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Send request to short URL service
+		msg, err := nc.Request(
+			shortUrlApi.Subj.ShortUrlGroup+"."+shortUrlApi.Subj.ShortUrlCreate,
+			reqBytes,
+			5*time.Second,
+		)
+		if err != nil {
+			logger.Error("failed to create short url: %v", err)
+			http.Error(w, "failed to create short url", http.StatusInternalServerError)
+			return
+		}
+
+		// Check for service errors
+		if msg.Header.Get("Nats-Service-Error") != "" {
+			errorCode := msg.Header.Get("Nats-Service-Error-Code")
+			errorMsg := string(msg.Data)
+			logger.Error("service error: %s - %s", errorCode, errorMsg)
+
+			switch errorCode {
+			case "SHORT_CODE_TAKEN":
+				http.Error(w, "short code already exists", http.StatusConflict)
+			case "INVALID_REQUEST":
+				http.Error(w, errorMsg, http.StatusBadRequest)
+			default:
+				http.Error(w, "service error", http.StatusInternalServerError)
+			}
+			return
+		}
+
+		// Parse response
+		var resp shortUrlApi.ShortUrl
+		if err := json.Unmarshal(msg.Data, &resp); err != nil {
+			logger.Error("failed to unmarshal response: %v", err)
+			http.Error(w, "failed to parse response", http.StatusInternalServerError)
+			return
+		}
+
+		logger.Debug("created short url: %s", resp.ShortCode)
+		respJson(w, resp, http.StatusCreated)
+	})
+}
+
+// handleShortUrlGet creates a handler for getting a single short URL
+func handleShortUrlGet(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+	logger := l.WithBreadcrumb("shorturls").WithBreadcrumb("get")
+	logger.Debug("ready")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Debug("called")
+
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "id is required", http.StatusBadRequest)
+			return
+		}
+
+		// Create request
+		req := shortUrlApi.ShortUrlGetRequest{
+			ID: id,
+		}
+
+		reqBytes, err := json.Marshal(req)
+		if err != nil {
+			logger.Error("failed to marshal request: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Send request to short URL service
+		msg, err := nc.Request(
+			shortUrlApi.Subj.ShortUrlGroup+"."+shortUrlApi.Subj.ShortUrlGet,
+			reqBytes,
+			5*time.Second,
+		)
+		if err != nil {
+			logger.Error("failed to get short url: %v", err)
+			http.Error(w, "failed to get short url", http.StatusInternalServerError)
+			return
+		}
+
+		// Check for service errors
+		if msg.Header.Get("Nats-Service-Error") != "" {
+			errorCode := msg.Header.Get("Nats-Service-Error-Code")
+			if errorCode == "NOT_FOUND" {
+				http.NotFound(w, r)
+				return
+			}
+			http.Error(w, "service error", http.StatusInternalServerError)
+			return
+		}
+
+		// Parse response
+		var resp shortUrlApi.ShortUrl
+		if err := json.Unmarshal(msg.Data, &resp); err != nil {
+			logger.Error("failed to unmarshal response: %v", err)
+			http.Error(w, "failed to parse response", http.StatusInternalServerError)
+			return
+		}
+
+		logger.Debug("found short url: %s", resp.ShortCode)
+		respJson(w, resp, http.StatusOK)
+	})
+}
+
+// handleShortUrlUpdate creates a handler for updating short URLs
+func handleShortUrlUpdate(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+	logger := l.WithBreadcrumb("shorturls").WithBreadcrumb("update")
+	logger.Debug("ready")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Debug("called")
+
+		// Get user from context
+		_, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		if !ok {
+			logger.Warn("user not found in context")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "id is required", http.StatusBadRequest)
+			return
+		}
+
+		// Parse request body
+		var req shortUrlApi.ShortUrlUpdateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			logger.Warn("failed to decode request: %v", err)
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		req.ID = id
+
+		reqBytes, err := json.Marshal(req)
+		if err != nil {
+			logger.Error("failed to marshal request: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Send request to short URL service
+		msg, err := nc.Request(
+			shortUrlApi.Subj.ShortUrlGroup+"."+shortUrlApi.Subj.ShortUrlUpdate,
+			reqBytes,
+			5*time.Second,
+		)
+		if err != nil {
+			logger.Error("failed to update short url: %v", err)
+			http.Error(w, "failed to update short url", http.StatusInternalServerError)
+			return
+		}
+
+		// Check for service errors
+		if msg.Header.Get("Nats-Service-Error") != "" {
+			errorCode := msg.Header.Get("Nats-Service-Error-Code")
+			errorMsg := string(msg.Data)
+			logger.Error("service error: %s - %s", errorCode, errorMsg)
+
+			switch errorCode {
+			case "NOT_FOUND":
+				http.NotFound(w, r)
+			case "SHORT_CODE_TAKEN":
+				http.Error(w, "short code already exists", http.StatusConflict)
+			case "INVALID_REQUEST":
+				http.Error(w, errorMsg, http.StatusBadRequest)
+			default:
+				http.Error(w, "service error", http.StatusInternalServerError)
+			}
+			return
+		}
+
+		// Parse response
+		var resp shortUrlApi.ShortUrl
+		if err := json.Unmarshal(msg.Data, &resp); err != nil {
+			logger.Error("failed to unmarshal response: %v", err)
+			http.Error(w, "failed to parse response", http.StatusInternalServerError)
+			return
+		}
+
+		logger.Debug("updated short url: %s", resp.ShortCode)
+		respJson(w, resp, http.StatusOK)
+	})
+}
+
+// handleShortUrlDelete creates a handler for deleting short URLs
+func handleShortUrlDelete(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+	logger := l.WithBreadcrumb("shorturls").WithBreadcrumb("delete")
+	logger.Debug("ready")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Debug("called")
+
+		// Get user from context
+		_, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		if !ok {
+			logger.Warn("user not found in context")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "id is required", http.StatusBadRequest)
+			return
+		}
+
+		// Create request
+		req := shortUrlApi.ShortUrlDeleteRequest{
+			ID: id,
+		}
+
+		reqBytes, err := json.Marshal(req)
+		if err != nil {
+			logger.Error("failed to marshal request: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Send request to short URL service
+		msg, err := nc.Request(
+			shortUrlApi.Subj.ShortUrlGroup+"."+shortUrlApi.Subj.ShortUrlDelete,
+			reqBytes,
+			5*time.Second,
+		)
+		if err != nil {
+			logger.Error("failed to delete short url: %v", err)
+			http.Error(w, "failed to delete short url", http.StatusInternalServerError)
+			return
+		}
+
+		// Check for service errors
+		if msg.Header.Get("Nats-Service-Error") != "" {
+			errorCode := msg.Header.Get("Nats-Service-Error-Code")
+			if errorCode == "NOT_FOUND" {
+				http.NotFound(w, r)
+				return
+			}
+			http.Error(w, "service error", http.StatusInternalServerError)
+			return
+		}
+
+		// Parse response
+		var resp shortUrlApi.ShortUrlDeleteResponse
+		if err := json.Unmarshal(msg.Data, &resp); err != nil {
+			logger.Error("failed to unmarshal response: %v", err)
+			http.Error(w, "failed to parse response", http.StatusInternalServerError)
+			return
+		}
+
+		logger.Debug("deleted short url: %s", resp.IDDeleted)
+		respJson(w, resp, http.StatusOK)
+	})
+}
+
+// handleShortUrlRedirect creates a handler for redirecting short URLs
+func handleShortUrlRedirect(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+	logger := l.WithBreadcrumb("shorturls").WithBreadcrumb("redirect")
+	logger.Debug("ready")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Debug("called")
+
+		shortCode := r.PathValue("shortCode")
+		if shortCode == "" {
+			http.NotFound(w, r)
+			return
+		}
+
+		// Create request
+		req := shortUrlApi.ShortUrlGetRequest{
+			ShortCode: shortCode,
+		}
+
+		reqBytes, err := json.Marshal(req)
+		if err != nil {
+			logger.Error("failed to marshal request: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Send request to short URL service
+		msg, err := nc.Request(
+			shortUrlApi.Subj.ShortUrlGroup+"."+shortUrlApi.Subj.ShortUrlGet,
+			reqBytes,
+			5*time.Second,
+		)
+		if err != nil {
+			logger.Error("failed to get short url: %v", err)
+			http.Error(w, "failed to get short url", http.StatusInternalServerError)
+			return
+		}
+
+		// Check for service errors
+		if msg.Header.Get("Nats-Service-Error") != "" {
+			errorCode := msg.Header.Get("Nats-Service-Error-Code")
+			if errorCode == "NOT_FOUND" {
+				http.NotFound(w, r)
+				return
+			}
+			http.Error(w, "service error", http.StatusInternalServerError)
+			return
+		}
+
+		// Parse response
+		var shortUrl shortUrlApi.ShortUrl
+		if err := json.Unmarshal(msg.Data, &shortUrl); err != nil {
+			logger.Error("failed to unmarshal response: %v", err)
+			http.Error(w, "failed to parse response", http.StatusInternalServerError)
+			return
+		}
+
+		// Check if short URL is active
+		if !shortUrl.IsActive {
+			http.Error(w, "short URL is inactive", http.StatusGone)
+			return
+		}
+
+		// Increment access count
+		go func() {
+			accessReq := shortUrlApi.ShortUrlAccessRequest{
+				ShortCode: shortCode,
+			}
+			accessReqBytes, err := json.Marshal(accessReq)
+			if err != nil {
+				logger.Error("failed to marshal access request: %v", err)
+				return
+			}
+
+			// Call the access endpoint to track the redirect
+			accessMsg, err := nc.Request(
+				shortUrlApi.Subj.ShortUrlGroup+"."+shortUrlApi.Subj.ShortUrlAccess,
+				accessReqBytes,
+				2*time.Second,
+			)
+			if err != nil {
+				logger.Error("failed to track access: %v", err)
+				return
+			}
+
+			// Check for service errors
+			if accessMsg.Header.Get("Nats-Service-Error") != "" {
+				logger.Error("access tracking failed: %s", string(accessMsg.Data))
+				return
+			}
+		}()
+
+		logger.Debug("redirecting %s to %s", shortCode, shortUrl.TargetURL)
+		http.Redirect(w, r, shortUrl.TargetURL, http.StatusMovedPermanently)
+	})
 }
 
 // --- HELPERS ---

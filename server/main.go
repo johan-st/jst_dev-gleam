@@ -11,6 +11,7 @@ import (
 
 	"jst_dev/server/articles"
 	"jst_dev/server/jst_log"
+	shorturl "jst_dev/server/short_url"
 	"jst_dev/server/talk"
 	web "jst_dev/server/web"
 	"jst_dev/server/who"
@@ -129,9 +130,24 @@ func run(
 		return fmt.Errorf("start who: %w", err)
 	}
 
+	// - short url
+	l.Debug("starting short url service")
+	shortUrlConf := &shorturl.Conf{
+		Logger:   lRoot.WithBreadcrumb("shorturl"),
+		NatsConn: nc,
+	}
+	shortUrlSvc, err := shorturl.New(ctx, shortUrlConf)
+	if err != nil {
+		return fmt.Errorf("new short url: %w", err)
+	}
+	err = shortUrlSvc.Start(ctx)
+	if err != nil {
+		return fmt.Errorf("start short url: %w", err)
+	}
+
 	// - articles
 	l.Debug("starting articles")
-	articleRepo, err := articles.Repo(ctx, nc, lRoot.WithBreadcrumb("articles	"))
+	articleRepo, err := articles.Repo(ctx, nc, lRoot.WithBreadcrumb("articles"))
 	if err != nil {
 		return fmt.Errorf("new articles: %w", err)
 	}
