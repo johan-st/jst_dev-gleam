@@ -6,7 +6,6 @@ import { Ok, Error } from "./gleam.mjs";
  * @param {string} key - The key under which the value will be stored.
  * @param {string} value - The string value to store.
  */
-
 export function localstorage_set(key, value) {
     localStorage.setItem(key, value)
 }
@@ -38,4 +37,42 @@ export function localstorage_get(key) {
  */
 export function string_to_dynamic(value) {
     return JSON.parse(value)
+}
+
+/**
+ * Copies text to the clipboard using the browser's clipboard API.
+ * Shows temporary "Copied!" feedback on the element containing the short_code.
+ *
+ * @param {string} text - The text to copy to clipboard.
+ * @param {string} short_code - The short code to identify which element to show feedback on.
+ */
+export function clipboard_copy(text, short_code) {
+    navigator.clipboard.writeText(text).then(() => {
+        // Find the element containing the short code
+        const elements = document.querySelectorAll('[title="Copy short URL to clipboard"]');
+        let targetElement = null;
+        
+        elements.forEach(el => {
+            if (el.textContent.trim() === short_code) {
+                targetElement = el;
+            }
+        });
+        
+        if (targetElement) {
+            const originalText = targetElement.textContent;
+            const originalColor = targetElement.style.color;
+            
+            // Show feedback
+            targetElement.textContent = "Copied!";
+            targetElement.style.color = "#10b981"; // green-500
+            
+            // Restore original text after 1 second
+            setTimeout(() => {
+                targetElement.textContent = originalText;
+                targetElement.style.color = originalColor;
+            }, 1000);
+        }
+    }).catch(err => {
+        console.error('Failed to copy to clipboard:', err);
+    });
 }
