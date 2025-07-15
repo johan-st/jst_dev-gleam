@@ -8,9 +8,7 @@ COPY ./server .
 RUN go build -v -o /run-app .
 
 
-FROM debian:bookworm AS runner
-
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+FROM gcr.io/distroless/base-debian12 AS runner
 
 COPY --from=builder /run-app /usr/local/bin/
-CMD ["run-app"]
+ENTRYPOINT ["run-app"]

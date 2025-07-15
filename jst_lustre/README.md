@@ -4,7 +4,7 @@
 
 ```sh
 gleam run -m lustre/dev start  --tailwind-entry=./src/styles.css
-gleam run -m lustre/dev build --minify --outdir=../server/web/static
+gleam run -m lustre/dev build --minify  --tailwind-entry=./src/styles.css --outdir=../server/web/static
 gleam test 
 
 ```
