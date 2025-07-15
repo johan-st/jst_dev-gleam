@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash"
-	"jst_dev/server/jst_log"
-	"jst_dev/server/who/api"
 	"slices"
 	"time"
 
@@ -16,6 +14,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/micro"
+
+	"jst_dev/server/jst_log"
+	"jst_dev/server/who/api"
 )
 
 const hashSalt = "jst_dev_salt"
@@ -178,10 +179,10 @@ func (w *Who) userWatcher() error {
 		user    User
 		u       *User
 	)
-	
+
 	// Store the context in the Who struct
 	w.ctx = context.Background()
-	
+
 	watcher, err = w.usersKv.WatchAll(nats.Context(w.ctx))
 	if err != nil {
 		return fmt.Errorf("failed to watch users: %w", err)
@@ -218,7 +219,7 @@ func (w *Who) userWatcher() error {
 			}
 		}
 	}()
-	
+
 	return nil
 }
 
@@ -709,7 +710,6 @@ func (w *Who) userAddPermission(user *User, perm api.Permission) error {
 func (w *Who) userRemovePermission(user *User, perm api.Permission) error {
 	user.permissions = slices.DeleteFunc(user.permissions, func(p api.Permission) bool {
 		return p == perm
-
 	})
 	return nil
 }

@@ -43,7 +43,7 @@ func main() {
 }
 
 // run initializes and starts all core services, manages their lifecycle, and handles graceful shutdown on interrupt signals.
-// 
+//
 // It loads configuration, sets up logging, starts embedded messaging, blog, HTTP, and user management services, and waits for OS interrupts to trigger a coordinated shutdown. Returns an error if any service fails to initialize or start.
 func run(
 	ctx context.Context,
@@ -81,7 +81,6 @@ func run(
 	)
 	if err != nil {
 		return fmt.Errorf("TALK, connection: %v", err)
-
 	}
 	defer nc.Close()
 

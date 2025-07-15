@@ -9,7 +9,6 @@ type GlobalConfig struct {
 
 // loadConf returns a GlobalConfig instance with default settings for the talk component.
 func loadConf() (*GlobalConfig, error) {
-
 	conf := &GlobalConfig{
 		Talk: talk.Conf{
 			ServerName:        "jst",

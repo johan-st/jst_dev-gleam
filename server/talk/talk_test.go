@@ -2,12 +2,13 @@ package talk_test
 
 import (
 	"context"
-	"jst_dev/server/jst_log"
-	"jst_dev/server/talk"
 	"testing"
 	"time"
 
 	"github.com/nats-io/nats.go"
+
+	"jst_dev/server/jst_log"
+	"jst_dev/server/talk"
 )
 
 func BenchmarkMessagingInProcess(b *testing.B) {

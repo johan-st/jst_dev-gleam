@@ -5,11 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"jst_dev/server/jst_log"
 	"sync"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+
+	"jst_dev/server/jst_log"
 )
 
 const (
@@ -134,6 +135,7 @@ func LinkExternal(url string, text string) Content {
 		Text: text,
 	}
 }
+
 // Image creates a Content block of type image with the specified URL and alt text.
 func Image(url string, alt string) Content {
 	return Content{
@@ -267,7 +269,6 @@ func (r *articleRepo) WatchAll() (jetstream.KeyWatcher, error) {
 // It returns a new ArticleRepo instance that serves reads from the cache and propagates writes to the underlying repository.
 // The cache is updated in real time using a background goroutine that listens for key-value changes.
 func WithInMemCache(repo ArticleRepoWithWatchAll, l *jst_log.Logger) (ArticleRepo, error) {
-
 	repoWrapped := &articleRepoInMem{
 		repo:     repo,
 		articles: make(map[string]*Article),

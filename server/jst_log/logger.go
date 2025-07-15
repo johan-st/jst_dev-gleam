@@ -52,7 +52,6 @@ type Logger struct {
 
 // NewLogger creates a new Logger instance with the specified application name and subject configuration. The logger starts with the Info level, no NATS connection, and empty breadcrumbs and children.
 func NewLogger(appName string, subjects LoggerSubjects) *Logger {
-
 	logger := &Logger{
 		nc:          nil,
 		appName:     appName,

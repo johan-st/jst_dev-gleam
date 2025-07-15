@@ -166,18 +166,18 @@ func TestMoreComprehensivePermissions(t *testing.T) {
 			user:      "johan",
 			resource:  "johan_docs",
 			canRead:   true,
-			canWrite:  true, 
-			canDelete: true, 
-			canCreate: true, 
+			canWrite:  true,
+			canDelete: true,
+			canCreate: true,
 		},
 		{
 			name:      "Admin has access to all resources",
 			user:      "johan", // johan is in admin group
 			resource:  "any_resource",
 			canRead:   true,
-			canWrite:  true, 
-			canDelete: true, 
-			canCreate: true, 
+			canWrite:  true,
+			canDelete: true,
+			canCreate: true,
 		},
 		// Add more test cases as needed
 	}

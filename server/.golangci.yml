@@ -1,0 +1,29 @@
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+  tests: true
+  skip-dirs:
+    - vendor
+
+linters:
+  disable-all: true
+  enable:
+    - gofmt
+    - goimports
+    - misspell
+    - whitespace
+
+linters-settings:
+  gofmt:
+    simplify: true
+  goimports:
+    local-prefixes: jst_dev/server
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck
+  max-issues-per-linter: 0
+  max-same-issues: 0

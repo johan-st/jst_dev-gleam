@@ -3,11 +3,12 @@ package talk
 import (
 	"context"
 	"fmt"
-	"jst_dev/server/jst_log"
 	"time"
 
 	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
+
+	"jst_dev/server/jst_log"
 )
 
 type Conf struct {
