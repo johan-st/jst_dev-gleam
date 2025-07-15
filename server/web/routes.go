@@ -49,7 +49,6 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 	mux.Handle("PUT /api/url/{id}", handleShortUrlUpdate(l, nc))
 	mux.Handle("DELETE /api/url/{id}", handleShortUrlDelete(l, nc))
 	mux.Handle("GET /u/{shortCode}", handleShortUrlRedirect(l, nc))
-	mux.Handle("GET /url/{shortCode}", handleShortUrlRedirect(l, nc))
 	mux.Handle("GET u.jst.dev/{shortCode}", handleShortUrlRedirect(l, nc))
 	mux.Handle("GET url.jst.dev/{shortCode}", handleShortUrlRedirect(l, nc))
 

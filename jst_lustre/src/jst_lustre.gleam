@@ -7,6 +7,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/order
+import gleam/set.{type Set}
 import gleam/string
 import gleam/uri.{type Uri}
 import lustre
@@ -31,7 +32,69 @@ import utils/session
 import utils/short_url.{type ShortUrl, type ShortUrlCreateRequest, type ShortUrlListResponse, type ShortUrlUpdateRequest}
 
 @external(javascript, "./app.ffi.mjs", "clipboard_copy")
-fn clipboard_copy(text: String, short_code: String) -> Nil
+fn clipboard_copy(text: String) -> Nil
+
+@external(javascript, "./app.ffi.mjs", "set_timeout")
+fn set_timeout(callback: fn() -> Nil, delay: Int) -> Nil
+
+fn validate_target_url(url_string: String) -> #(Bool, Option(String)) {
+  case url_string {
+    "" -> #(False, Some("URL is required"))
+    _ -> {
+      case uri.parse(url_string) {
+        Ok(parsed_uri) -> {
+          case parsed_uri.scheme, parsed_uri.host {
+            Some(scheme), Some(host) -> {
+              case scheme {
+                "http" | "https" -> {
+                  case validate_host(host) {
+                    True -> #(True, None)
+                    False -> #(False, Some("Host must be a valid domain with a TLD (e.g., example.com)"))
+                  }
+                }
+                _ -> #(False, Some("URL must use http or https protocol"))
+              }
+            }
+            None, Some(_) -> #(False, Some("URL must include a protocol (http or https)"))
+            Some(_), None -> #(False, Some("URL must include a host"))
+            None, None -> #(False, Some("URL must include both protocol and host"))
+          }
+        }
+        Error(_) -> #(False, Some("Invalid URL format"))
+      }
+    }
+  }
+}
+
+fn validate_host(host: String) -> Bool {
+  case host {
+    "" -> False
+    _ -> {
+      // Check if host contains at least one dot (for TLD)
+      case string.contains(host, ".") {
+        True -> {
+          let parts = string.split(host, ".")
+          case list.length(parts) >= 2 {
+            True -> {
+              // Check that no part is empty and last part (TLD) is at least 2 characters
+              case list.all(parts, fn(part) { string.length(part) > 0 }) {
+                True -> {
+                  case list.last(parts) {
+                    Ok(tld) -> string.length(tld) >= 2
+                    Error(_) -> False
+                  }
+                }
+                False -> False
+              }
+            }
+            False -> False
+          }
+        }
+        False -> False
+      }
+    }
+  }
+}
 
 // MAIN ------------------------------------------------------------------------
 
@@ -59,6 +122,9 @@ type Model {
     profile_menu_open: Bool,
     notice: String,
     debug_use_local_storage: Bool,
+    delete_confirmation: option.Option(String),
+    copy_feedback: option.Option(String),
+    expanded_urls: Set(String),
   )
 }
 
@@ -92,6 +158,9 @@ fn init(_) -> #(Model, Effect(Msg)) {
       profile_menu_open: False,
       notice: "",
       debug_use_local_storage: True,
+      delete_confirmation: None,
+      copy_feedback: None,
+      expanded_urls: set.new(),
     )
   let effect_modem =
     modem.init(fn(uri) {
@@ -166,12 +235,16 @@ type Msg {
   ShortUrlListGot(result: Result(ShortUrlListResponse, HttpError))
   ShortUrlDeleteClicked(id: String)
   ShortUrlDeleteResponse(id: String, result: Result(String, HttpError))
+  ShortUrlDeleteConfirmClicked(id: String)
+  ShortUrlDeleteCancelClicked
 
   ShortUrlFormShortCodeUpdated(text: String)
   ShortUrlFormTargetUrlUpdated(text: String)
   ShortUrlCopyClicked(short_code: String)
+  ShortUrlCopyFeedbackCleared
   ShortUrlToggleActiveClicked(id: String, is_active: Bool)
   ShortUrlToggleActiveResponse(id: String, result: Result(ShortUrl, HttpError))
+  ShortUrlToggleExpanded(id: String)
   // EDIT VIEW TOGGLE
   EditViewModeToggled
   // DEBUG
@@ -814,9 +887,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     // SHORT URLS
     ShortUrlCreateClicked(short_code, target_url) -> {
-      echo model.base_uri
-      case model.session {
-        session.Authenticated(_session_data) -> {
+      let #(is_valid, _) = validate_target_url(target_url)
+      case is_valid, model.session {
+        True, session.Authenticated(_session_data) -> {
           let req = short_url.ShortUrlCreateRequest(
             short_code: short_code,
             target_url: target_url,
@@ -826,7 +899,8 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             short_url.create_short_url(ShortUrlCreateResponse, model.base_uri, req),
           )
         }
-        _ -> #(model, effect.none())
+        False, _ -> #(model, effect.none())
+        _, _ -> #(model, effect.none())
       }
     }
     ShortUrlCreateResponse(result) -> {
@@ -857,14 +931,20 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       }
     }
     ShortUrlDeleteClicked(id) -> {
+      #(Model(..model, delete_confirmation: Some(id)), effect.none())
+    }
+    ShortUrlDeleteConfirmClicked(id) -> {
       #(
-        model,
+        Model(..model, delete_confirmation: None),
         short_url.delete_short_url(
           fn(result) { ShortUrlDeleteResponse(id, result) },
           model.base_uri,
           id,
         ),
       )
+    }
+    ShortUrlDeleteCancelClicked -> {
+      #(Model(..model, delete_confirmation: None), effect.none())
     }
     ShortUrlDeleteResponse(id, result) -> {
       case result {
@@ -890,8 +970,17 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     ShortUrlCopyClicked(short_code) -> {
       let url = "u.jst.dev/" <> short_code
-      clipboard_copy(url, short_code)
-      #(model, effect.none())
+      clipboard_copy(url)
+      #(
+        Model(..model, copy_feedback: Some(short_code)),
+        effect.from(fn(dispatch) {
+          // Clear feedback after 2 seconds
+          set_timeout(fn() { dispatch(ShortUrlCopyFeedbackCleared) }, 2000)
+        }),
+      )
+    }
+    ShortUrlCopyFeedbackCleared -> {
+      #(Model(..model, copy_feedback: None), effect.none())
     }
     ShortUrlToggleActiveClicked(id, is_active) -> {
       let update_req = short_url.ShortUrlUpdateRequest(
@@ -928,6 +1017,13 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           #(Model(..model, short_urls: Errored(err)), effect.none())
         }
       }
+    }
+    ShortUrlToggleExpanded(id) -> {
+      let updated_expanded_urls = case set.contains(model.expanded_urls, id) {
+        True -> set.delete(model.expanded_urls, id)
+        False -> set.insert(model.expanded_urls, id)
+      }
+      #(Model(..model, expanded_urls: updated_expanded_urls), effect.none())
     }
     DebugToggleLocalStorage -> {
       // Fells a bit wierd to call a function just for the side-effect and not use the result.. 
@@ -2093,31 +2189,56 @@ fn view_url_create_form(model: Model) -> Element(Msg) {
     html.div([attr.class("space-y-4")], [
       html.div([], [
         html.label([attr.class("block text-sm font-medium text-zinc-300 mb-2")], [
-          html.text("Short Code"),
-        ]),
-        html.input([
-          attr.class("w-full px-3 py-2 bg-zinc-700 border border-zinc-600 rounded-md text-zinc-100 focus:outline-none focus:border-pink-500"),
-          attr.placeholder("Enter short code"),
-          attr.type_("text"),
-          attr.value(model.short_url_form_short_code),
-          event.on_input(ShortUrlFormShortCodeUpdated),
-        ]),
-      ]),
-      html.div([], [
-        html.label([attr.class("block text-sm font-medium text-zinc-300 mb-2")], [
           html.text("Target URL"),
         ]),
         html.input([
-          attr.class("w-full px-3 py-2 bg-zinc-700 border border-zinc-600 rounded-md text-zinc-100 focus:outline-none focus:border-pink-500"),
+          attr.class(case validate_target_url(model.short_url_form_target_url) {
+            #(_, Some(_)) -> "w-full px-3 py-2 bg-zinc-700 border border-red-500 rounded-md text-zinc-100 focus:outline-none focus:border-red-400"
+            #(_, None) -> "w-full px-3 py-2 bg-zinc-700 border border-zinc-600 rounded-md text-zinc-100 focus:outline-none focus:border-pink-500"
+          }),
           attr.placeholder("https://example.com"),
           attr.type_("url"),
           attr.value(model.short_url_form_target_url),
           event.on_input(ShortUrlFormTargetUrlUpdated),
         ]),
+        case validate_target_url(model.short_url_form_target_url) {
+          #(_, Some(error_msg)) -> html.p([attr.class("text-xs text-red-400 mt-1")], [
+            html.text(error_msg),
+          ])
+          #(True, None) -> html.p([attr.class("text-xs text-green-400 mt-1")], [
+            html.text("✓ Valid URL"),
+          ])
+          #(False, None) -> element.none()
+        },
+      ]),
+      html.div([], [
+        html.label([attr.class("block text-sm font-medium text-zinc-300 mb-2")], [
+          html.text("Short Code"),
+          html.span([attr.class("text-xs text-zinc-500 font-normal ml-2")], [
+            html.text("(optional)"),
+          ]),
+        ]),
+        html.input([
+          attr.class("w-full px-3 py-2 bg-zinc-700 border border-zinc-600 rounded-md text-zinc-100 focus:outline-none focus:border-pink-500"),
+          attr.placeholder("Leave empty for random code"),
+          attr.type_("text"),
+          attr.value(model.short_url_form_short_code),
+          event.on_input(ShortUrlFormShortCodeUpdated),
+        ]),
+        html.p([attr.class("text-xs text-zinc-500 mt-1")], [
+          html.text("Only fill this if you want a specific short code. Otherwise, a random one will be generated."),
+        ]),
       ]),
       html.button(
         [
-          attr.class("w-full px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700 transition-colors"),
+          attr.class(case validate_target_url(model.short_url_form_target_url) {
+            #(True, None) -> "w-full px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700 transition-colors"
+            _ -> "w-full px-4 py-2 bg-gray-600 text-gray-300 rounded-md cursor-not-allowed"
+          }),
+          attr.disabled(case validate_target_url(model.short_url_form_target_url) {
+            #(True, None) -> False
+            _ -> True
+          }),
           event.on_mouse_down(ShortUrlCreateClicked(model.short_url_form_short_code, model.short_url_form_target_url)),
         ],
         [html.text("Create Short URL")],
@@ -2129,97 +2250,333 @@ fn view_url_create_form(model: Model) -> Element(Msg) {
 fn view_url_list(model: Model) -> Element(Msg) {
   case model.short_urls {
     NotInitialized -> html.div([attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")], [
-      html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
+      html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
         html.text("URLs"),
       ]),
-      html.div([attr.class("text-zinc-400")], [
-        html.text("Loading..."),
+      html.div([attr.class("text-center py-12")], [
+        html.div([attr.class("text-zinc-400 text-lg")], [
+          html.text("Loading..."),
+        ]),
       ]),
     ])
     Pending -> html.div([attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")], [
-      html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
+      html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
         html.text("URLs"),
       ]),
-      html.div([attr.class("text-zinc-400")], [
-        html.text("Loading..."),
+      html.div([attr.class("text-center py-12")], [
+        html.div([attr.class("text-zinc-400 text-lg")], [
+          html.text("Loading..."),
+        ]),
       ]),
     ])
     Loaded(short_urls) -> {
       case short_urls {
         [] -> html.div([attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")], [
-          html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
+          html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
             html.text("URLs"),
           ]),
-          html.div([attr.class("text-zinc-400")], [
-            html.text("No short URLs created yet."),
+          html.div([attr.class("text-center py-12")], [
+            html.div([attr.class("text-zinc-400 text-lg mb-2")], [
+              html.text("No short URLs created yet.")
+            ]),
+            html.div([attr.class("text-zinc-500 text-sm")], [
+              html.text("Create your first short URL using the form above.")
+            ])
           ]),
         ])
         _ -> {
           let url_elements = list.map(short_urls, fn(url) {
-            html.div([
-              attr.class("relative p-4 bg-zinc-700 rounded border border-zinc-600 flex items-stretch group hover:bg-zinc-600 transition-colors cursor-pointer"),
-            ], [
-              html.button([
-                attr.class("absolute top-2 right-2 text-red-400 hover:text-red-600 text-sm font-bold p-1 m-0 bg-transparent border border-red-400 rounded cursor-pointer z-10"),
-                event.on_mouse_down(ShortUrlDeleteClicked(url.id)),
-                attr.title("Delete"),
-              ], [html.text("DEL")]),
-              html.button([
-                attr.class(case url.is_active {
-                  True -> "absolute top-2 right-24 text-green-400 hover:text-green-600 text-sm font-bold p-1 m-0 bg-transparent border border-green-400 rounded cursor-pointer z-10"
-                  False -> "absolute top-2 right-24 text-red-400 hover:text-red-600 text-sm font-bold p-1 m-0 bg-transparent border border-red-400 rounded cursor-pointer z-10"
-                }),
-                event.on_mouse_down(ShortUrlToggleActiveClicked(url.id, url.is_active)),
-                attr.title(case url.is_active {
-                  True -> "Deactivate URL"
-                  False -> "Activate URL"
-                }),
-              ], [html.text(case url.is_active {
-                True -> "ON"
-                False -> "OFF"
-              })]),
-              html.div([
-                attr.class("text-pink-700 font-mono text-lg mb-1 cursor-pointer select-all hover:underline z-10"),
-                event.on_mouse_down(ShortUrlCopyClicked(url.short_code)),
-                attr.title("Copy short URL to clipboard"),
-                attr.style([#("min-width", "5ch"), #("display", "inline-block")]),
-              ], [html.text(url.short_code)]),
-              html.div([
-                attr.class("flex-1 ml-4 cursor-pointer"),
-                event.on_mouse_down(UserMouseDownNavigation(routes.to_uri(routes.UrlShortInfo(url.short_code)))),
-              ], [
-                html.div([attr.class("text-zinc-400 text-sm break-all")], [html.text(url.target_url)]),
-                html.div([attr.class("text-zinc-500 text-xs")], [html.text("Accesses: " <> int.to_string(url.access_count))]),
-                html.div([attr.class("text-zinc-500 text-xs")], [html.text("Created: " <> birl.from_unix_milli(url.created_at * 1000) |> birl.to_naive_date_string)]),
-              ]),
-            ])
+            let is_expanded = set.contains(model.expanded_urls, url.id)
+            
+            case is_expanded {
+              True -> view_expanded_url_card(model, url)
+              False -> view_compact_url_card(model, url)
+            }
           })
           html.div([attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")], [
-            html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
+            html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
               html.text("URLs"),
             ]),
-            html.div([attr.class("space-y-4")], url_elements),
+            html.ul([
+              attr.class("space-y-2"),
+              attr.role("list")
+            ], url_elements),
+            case model.delete_confirmation {
+              Some(delete_id) -> view_delete_confirmation(delete_id, short_urls)
+              None -> element.none()
+            }
           ])
         }
       }
     }
     Errored(error) -> html.div([attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")], [
-      html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
+      html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
         html.text("URLs"),
       ]),
-      html.div([attr.class("text-red-400")], [
-        html.text("Error loading short URLs: " <> error_string.http_error(error)),
+      html.div([attr.class("text-center py-12")], [
+        html.div([attr.class("text-red-400 text-lg mb-2")], [
+          html.text("Error loading short URLs")
+        ]),
+        html.div([attr.class("text-zinc-500 text-sm")], [
+          html.text(error_string.http_error(error))
+        ])
       ]),
     ])
     Optimistic(_) -> html.div([attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")], [
-      html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
+      html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
         html.text("URLs"),
       ]),
-      html.div([attr.class("text-zinc-400")], [
-        html.text("Loading..."),
+      html.div([attr.class("text-center py-12")], [
+        html.div([attr.class("text-zinc-400 text-lg")], [
+          html.text("Loading..."),
+        ]),
       ]),
     ])
   }
+}
+
+fn view_compact_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
+  html.li([
+    attr.class("bg-zinc-800 border border-zinc-700 rounded-lg transition-colors"),
+  ], [
+    // Fixed header section that stays in place
+    html.div([
+      attr.class("flex items-center justify-between p-4"),
+    ], [
+      html.div([attr.class("flex items-center space-x-4 flex-1 min-w-0")], [
+        // Short URL - clickable to copy
+        html.button([
+          attr.class("font-mono text-sm font-medium text-zinc-100 hover:text-pink-300 transition-colors cursor-pointer"),
+          event.on_mouse_down(ShortUrlCopyClicked(url.short_code)),
+          attr.title("Click to copy short URL")
+        ], [
+          html.span([attr.class("text-zinc-500")], [html.text("u.jst.dev/")]),
+          html.span([attr.class("text-pink-400")], [html.text(url.short_code)]),
+          case model.copy_feedback == Some(url.short_code) {
+            True -> html.span([attr.class("ml-2 text-green-400 text-xs")], [html.text("✓ Copied!")])
+            False -> element.none()
+          }
+        ]),
+        
+        // Target URL (truncated) - clickable to expand
+        html.div([
+          attr.class("text-sm text-zinc-400 truncate flex-1 cursor-pointer hover:text-zinc-300 transition-colors"),
+          attr.title(url.target_url),
+          event.on_mouse_down(ShortUrlToggleExpanded(url.id))
+        ], [
+          html.span([attr.class("text-zinc-600")], [html.text("→ ")]),
+          html.text(url.target_url)
+        ]),
+        
+        // Status badge - clickable to toggle active state
+        html.button([
+          attr.class(case url.is_active {
+            True -> "inline-flex shrink-0 items-center rounded-full bg-green-600/20 px-2 py-1 text-xs font-medium text-green-400 ring-1 ring-inset ring-green-600/30 cursor-pointer hover:bg-green-600/30 transition-colors"
+            False -> "inline-flex shrink-0 items-center rounded-full bg-red-600/20 px-2 py-1 text-xs font-medium text-red-400 ring-1 ring-inset ring-red-600/30 cursor-pointer hover:bg-red-600/30 transition-colors"
+          }),
+          event.on_mouse_down(ShortUrlToggleActiveClicked(url.id, url.is_active)),
+          attr.title("Toggle active/inactive")
+        ], [html.text(case url.is_active {
+          True -> "Active"
+          False -> "Inactive"
+        })]),
+        
+        // Access count - clickable to expand
+        html.div([
+          attr.class("text-xs text-zinc-500 shrink-0 cursor-pointer hover:text-zinc-400 transition-colors"),
+          event.on_mouse_down(ShortUrlToggleExpanded(url.id))
+        ], [
+          html.text(int.to_string(url.access_count) <> " clicks")
+        ]),
+      ]),
+      
+      // Expand indicator - clickable to expand
+      html.div([
+        attr.class("flex items-center space-x-2 ml-4 cursor-pointer hover:text-zinc-300 transition-colors"),
+        event.on_mouse_down(ShortUrlToggleExpanded(url.id))
+      ], [
+        html.div([attr.class("text-zinc-500 text-sm")], [
+          html.text("▼")
+        ])
+      ])
+    ])
+  ])
+}
+
+fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
+  html.li([
+    attr.class("bg-zinc-800 border border-zinc-700 rounded-lg transition-colors"),
+  ], [
+    // Fixed header section - identical to compact view
+    html.div([
+      attr.class("flex items-center justify-between p-4"),
+    ], [
+      html.div([attr.class("flex items-center space-x-4 flex-1 min-w-0")], [
+        // Short URL - clickable to copy
+        html.button([
+          attr.class("font-mono text-sm font-medium text-zinc-100 hover:text-pink-300 transition-colors cursor-pointer"),
+          event.on_mouse_down(ShortUrlCopyClicked(url.short_code)),
+          attr.title("Click to copy short URL")
+        ], [
+          html.span([attr.class("text-zinc-500")], [html.text("u.jst.dev/")]),
+          html.span([attr.class("text-pink-400")], [html.text(url.short_code)]),
+          case model.copy_feedback == Some(url.short_code) {
+            True -> html.span([attr.class("ml-2 text-green-400 text-xs")], [html.text("✓ Copied!")])
+            False -> element.none()
+          }
+        ]),
+        
+        // Target URL (truncated) - shows same as compact
+        html.div([
+          attr.class("text-sm text-zinc-400 truncate flex-1"),
+          attr.title(url.target_url)
+        ], [
+          html.span([attr.class("text-zinc-600")], [html.text("→ ")]),
+          html.text(url.target_url)
+        ]),
+        
+                 // Status badge - clickable to toggle active state
+         html.button([
+           attr.class(case url.is_active {
+             True -> "inline-flex shrink-0 items-center rounded-full bg-green-600/20 px-2 py-1 text-xs font-medium text-green-400 ring-1 ring-inset ring-green-600/30 cursor-pointer hover:bg-green-600/30 transition-colors"
+             False -> "inline-flex shrink-0 items-center rounded-full bg-red-600/20 px-2 py-1 text-xs font-medium text-red-400 ring-1 ring-inset ring-red-600/30 cursor-pointer hover:bg-red-600/30 transition-colors"
+           }),
+           event.on_mouse_down(ShortUrlToggleActiveClicked(url.id, url.is_active)),
+           attr.title("Toggle active/inactive")
+         ], [html.text(case url.is_active {
+           True -> "Active"
+           False -> "Inactive"
+         })]),
+        
+        // Access count - same as compact
+        html.div([attr.class("text-xs text-zinc-500 shrink-0")], [
+          html.text(int.to_string(url.access_count) <> " clicks")
+        ]),
+      ]),
+      
+      // Collapse indicator
+      html.div([
+        attr.class("flex items-center space-x-2 ml-4 cursor-pointer hover:text-zinc-300 transition-colors"),
+        event.on_mouse_down(ShortUrlToggleExpanded(url.id))
+      ], [
+        html.div([attr.class("text-zinc-500 text-sm")], [
+          html.text("▲")
+        ])
+      ])
+    ]),
+    
+    // Additional expanded content
+    html.div([
+      attr.class("px-4 pb-4"),
+    ], [
+             // Full Target URL section
+       html.div([attr.class("mb-4 pt-2 border-t border-zinc-700")], [
+         html.div([attr.class("text-sm text-zinc-500 mb-2")], [html.text("Target URL:")]),
+         html.div([
+           attr.class("text-zinc-300 break-all bg-zinc-900 rounded px-3 py-2 text-sm cursor-pointer hover:bg-zinc-850 transition-colors"),
+           attr.title(url.target_url <> " (click to collapse)"),
+           event.on_mouse_down(ShortUrlToggleExpanded(url.id))
+         ], [html.text(url.target_url)])
+       ]),
+      
+      // Metadata grid
+      html.div([attr.class("grid grid-cols-2 gap-4 text-sm mb-4")], [
+        html.div([attr.class("space-y-2")], [
+          html.div([attr.class("flex justify-between")], [
+            html.span([attr.class("text-zinc-500")], [html.text("Created By:")]),
+            html.span([attr.class("text-zinc-300")], [html.text(url.created_by)]),
+          ]),
+          html.div([attr.class("flex justify-between")], [
+            html.span([attr.class("text-zinc-500")], [html.text("Access Count:")]),
+            html.span([attr.class("text-zinc-300 font-mono")], [html.text(int.to_string(url.access_count))]),
+          ]),
+        ]),
+        html.div([attr.class("space-y-2")], [
+          html.div([attr.class("flex justify-between")], [
+            html.span([attr.class("text-zinc-500")], [html.text("Created:")]),
+            html.span([attr.class("text-zinc-300")], [html.text(birl.from_unix_milli(url.created_at * 1000) |> birl.to_naive_date_string)]),
+          ]),
+          html.div([attr.class("flex justify-between")], [
+            html.span([attr.class("text-zinc-500")], [html.text("Updated:")]),
+            html.span([attr.class("text-zinc-300")], [html.text(birl.from_unix_milli(url.updated_at * 1000) |> birl.to_naive_date_string)]),
+          ]),
+        ])
+      ]),
+      
+      // Action buttons
+      html.div([
+        attr.class("flex gap-2"),
+      ], [
+        html.button([
+          attr.class("flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-100 bg-blue-600 hover:bg-blue-700 rounded transition-colors"),
+          event.on_mouse_down(ShortUrlCopyClicked(url.short_code)),
+        ], [
+          html.div([attr.class("text-sm")], [html.text("📋")]),
+          html.text(case model.copy_feedback == Some(url.short_code) {
+            True -> "Copied!"
+            False -> "Copy URL"
+          })
+        ]),
+        html.button([
+          attr.class(case url.is_active {
+            True -> "flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-100 bg-orange-600 hover:bg-orange-700 rounded transition-colors"
+            False -> "flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-100 bg-green-600 hover:bg-green-700 rounded transition-colors"
+          }),
+          event.on_mouse_down(ShortUrlToggleActiveClicked(url.id, url.is_active)),
+        ], [
+          html.div([attr.class("text-sm")], [html.text(case url.is_active {
+            True -> "⏸"
+            False -> "▶"
+          })]),
+          html.text(case url.is_active {
+            True -> "Deactivate"
+            False -> "Activate"
+          })
+        ]),
+        html.button([
+          attr.class("flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-100 bg-red-600 hover:bg-red-700 rounded transition-colors"),
+          event.on_mouse_down(ShortUrlDeleteClicked(url.id)),
+        ], [
+          html.div([attr.class("text-sm")], [html.text("🗑")]),
+          html.text("Delete")
+        ]),
+      ])
+    ])
+  ])
+}
+
+fn view_delete_confirmation(delete_id: String, short_urls: List(ShortUrl)) -> Element(Msg) {
+  let url_to_delete = case list.find(short_urls, fn(url) { url.id == delete_id }) {
+    Ok(url) -> url.short_code
+    Error(_) -> "unknown"
+  }
+  
+  html.div([
+    attr.class("fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50")
+  ], [
+    html.div([
+      attr.class("bg-zinc-800 rounded-lg p-6 max-w-md w-full mx-4 border border-zinc-700")
+    ], [
+      html.h3([attr.class("text-lg font-medium text-white mb-4")], [
+        html.text("Delete Short URL")
+      ]),
+      html.p([attr.class("text-zinc-300 mb-6")], [
+        html.text("Are you sure you want to delete the short URL "),
+        html.span([attr.class("font-mono text-pink-400")], [html.text("u.jst.dev/" <> url_to_delete)]),
+        html.text("? This action cannot be undone.")
+      ]),
+      html.div([attr.class("flex gap-3 justify-end")], [
+        html.button([
+          attr.class("px-4 py-2 bg-zinc-600 text-white rounded hover:bg-zinc-700 transition-colors"),
+          event.on_mouse_down(ShortUrlDeleteCancelClicked)
+        ], [html.text("Cancel")]),
+        html.button([
+          attr.class("px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"),
+          event.on_mouse_down(ShortUrlDeleteConfirmClicked(delete_id))
+        ], [html.text("Delete")])
+      ])
+    ])
+  ])
 }
 
 fn view_url_info_page(model: Model, short_code: String) -> List(Element(Msg)) {
@@ -2282,7 +2639,10 @@ fn view_url_info_page(model: Model, short_code: String) -> List(Element(Msg)) {
                   attr.class("px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors"),
                   event.on_mouse_down(ShortUrlCopyClicked(url.short_code)),
                 ],
-                [html.text("Copy URL")],
+                [html.text(case model.copy_feedback == Some(url.short_code) {
+                  True -> "Copied!"
+                  False -> "Copy URL"
+                })],
               ),
               html.button(
                 [
