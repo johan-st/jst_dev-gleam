@@ -100,7 +100,7 @@ pub fn model_encoder_and_decoder_test() {
 
   // Compare each article in the model separately to handle content states correctly
   case dec_v1 {
-    PersistentModelV0-> should.fail()
+    PersistentModelV0 -> should.fail()
     PersistentModelV1(articles) -> {
       case articles {
         [a1, a2, a3, a4] -> {

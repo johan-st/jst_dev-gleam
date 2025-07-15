@@ -81,11 +81,7 @@ pub fn view(
           attr.attribute("stroke-linecap", "round"),
           attr.attribute("stroke-linejoin", "round"),
         ]),
-        [
-          svg.polyline([
-            attr.attribute("points", "20,6 9,17 4,12"),
-          ]),
-        ],
+        [svg.polyline([attr.attribute("points", "20,6 9,17 4,12")])],
       )
   }
 }

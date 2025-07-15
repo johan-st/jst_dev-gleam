@@ -1,5 +1,3 @@
-  
-
 pub opaque type Draft {
   DraftV1(
     saving: Bool,

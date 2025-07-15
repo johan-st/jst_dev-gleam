@@ -3,6 +3,7 @@
 import article/article.{type Article, ArticleV1}
 import article/draft
 import birl
+import components/ui
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -29,7 +30,10 @@ import utils/remote_data.{
   type RemoteData, Errored, Loaded, NotInitialized, Optimistic, Pending,
 }
 import utils/session
-import utils/short_url.{type ShortUrl, type ShortUrlCreateRequest, type ShortUrlListResponse, type ShortUrlUpdateRequest}
+import utils/short_url.{
+  type ShortUrl, type ShortUrlCreateRequest, type ShortUrlListResponse,
+  type ShortUrlUpdateRequest,
+}
 
 @external(javascript, "./app.ffi.mjs", "clipboard_copy")
 fn clipboard_copy(text: String) -> Nil
@@ -49,15 +53,26 @@ fn validate_target_url(url_string: String) -> #(Bool, Option(String)) {
                 "http" | "https" -> {
                   case validate_host(host) {
                     True -> #(True, None)
-                    False -> #(False, Some("Host must be a valid domain with a TLD (e.g., example.com)"))
+                    False -> #(
+                      False,
+                      Some(
+                        "Host must be a valid domain with a TLD (e.g., example.com)",
+                      ),
+                    )
                   }
                 }
                 _ -> #(False, Some("URL must use http or https protocol"))
               }
             }
-            None, Some(_) -> #(False, Some("URL must include a protocol (http or https)"))
+            None, Some(_) -> #(
+              False,
+              Some("URL must include a protocol (http or https)"),
+            )
             Some(_), None -> #(False, Some("URL must include a host"))
-            None, None -> #(False, Some("URL must include both protocol and host"))
+            None, None -> #(
+              False,
+              Some("URL must include both protocol and host"),
+            )
           }
         }
         Error(_) -> #(False, Some("Invalid URL format"))
@@ -125,6 +140,11 @@ type Model {
     delete_confirmation: option.Option(String),
     copy_feedback: option.Option(String),
     expanded_urls: Set(String),
+    // Login form state
+    login_form_open: Bool,
+    login_username: String,
+    login_password: String,
+    login_loading: Bool,
   )
 }
 
@@ -161,6 +181,10 @@ fn init(_) -> #(Model, Effect(Msg)) {
       delete_confirmation: None,
       copy_feedback: None,
       expanded_urls: set.new(),
+      login_form_open: False,
+      login_username: "",
+      login_password: "",
+      login_loading: False,
     )
   let effect_modem =
     modem.init(fn(uri) {
@@ -250,6 +274,11 @@ type Msg {
   // DEBUG
   DebugToggleLocalStorage
   GotLocalModelResult(res: Option(PersistentModel))
+  // LOGIN FORM
+  LoginFormToggled
+  LoginUsernameUpdated(String)
+  LoginPasswordUpdated(String)
+  LoginFormSubmitted
 }
 
 fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -312,6 +341,37 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           Model(..model, debug_use_local_storage: False)
           |> update_navigation(uri)
           |> fetch_articles_model()
+        }
+      }
+    }
+
+    // LOGIN FORM HANDLERS
+    LoginFormToggled -> {
+      #(
+        Model(
+          ..model,
+          login_form_open: !model.login_form_open,
+          login_username: "",
+          login_password: "",
+        ),
+        effect.none(),
+      )
+    }
+    LoginUsernameUpdated(username) -> {
+      #(Model(..model, login_username: username), effect.none())
+    }
+    LoginPasswordUpdated(password) -> {
+      #(Model(..model, login_password: password), effect.none())
+    }
+    LoginFormSubmitted -> {
+      case model.login_username, model.login_password {
+        "", _ | _, "" -> #(model, effect.none())
+        // Don't submit with empty fields
+        username, password -> {
+          #(
+            Model(..model, login_loading: True, session: session.Pending),
+            session.login(AuthLoginResponse, username, password, model.base_uri),
+          )
         }
       }
     }
@@ -699,7 +759,15 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     AuthLoginResponse(session_result) -> {
       case session_result {
         Ok(session) -> #(
-          Model(..model, session: session, notice: "login, OK"),
+          Model(
+            ..model,
+            session: session,
+            notice: "Successfully logged in",
+            login_form_open: False,
+            login_loading: False,
+            login_username: "",
+            login_password: "",
+          ),
           effect.none(),
         )
         Error(err) -> {
@@ -708,7 +776,8 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             Model(
               ..model,
               session: session.Unauthenticated,
-              notice: "login, ERROR",
+              notice: "Login failed. Please check your credentials.",
+              login_loading: False,
             ),
             effect.none(),
           )
@@ -890,13 +959,18 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       let #(is_valid, _) = validate_target_url(target_url)
       case is_valid, model.session {
         True, session.Authenticated(_session_data) -> {
-          let req = short_url.ShortUrlCreateRequest(
-            short_code: short_code,
-            target_url: target_url,
-          )
+          let req =
+            short_url.ShortUrlCreateRequest(
+              short_code: short_code,
+              target_url: target_url,
+            )
           #(
             model,
-            short_url.create_short_url(ShortUrlCreateResponse, model.base_uri, req),
+            short_url.create_short_url(
+              ShortUrlCreateResponse,
+              model.base_uri,
+              req,
+            ),
           )
         }
         False, _ -> #(model, effect.none())
@@ -923,7 +997,10 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ShortUrlListGot(result) -> {
       case result {
         Ok(response) -> {
-          #(Model(..model, short_urls: Loaded(response.short_urls)), effect.none())
+          #(
+            Model(..model, short_urls: Loaded(response.short_urls)),
+            effect.none(),
+          )
         }
         Error(err) -> {
           #(Model(..model, short_urls: Errored(err)), effect.none())
@@ -956,7 +1033,14 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             Optimistic(_) -> NotInitialized
             Errored(_) -> NotInitialized
           }
-          #(Model(..model, short_urls: updated_short_urls), modem.push(uri.to_string(routes.to_uri(routes.UrlShortIndex)), None, None))
+          #(
+            Model(..model, short_urls: updated_short_urls),
+            modem.push(
+              uri.to_string(routes.to_uri(routes.UrlShortIndex)),
+              None,
+              None,
+            ),
+          )
         }
         Error(_) -> #(model, effect.none())
       }
@@ -983,10 +1067,8 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(Model(..model, copy_feedback: None), effect.none())
     }
     ShortUrlToggleActiveClicked(id, is_active) -> {
-      let update_req = short_url.ShortUrlUpdateRequest(
-        id: id,
-        is_active: Some(!is_active),
-      )
+      let update_req =
+        short_url.ShortUrlUpdateRequest(id: id, is_active: Some(!is_active))
       #(
         model,
         short_url.update_short_url(
@@ -1002,12 +1084,15 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           let updated_short_urls = case model.short_urls {
             NotInitialized -> NotInitialized
             Pending -> Pending
-            Loaded(urls) -> Loaded(list.map(urls, fn(url) {
-              case url.id == id {
-                True -> updated_url
-                False -> url
-              }
-            }))
+            Loaded(urls) ->
+              Loaded(
+                list.map(urls, fn(url) {
+                  case url.id == id {
+                    True -> updated_url
+                    False -> url
+                  }
+                }),
+              )
             Optimistic(_) -> NotInitialized
             Errored(_) -> NotInitialized
           }
@@ -1216,6 +1301,7 @@ fn view(model: Model) -> Element(Msg) {
             view_notice(model.notice),
             view_header(model),
             html.main([attr.class("mx-auto px-10 py-10")], content),
+            view_modals(model),
           ],
         )
       }
@@ -1235,6 +1321,7 @@ fn view(model: Model) -> Element(Msg) {
               [attr.class("max-w-screen-md mx-auto px-10 py-10")],
               content,
             ),
+            view_modals(model),
           ],
         )
       }
@@ -1317,19 +1404,67 @@ fn page_from_model(model: Model) -> pages.Page {
 }
 
 fn view_notice(notice: String) -> Element(Msg) {
-  case notice {
-    "" -> element.none()
-    notice ->
-      html.div(
-        [
-          event.on_click(NoticeCleared),
-          attr.class(
-            "h-5 w-full cursor-pointer bg-zinc-700 text-mono text-zinc-200 text-xs px-8",
-          ),
-        ],
-        [html.text(notice)],
-      )
+  echo notice
+  element.none()
+  // case notice {
+  //   "" -> element.none()
+  //  notice ->
+  //   html.div(
+  //    [
+  //     event.on_click(NoticeCleared),
+  //    attr.class(
+  //     "h-5 w-full cursor-pointer bg-zinc-700 text-mono text-zinc-200 text-xs px-8",
+  //  ),
+  //  ],
+  // [html.text(notice)],
+  // )
+  // }
+}
+
+fn view_modals(model: Model) -> Element(Msg) {
+  case model.login_form_open {
+    True -> view_login_modal(model)
+    False -> element.none()
   }
+}
+
+fn view_login_modal(model: Model) -> Element(Msg) {
+  html.div([], [
+    ui.modal_backdrop(LoginFormToggled),
+    ui.modal(
+      "Sign In",
+      [
+        ui.form_input(
+          "Username",
+          model.login_username,
+          "Enter your username",
+          "text",
+          True,
+          None,
+          LoginUsernameUpdated,
+        ),
+        ui.form_input(
+          "Password",
+          model.login_password,
+          "Enter your password",
+          "password",
+          True,
+          None,
+          LoginPasswordUpdated,
+        ),
+      ],
+      [
+        ui.button_secondary("Cancel", False, LoginFormToggled),
+        ui.button_primary(
+          "Sign In",
+          model.login_username == "" || model.login_password == "",
+          model.login_loading,
+          LoginFormSubmitted,
+        ),
+      ],
+      LoginFormToggled,
+    ),
+  ])
 }
 
 // VIEW HEADER ----------------------------------------------------------------
@@ -1447,12 +1582,9 @@ fn view_header(model: Model) -> Element(Msg) {
                             html.button(
                               [
                                 attr.class(
-                                  "block w-full text-left px-4 py-2 text-sm text-zinc-200 hover:bg-green-800 transition-colors cursor-pointe",
+                                  "block w-full text-left px-4 py-2 text-sm text-zinc-200 hover:bg-green-800 transition-colors cursor-pointer",
                                 ),
-                                event.on_mouse_down(AuthLoginClicked(
-                                  "johan-st",
-                                  "password",
-                                )),
+                                event.on_mouse_down(LoginFormToggled),
                               ],
                               [html.text("Login")],
                             )
@@ -1549,11 +1681,8 @@ fn view_header_link(
   html.li(
     list.append(extra_attr, [
       attr.classes([
-        #(
-          "border-transparent border-b-2 hover:border-pink-700 cursor-pointer",
-          True,
-        ),
-        #("text-pink-700", routes.is_sub(route: to, maybe_sub: curr)),
+        #("nav-link", True),
+        #("active", routes.is_sub(route: to, maybe_sub: curr)),
       ]),
       event.on_mouse_down(UserMouseDownNavigation(to |> routes.to_uri)),
     ]),
@@ -1600,7 +1729,7 @@ fn view_index() -> List(Element(Msg)) {
 }
 
 fn view_loading() -> List(Element(Msg)) {
-  [view_title("Loading", "loading"), view_simple_paragraph("Loading...")]
+  [ui.loading_indicator_small()]
 }
 
 fn view_article_listing(
@@ -2094,7 +2223,7 @@ fn view_article(
 ) -> List(Element(Msg)) {
   let content: List(Element(Msg)) = case article.content {
     NotInitialized -> [view_error("content not initialized")]
-    Pending -> [view_error("loading")]
+    Pending -> [ui.loading_indicator_bar(), ui.loading_indicator_subtle()]
     Loaded(content_string) | Optimistic(content_string) ->
       jot_to_lustre.to_lustre(content_string)
     Errored(error) -> [view_error(error_string.http_error(error))]
@@ -2173,410 +2302,571 @@ fn view_about() -> List(Element(Msg)) {
 fn view_url_index(model: Model) -> List(Element(Msg)) {
   [
     view_title("URL Shortener", "url-shortener"),
-    view_simple_paragraph(
-      "Create and manage short URLs for easy sharing.",
-    ),
+    view_simple_paragraph("Create and manage short URLs for easy sharing."),
     view_url_create_form(model),
     view_url_list(model),
   ]
 }
 
 fn view_url_create_form(model: Model) -> Element(Msg) {
-  html.div([attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")], [
-    html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
-      html.text("Create Short URL"),
-    ]),
-    html.div([attr.class("space-y-4")], [
-      html.div([], [
-        html.label([attr.class("block text-sm font-medium text-zinc-300 mb-2")], [
-          html.text("Target URL"),
-        ]),
-        html.input([
-          attr.class(case validate_target_url(model.short_url_form_target_url) {
-            #(_, Some(_)) -> "w-full px-3 py-2 bg-zinc-700 border border-red-500 rounded-md text-zinc-100 focus:outline-none focus:border-red-400"
-            #(_, None) -> "w-full px-3 py-2 bg-zinc-700 border border-zinc-600 rounded-md text-zinc-100 focus:outline-none focus:border-pink-500"
-          }),
-          attr.placeholder("https://example.com"),
-          attr.type_("url"),
-          attr.value(model.short_url_form_target_url),
-          event.on_input(ShortUrlFormTargetUrlUpdated),
-        ]),
-        case validate_target_url(model.short_url_form_target_url) {
-          #(_, Some(error_msg)) -> html.p([attr.class("text-xs text-red-400 mt-1")], [
-            html.text(error_msg),
-          ])
-          #(True, None) -> html.p([attr.class("text-xs text-green-400 mt-1")], [
-            html.text("✓ Valid URL"),
-          ])
-          #(False, None) -> element.none()
-        },
+  html.div(
+    [attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")],
+    [
+      html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
+        html.text("Create Short URL"),
       ]),
-      html.div([], [
-        html.label([attr.class("block text-sm font-medium text-zinc-300 mb-2")], [
-          html.text("Short Code"),
-          html.span([attr.class("text-xs text-zinc-500 font-normal ml-2")], [
-            html.text("(optional)"),
+      html.div([attr.class("space-y-4")], [
+        html.div([], [
+          html.label(
+            [attr.class("block text-sm font-medium text-zinc-300 mb-2")],
+            [html.text("Target URL")],
+          ),
+          html.input([
+            attr.class(
+              case validate_target_url(model.short_url_form_target_url) {
+                #(_, Some(_)) ->
+                  "w-full px-3 py-2 bg-zinc-700 border border-red-500 rounded-md text-zinc-100 focus:outline-none focus:border-red-400"
+                #(_, None) ->
+                  "w-full px-3 py-2 bg-zinc-700 border border-zinc-600 rounded-md text-zinc-100 focus:outline-none focus:border-pink-500"
+              },
+            ),
+            attr.placeholder("https://example.com"),
+            attr.type_("url"),
+            attr.value(model.short_url_form_target_url),
+            event.on_input(ShortUrlFormTargetUrlUpdated),
+          ]),
+          case validate_target_url(model.short_url_form_target_url) {
+            #(_, Some(error_msg)) ->
+              html.p([attr.class("text-xs text-red-400 mt-1")], [
+                html.text(error_msg),
+              ])
+            #(True, None) ->
+              html.p([attr.class("text-xs text-green-400 mt-1")], [
+                html.text("✓ Valid URL"),
+              ])
+            #(False, None) -> element.none()
+          },
+        ]),
+        html.div([], [
+          html.label(
+            [attr.class("block text-sm font-medium text-zinc-300 mb-2")],
+            [
+              html.text("Short Code"),
+              html.span([attr.class("text-xs text-zinc-500 font-normal ml-2")], [
+                html.text("(optional)"),
+              ]),
+            ],
+          ),
+          html.input([
+            attr.class(
+              "w-full px-3 py-2 bg-zinc-700 border border-zinc-600 rounded-md text-zinc-100 focus:outline-none focus:border-pink-500",
+            ),
+            attr.placeholder("Leave empty for random code"),
+            attr.type_("text"),
+            attr.value(model.short_url_form_short_code),
+            event.on_input(ShortUrlFormShortCodeUpdated),
+          ]),
+          html.p([attr.class("text-xs text-zinc-500 mt-1")], [
+            html.text(
+              "Only fill this if you want a specific short code. Otherwise, a random one will be generated.",
+            ),
           ]),
         ]),
-        html.input([
-          attr.class("w-full px-3 py-2 bg-zinc-700 border border-zinc-600 rounded-md text-zinc-100 focus:outline-none focus:border-pink-500"),
-          attr.placeholder("Leave empty for random code"),
-          attr.type_("text"),
-          attr.value(model.short_url_form_short_code),
-          event.on_input(ShortUrlFormShortCodeUpdated),
-        ]),
-        html.p([attr.class("text-xs text-zinc-500 mt-1")], [
-          html.text("Only fill this if you want a specific short code. Otherwise, a random one will be generated."),
-        ]),
+        html.button(
+          [
+            attr.class(
+              case validate_target_url(model.short_url_form_target_url) {
+                #(True, None) ->
+                  "w-full px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700 transition-colors"
+                _ ->
+                  "w-full px-4 py-2 bg-gray-600 text-gray-300 rounded-md cursor-not-allowed"
+              },
+            ),
+            attr.disabled(
+              case validate_target_url(model.short_url_form_target_url) {
+                #(True, None) -> False
+                _ -> True
+              },
+            ),
+            event.on_mouse_down(ShortUrlCreateClicked(
+              model.short_url_form_short_code,
+              model.short_url_form_target_url,
+            )),
+          ],
+          [html.text("Create Short URL")],
+        ),
       ]),
-      html.button(
-        [
-          attr.class(case validate_target_url(model.short_url_form_target_url) {
-            #(True, None) -> "w-full px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700 transition-colors"
-            _ -> "w-full px-4 py-2 bg-gray-600 text-gray-300 rounded-md cursor-not-allowed"
-          }),
-          attr.disabled(case validate_target_url(model.short_url_form_target_url) {
-            #(True, None) -> False
-            _ -> True
-          }),
-          event.on_mouse_down(ShortUrlCreateClicked(model.short_url_form_short_code, model.short_url_form_target_url)),
-        ],
-        [html.text("Create Short URL")],
-      ),
-    ]),
-  ])
+    ],
+  )
 }
 
 fn view_url_list(model: Model) -> Element(Msg) {
   case model.short_urls {
-    NotInitialized -> html.div([attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")], [
-      html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
-        html.text("URLs"),
-      ]),
-      html.div([attr.class("text-center py-12")], [
-        html.div([attr.class("text-zinc-400 text-lg")], [
-          html.text("Loading..."),
-        ]),
-      ]),
-    ])
-    Pending -> html.div([attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")], [
-      html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
-        html.text("URLs"),
-      ]),
-      html.div([attr.class("text-center py-12")], [
-        html.div([attr.class("text-zinc-400 text-lg")], [
-          html.text("Loading..."),
-        ]),
-      ]),
-    ])
+    NotInitialized ->
+      html.div(
+        [attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")],
+        [
+          html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
+            html.text("URLs"),
+          ]),
+          ui.loading_indicator_small(),
+        ],
+      )
+    Pending ->
+      html.div(
+        [attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")],
+        [
+          html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
+            html.text("URLs"),
+          ]),
+          ui.loading_indicator_small(),
+        ],
+      )
     Loaded(short_urls) -> {
       case short_urls {
-        [] -> html.div([attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")], [
+        [] ->
+          html.div(
+            [
+              attr.class(
+                "mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700",
+              ),
+            ],
+            [
+              html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
+                html.text("URLs"),
+              ]),
+              html.div([attr.class("text-center py-12")], [
+                html.div([attr.class("text-zinc-400 text-lg mb-2")], [
+                  html.text("No short URLs created yet."),
+                ]),
+                html.div([attr.class("text-zinc-500 text-sm")], [
+                  html.text("Create your first short URL using the form above."),
+                ]),
+              ]),
+            ],
+          )
+        _ -> {
+          let url_elements =
+            list.map(short_urls, fn(url) {
+              let is_expanded = set.contains(model.expanded_urls, url.id)
+
+              case is_expanded {
+                True -> view_expanded_url_card(model, url)
+                False -> view_compact_url_card(model, url)
+              }
+            })
+          html.div(
+            [
+              attr.class(
+                "mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700",
+              ),
+            ],
+            [
+              html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
+                html.text("URLs"),
+              ]),
+              html.ul(
+                [attr.class("space-y-2"), attr.role("list")],
+                url_elements,
+              ),
+              case model.delete_confirmation {
+                Some(delete_id) ->
+                  view_delete_confirmation(delete_id, short_urls)
+                None -> element.none()
+              },
+            ],
+          )
+        }
+      }
+    }
+    Errored(error) ->
+      html.div(
+        [attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")],
+        [
           html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
             html.text("URLs"),
           ]),
           html.div([attr.class("text-center py-12")], [
-            html.div([attr.class("text-zinc-400 text-lg mb-2")], [
-              html.text("No short URLs created yet.")
+            html.div([attr.class("text-red-400 text-lg mb-2")], [
+              html.text("Error loading short URLs"),
             ]),
             html.div([attr.class("text-zinc-500 text-sm")], [
-              html.text("Create your first short URL using the form above.")
-            ])
-          ]),
-        ])
-        _ -> {
-          let url_elements = list.map(short_urls, fn(url) {
-            let is_expanded = set.contains(model.expanded_urls, url.id)
-            
-            case is_expanded {
-              True -> view_expanded_url_card(model, url)
-              False -> view_compact_url_card(model, url)
-            }
-          })
-          html.div([attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")], [
-            html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
-              html.text("URLs"),
+              html.text(error_string.http_error(error)),
             ]),
-            html.ul([
-              attr.class("space-y-2"),
-              attr.role("list")
-            ], url_elements),
-            case model.delete_confirmation {
-              Some(delete_id) -> view_delete_confirmation(delete_id, short_urls)
-              None -> element.none()
-            }
-          ])
-        }
-      }
-    }
-    Errored(error) -> html.div([attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")], [
-      html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
-        html.text("URLs"),
-      ]),
-      html.div([attr.class("text-center py-12")], [
-        html.div([attr.class("text-red-400 text-lg mb-2")], [
-          html.text("Error loading short URLs")
-        ]),
-        html.div([attr.class("text-zinc-500 text-sm")], [
-          html.text(error_string.http_error(error))
-        ])
-      ]),
-    ])
-    Optimistic(_) -> html.div([attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")], [
-      html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
-        html.text("URLs"),
-      ]),
-      html.div([attr.class("text-center py-12")], [
-        html.div([attr.class("text-zinc-400 text-lg")], [
-          html.text("Loading..."),
-        ]),
-      ]),
-    ])
+          ]),
+        ],
+      )
+    Optimistic(_) ->
+      html.div(
+        [attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")],
+        [
+          html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
+            html.text("URLs"),
+          ]),
+          ui.loading_indicator_small(),
+        ],
+      )
   }
 }
 
 fn view_compact_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
-  html.li([
-    attr.class("bg-zinc-800 border border-zinc-700 rounded-lg transition-colors"),
-  ], [
-    // Fixed header section that stays in place
-    html.div([
-      attr.class("flex items-center justify-between p-4"),
-    ], [
-      html.div([attr.class("flex items-center space-x-4 flex-1 min-w-0")], [
-        // Short URL - clickable to copy
-        html.button([
-          attr.class("font-mono text-sm font-medium text-zinc-100 hover:text-pink-300 transition-colors cursor-pointer"),
-          event.on_mouse_down(ShortUrlCopyClicked(url.short_code)),
-          attr.title("Click to copy short URL")
-        ], [
-          html.span([attr.class("text-zinc-500")], [html.text("u.jst.dev/")]),
-          html.span([attr.class("text-pink-400")], [html.text(url.short_code)]),
-          case model.copy_feedback == Some(url.short_code) {
-            True -> html.span([attr.class("ml-2 text-green-400 text-xs")], [html.text("✓ Copied!")])
-            False -> element.none()
-          }
+  html.li(
+    [
+      attr.class(
+        "bg-zinc-800 border border-zinc-700 rounded-lg transition-colors",
+      ),
+    ],
+    [
+      // Fixed header section that stays in place
+      html.div([attr.class("flex items-center justify-between p-4")], [
+        html.div([attr.class("flex items-center space-x-4 flex-1 min-w-0")], [
+          // Short URL - clickable to copy
+          html.button(
+            [
+              attr.class(
+                "font-mono text-sm font-medium text-zinc-100 hover:text-pink-300 transition-colors cursor-pointer",
+              ),
+              event.on_mouse_down(ShortUrlCopyClicked(url.short_code)),
+              attr.title("Click to copy short URL"),
+            ],
+            [
+              html.span([attr.class("text-zinc-500")], [html.text("u.jst.dev/")]),
+              html.span([attr.class("text-pink-400")], [
+                html.text(url.short_code),
+              ]),
+              case model.copy_feedback == Some(url.short_code) {
+                True ->
+                  html.span([attr.class("ml-2 text-green-400 text-xs")], [
+                    html.text("✓ Copied!"),
+                  ])
+                False -> element.none()
+              },
+            ],
+          ),
+          // Target URL (truncated) - clickable to expand
+          html.div(
+            [
+              attr.class(
+                "text-sm text-zinc-400 truncate flex-1 cursor-pointer hover:text-zinc-300 transition-colors",
+              ),
+              attr.title(url.target_url),
+              event.on_mouse_down(ShortUrlToggleExpanded(url.id)),
+            ],
+            [
+              html.span([attr.class("text-zinc-600")], [html.text("→ ")]),
+              html.text(url.target_url),
+            ],
+          ),
+          // Status badge - clickable to toggle active state
+          html.button(
+            [
+              attr.class(case url.is_active {
+                True ->
+                  "inline-flex shrink-0 items-center rounded-full bg-green-600/20 px-2 py-1 text-xs font-medium text-green-400 ring-1 ring-inset ring-green-600/30 cursor-pointer hover:bg-green-600/30 transition-colors"
+                False ->
+                  "inline-flex shrink-0 items-center rounded-full bg-red-600/20 px-2 py-1 text-xs font-medium text-red-400 ring-1 ring-inset ring-red-600/30 cursor-pointer hover:bg-red-600/30 transition-colors"
+              }),
+              event.on_mouse_down(ShortUrlToggleActiveClicked(
+                url.id,
+                url.is_active,
+              )),
+              attr.title("Toggle active/inactive"),
+            ],
+            [
+              html.text(case url.is_active {
+                True -> "Active"
+                False -> "Inactive"
+              }),
+            ],
+          ),
+          // Access count - clickable to expand
+          html.div(
+            [
+              attr.class(
+                "text-xs text-zinc-500 shrink-0 cursor-pointer hover:text-zinc-400 transition-colors",
+              ),
+              event.on_mouse_down(ShortUrlToggleExpanded(url.id)),
+            ],
+            [html.text(int.to_string(url.access_count) <> " clicks")],
+          ),
         ]),
-        
-        // Target URL (truncated) - clickable to expand
-        html.div([
-          attr.class("text-sm text-zinc-400 truncate flex-1 cursor-pointer hover:text-zinc-300 transition-colors"),
-          attr.title(url.target_url),
-          event.on_mouse_down(ShortUrlToggleExpanded(url.id))
-        ], [
-          html.span([attr.class("text-zinc-600")], [html.text("→ ")]),
-          html.text(url.target_url)
-        ]),
-        
-        // Status badge - clickable to toggle active state
-        html.button([
-          attr.class(case url.is_active {
-            True -> "inline-flex shrink-0 items-center rounded-full bg-green-600/20 px-2 py-1 text-xs font-medium text-green-400 ring-1 ring-inset ring-green-600/30 cursor-pointer hover:bg-green-600/30 transition-colors"
-            False -> "inline-flex shrink-0 items-center rounded-full bg-red-600/20 px-2 py-1 text-xs font-medium text-red-400 ring-1 ring-inset ring-red-600/30 cursor-pointer hover:bg-red-600/30 transition-colors"
-          }),
-          event.on_mouse_down(ShortUrlToggleActiveClicked(url.id, url.is_active)),
-          attr.title("Toggle active/inactive")
-        ], [html.text(case url.is_active {
-          True -> "Active"
-          False -> "Inactive"
-        })]),
-        
-        // Access count - clickable to expand
-        html.div([
-          attr.class("text-xs text-zinc-500 shrink-0 cursor-pointer hover:text-zinc-400 transition-colors"),
-          event.on_mouse_down(ShortUrlToggleExpanded(url.id))
-        ], [
-          html.text(int.to_string(url.access_count) <> " clicks")
-        ]),
+        // Expand indicator - clickable to expand
+        html.div(
+          [
+            attr.class(
+              "flex items-center space-x-2 ml-4 cursor-pointer hover:text-zinc-300 transition-colors",
+            ),
+            event.on_mouse_down(ShortUrlToggleExpanded(url.id)),
+          ],
+          [html.div([attr.class("text-zinc-500 text-sm")], [html.text("▼")])],
+        ),
       ]),
-      
-      // Expand indicator - clickable to expand
-      html.div([
-        attr.class("flex items-center space-x-2 ml-4 cursor-pointer hover:text-zinc-300 transition-colors"),
-        event.on_mouse_down(ShortUrlToggleExpanded(url.id))
-      ], [
-        html.div([attr.class("text-zinc-500 text-sm")], [
-          html.text("▼")
-        ])
-      ])
-    ])
-  ])
+    ],
+  )
 }
 
 fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
-  html.li([
-    attr.class("bg-zinc-800 border border-zinc-700 rounded-lg transition-colors"),
-  ], [
-    // Fixed header section - identical to compact view
-    html.div([
-      attr.class("flex items-center justify-between p-4"),
-    ], [
-      html.div([attr.class("flex items-center space-x-4 flex-1 min-w-0")], [
-        // Short URL - clickable to copy
-        html.button([
-          attr.class("font-mono text-sm font-medium text-zinc-100 hover:text-pink-300 transition-colors cursor-pointer"),
-          event.on_mouse_down(ShortUrlCopyClicked(url.short_code)),
-          attr.title("Click to copy short URL")
-        ], [
-          html.span([attr.class("text-zinc-500")], [html.text("u.jst.dev/")]),
-          html.span([attr.class("text-pink-400")], [html.text(url.short_code)]),
-          case model.copy_feedback == Some(url.short_code) {
-            True -> html.span([attr.class("ml-2 text-green-400 text-xs")], [html.text("✓ Copied!")])
-            False -> element.none()
-          }
+  html.li(
+    [
+      attr.class(
+        "bg-zinc-800 border border-zinc-700 rounded-lg transition-colors",
+      ),
+    ],
+    [
+      // Fixed header section - identical to compact view
+      html.div([attr.class("flex items-center justify-between p-4")], [
+        html.div([attr.class("flex items-center space-x-4 flex-1 min-w-0")], [
+          // Short URL - clickable to copy
+          html.button(
+            [
+              attr.class(
+                "font-mono text-sm font-medium text-zinc-100 hover:text-pink-300 transition-colors cursor-pointer",
+              ),
+              event.on_mouse_down(ShortUrlCopyClicked(url.short_code)),
+              attr.title("Click to copy short URL"),
+            ],
+            [
+              html.span([attr.class("text-zinc-500")], [html.text("u.jst.dev/")]),
+              html.span([attr.class("text-pink-400")], [
+                html.text(url.short_code),
+              ]),
+              case model.copy_feedback == Some(url.short_code) {
+                True ->
+                  html.span([attr.class("ml-2 text-green-400 text-xs")], [
+                    html.text("✓ Copied!"),
+                  ])
+                False -> element.none()
+              },
+            ],
+          ),
+          // Target URL (truncated) - shows same as compact
+          html.div(
+            [
+              attr.class("text-sm text-zinc-400 truncate flex-1"),
+              attr.title(url.target_url),
+            ],
+            [
+              html.span([attr.class("text-zinc-600")], [html.text("→ ")]),
+              html.text(url.target_url),
+            ],
+          ),
+          // Status badge - clickable to toggle active state
+          html.button(
+            [
+              attr.class(case url.is_active {
+                True ->
+                  "inline-flex shrink-0 items-center rounded-full bg-green-600/20 px-2 py-1 text-xs font-medium text-green-400 ring-1 ring-inset ring-green-600/30 cursor-pointer hover:bg-green-600/30 transition-colors"
+                False ->
+                  "inline-flex shrink-0 items-center rounded-full bg-red-600/20 px-2 py-1 text-xs font-medium text-red-400 ring-1 ring-inset ring-red-600/30 cursor-pointer hover:bg-red-600/30 transition-colors"
+              }),
+              event.on_mouse_down(ShortUrlToggleActiveClicked(
+                url.id,
+                url.is_active,
+              )),
+              attr.title("Toggle active/inactive"),
+            ],
+            [
+              html.text(case url.is_active {
+                True -> "Active"
+                False -> "Inactive"
+              }),
+            ],
+          ),
+          // Access count - same as compact
+          html.div([attr.class("text-xs text-zinc-500 shrink-0")], [
+            html.text(int.to_string(url.access_count) <> " clicks"),
+          ]),
         ]),
-        
-        // Target URL (truncated) - shows same as compact
-        html.div([
-          attr.class("text-sm text-zinc-400 truncate flex-1"),
-          attr.title(url.target_url)
-        ], [
-          html.span([attr.class("text-zinc-600")], [html.text("→ ")]),
-          html.text(url.target_url)
+        // Collapse indicator
+        html.div(
+          [
+            attr.class(
+              "flex items-center space-x-2 ml-4 cursor-pointer hover:text-zinc-300 transition-colors",
+            ),
+            event.on_mouse_down(ShortUrlToggleExpanded(url.id)),
+          ],
+          [html.div([attr.class("text-zinc-500 text-sm")], [html.text("▲")])],
+        ),
+      ]),
+      // Additional expanded content
+      html.div([attr.class("px-4 pb-4")], [
+        // Full Target URL section
+        html.div([attr.class("mb-4 pt-2 border-t border-zinc-700")], [
+          html.div([attr.class("text-sm text-zinc-500 mb-2")], [
+            html.text("Target URL:"),
+          ]),
+          html.div(
+            [
+              attr.class(
+                "text-zinc-300 break-all bg-zinc-900 rounded px-3 py-2 text-sm cursor-pointer hover:bg-zinc-850 transition-colors",
+              ),
+              attr.title(url.target_url <> " (click to collapse)"),
+              event.on_mouse_down(ShortUrlToggleExpanded(url.id)),
+            ],
+            [html.text(url.target_url)],
+          ),
         ]),
-        
-                 // Status badge - clickable to toggle active state
-         html.button([
-           attr.class(case url.is_active {
-             True -> "inline-flex shrink-0 items-center rounded-full bg-green-600/20 px-2 py-1 text-xs font-medium text-green-400 ring-1 ring-inset ring-green-600/30 cursor-pointer hover:bg-green-600/30 transition-colors"
-             False -> "inline-flex shrink-0 items-center rounded-full bg-red-600/20 px-2 py-1 text-xs font-medium text-red-400 ring-1 ring-inset ring-red-600/30 cursor-pointer hover:bg-red-600/30 transition-colors"
-           }),
-           event.on_mouse_down(ShortUrlToggleActiveClicked(url.id, url.is_active)),
-           attr.title("Toggle active/inactive")
-         ], [html.text(case url.is_active {
-           True -> "Active"
-           False -> "Inactive"
-         })]),
-        
-        // Access count - same as compact
-        html.div([attr.class("text-xs text-zinc-500 shrink-0")], [
-          html.text(int.to_string(url.access_count) <> " clicks")
+        // Metadata grid
+        html.div([attr.class("grid grid-cols-2 gap-4 text-sm mb-4")], [
+          html.div([attr.class("space-y-2")], [
+            html.div([attr.class("flex justify-between")], [
+              html.span([attr.class("text-zinc-500")], [
+                html.text("Created By:"),
+              ]),
+              html.span([attr.class("text-zinc-300")], [
+                html.text(url.created_by),
+              ]),
+            ]),
+            html.div([attr.class("flex justify-between")], [
+              html.span([attr.class("text-zinc-500")], [
+                html.text("Access Count:"),
+              ]),
+              html.span([attr.class("text-zinc-300 font-mono")], [
+                html.text(int.to_string(url.access_count)),
+              ]),
+            ]),
+          ]),
+          html.div([attr.class("space-y-2")], [
+            html.div([attr.class("flex justify-between")], [
+              html.span([attr.class("text-zinc-500")], [html.text("Created:")]),
+              html.span([attr.class("text-zinc-300")], [
+                html.text(
+                  birl.from_unix_milli(url.created_at * 1000)
+                  |> birl.to_naive_date_string,
+                ),
+              ]),
+            ]),
+            html.div([attr.class("flex justify-between")], [
+              html.span([attr.class("text-zinc-500")], [html.text("Updated:")]),
+              html.span([attr.class("text-zinc-300")], [
+                html.text(
+                  birl.from_unix_milli(url.updated_at * 1000)
+                  |> birl.to_naive_date_string,
+                ),
+              ]),
+            ]),
+          ]),
+        ]),
+        // Action buttons
+        html.div([attr.class("flex gap-2")], [
+          html.button(
+            [
+              attr.class(
+                "flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-100 bg-blue-600 hover:bg-blue-700 rounded transition-colors",
+              ),
+              event.on_mouse_down(ShortUrlCopyClicked(url.short_code)),
+            ],
+            [
+              html.div([attr.class("text-sm")], [html.text("📋")]),
+              html.text(case model.copy_feedback == Some(url.short_code) {
+                True -> "Copied!"
+                False -> "Copy URL"
+              }),
+            ],
+          ),
+          html.button(
+            [
+              attr.class(case url.is_active {
+                True ->
+                  "flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-100 bg-orange-600 hover:bg-orange-700 rounded transition-colors"
+                False ->
+                  "flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-100 bg-green-600 hover:bg-green-700 rounded transition-colors"
+              }),
+              event.on_mouse_down(ShortUrlToggleActiveClicked(
+                url.id,
+                url.is_active,
+              )),
+            ],
+            [
+              html.div([attr.class("text-sm")], [
+                html.text(case url.is_active {
+                  True -> "⏸"
+                  False -> "▶"
+                }),
+              ]),
+              html.text(case url.is_active {
+                True -> "Deactivate"
+                False -> "Activate"
+              }),
+            ],
+          ),
+          html.button(
+            [
+              attr.class(
+                "flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-100 bg-red-600 hover:bg-red-700 rounded transition-colors",
+              ),
+              event.on_mouse_down(ShortUrlDeleteClicked(url.id)),
+            ],
+            [
+              html.div([attr.class("text-sm")], [html.text("🗑")]),
+              html.text("Delete"),
+            ],
+          ),
         ]),
       ]),
-      
-      // Collapse indicator
-      html.div([
-        attr.class("flex items-center space-x-2 ml-4 cursor-pointer hover:text-zinc-300 transition-colors"),
-        event.on_mouse_down(ShortUrlToggleExpanded(url.id))
-      ], [
-        html.div([attr.class("text-zinc-500 text-sm")], [
-          html.text("▲")
-        ])
-      ])
-    ]),
-    
-    // Additional expanded content
-    html.div([
-      attr.class("px-4 pb-4"),
-    ], [
-             // Full Target URL section
-       html.div([attr.class("mb-4 pt-2 border-t border-zinc-700")], [
-         html.div([attr.class("text-sm text-zinc-500 mb-2")], [html.text("Target URL:")]),
-         html.div([
-           attr.class("text-zinc-300 break-all bg-zinc-900 rounded px-3 py-2 text-sm cursor-pointer hover:bg-zinc-850 transition-colors"),
-           attr.title(url.target_url <> " (click to collapse)"),
-           event.on_mouse_down(ShortUrlToggleExpanded(url.id))
-         ], [html.text(url.target_url)])
-       ]),
-      
-      // Metadata grid
-      html.div([attr.class("grid grid-cols-2 gap-4 text-sm mb-4")], [
-        html.div([attr.class("space-y-2")], [
-          html.div([attr.class("flex justify-between")], [
-            html.span([attr.class("text-zinc-500")], [html.text("Created By:")]),
-            html.span([attr.class("text-zinc-300")], [html.text(url.created_by)]),
-          ]),
-          html.div([attr.class("flex justify-between")], [
-            html.span([attr.class("text-zinc-500")], [html.text("Access Count:")]),
-            html.span([attr.class("text-zinc-300 font-mono")], [html.text(int.to_string(url.access_count))]),
-          ]),
-        ]),
-        html.div([attr.class("space-y-2")], [
-          html.div([attr.class("flex justify-between")], [
-            html.span([attr.class("text-zinc-500")], [html.text("Created:")]),
-            html.span([attr.class("text-zinc-300")], [html.text(birl.from_unix_milli(url.created_at * 1000) |> birl.to_naive_date_string)]),
-          ]),
-          html.div([attr.class("flex justify-between")], [
-            html.span([attr.class("text-zinc-500")], [html.text("Updated:")]),
-            html.span([attr.class("text-zinc-300")], [html.text(birl.from_unix_milli(url.updated_at * 1000) |> birl.to_naive_date_string)]),
-          ]),
-        ])
-      ]),
-      
-      // Action buttons
-      html.div([
-        attr.class("flex gap-2"),
-      ], [
-        html.button([
-          attr.class("flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-100 bg-blue-600 hover:bg-blue-700 rounded transition-colors"),
-          event.on_mouse_down(ShortUrlCopyClicked(url.short_code)),
-        ], [
-          html.div([attr.class("text-sm")], [html.text("📋")]),
-          html.text(case model.copy_feedback == Some(url.short_code) {
-            True -> "Copied!"
-            False -> "Copy URL"
-          })
-        ]),
-        html.button([
-          attr.class(case url.is_active {
-            True -> "flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-100 bg-orange-600 hover:bg-orange-700 rounded transition-colors"
-            False -> "flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-100 bg-green-600 hover:bg-green-700 rounded transition-colors"
-          }),
-          event.on_mouse_down(ShortUrlToggleActiveClicked(url.id, url.is_active)),
-        ], [
-          html.div([attr.class("text-sm")], [html.text(case url.is_active {
-            True -> "⏸"
-            False -> "▶"
-          })]),
-          html.text(case url.is_active {
-            True -> "Deactivate"
-            False -> "Activate"
-          })
-        ]),
-        html.button([
-          attr.class("flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-100 bg-red-600 hover:bg-red-700 rounded transition-colors"),
-          event.on_mouse_down(ShortUrlDeleteClicked(url.id)),
-        ], [
-          html.div([attr.class("text-sm")], [html.text("🗑")]),
-          html.text("Delete")
-        ]),
-      ])
-    ])
-  ])
+    ],
+  )
 }
 
-fn view_delete_confirmation(delete_id: String, short_urls: List(ShortUrl)) -> Element(Msg) {
-  let url_to_delete = case list.find(short_urls, fn(url) { url.id == delete_id }) {
+fn view_delete_confirmation(
+  delete_id: String,
+  short_urls: List(ShortUrl),
+) -> Element(Msg) {
+  let url_to_delete = case
+    list.find(short_urls, fn(url) { url.id == delete_id })
+  {
     Ok(url) -> url.short_code
     Error(_) -> "unknown"
   }
-  
-  html.div([
-    attr.class("fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50")
-  ], [
-    html.div([
-      attr.class("bg-zinc-800 rounded-lg p-6 max-w-md w-full mx-4 border border-zinc-700")
-    ], [
-      html.h3([attr.class("text-lg font-medium text-white mb-4")], [
-        html.text("Delete Short URL")
-      ]),
-      html.p([attr.class("text-zinc-300 mb-6")], [
-        html.text("Are you sure you want to delete the short URL "),
-        html.span([attr.class("font-mono text-pink-400")], [html.text("u.jst.dev/" <> url_to_delete)]),
-        html.text("? This action cannot be undone.")
-      ]),
-      html.div([attr.class("flex gap-3 justify-end")], [
-        html.button([
-          attr.class("px-4 py-2 bg-zinc-600 text-white rounded hover:bg-zinc-700 transition-colors"),
-          event.on_mouse_down(ShortUrlDeleteCancelClicked)
-        ], [html.text("Cancel")]),
-        html.button([
-          attr.class("px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"),
-          event.on_mouse_down(ShortUrlDeleteConfirmClicked(delete_id))
-        ], [html.text("Delete")])
-      ])
-    ])
-  ])
+
+  html.div(
+    [
+      attr.class(
+        "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50",
+      ),
+    ],
+    [
+      html.div(
+        [
+          attr.class(
+            "bg-zinc-800 rounded-lg p-6 max-w-md w-full mx-4 border border-zinc-700",
+          ),
+        ],
+        [
+          html.h3([attr.class("text-lg font-medium text-white mb-4")], [
+            html.text("Delete Short URL"),
+          ]),
+          html.p([attr.class("text-zinc-300 mb-6")], [
+            html.text("Are you sure you want to delete the short URL "),
+            html.span([attr.class("font-mono text-pink-400")], [
+              html.text("u.jst.dev/" <> url_to_delete),
+            ]),
+            html.text("? This action cannot be undone."),
+          ]),
+          html.div([attr.class("flex gap-3 justify-end")], [
+            html.button(
+              [
+                attr.class(
+                  "px-4 py-2 bg-zinc-600 text-white rounded hover:bg-zinc-700 transition-colors",
+                ),
+                event.on_mouse_down(ShortUrlDeleteCancelClicked),
+              ],
+              [html.text("Cancel")],
+            ),
+            html.button(
+              [
+                attr.class(
+                  "px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors",
+                ),
+                event.on_mouse_down(ShortUrlDeleteConfirmClicked(delete_id)),
+              ],
+              [html.text("Delete")],
+            ),
+          ]),
+        ],
+      ),
+    ],
+  )
 }
 
 fn view_url_info_page(model: Model, short_code: String) -> List(Element(Msg)) {
@@ -2585,87 +2875,145 @@ fn view_url_info_page(model: Model, short_code: String) -> List(Element(Msg)) {
       case list.find(urls, fn(url) { url.short_code == short_code }) {
         Ok(url) -> [
           view_title("URL Info", "url-info"),
-          html.div([attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")], [
-            html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
-              html.text("URL Details"),
-            ]),
-            html.div([attr.class("space-y-4 text-zinc-300")], [
-              html.div([attr.class("flex justify-between items-center")], [
-                html.span([attr.class("text-zinc-500")], [html.text("Short Code:")]),
-                html.span([attr.class("font-mono text-pink-700")], [html.text(url.short_code)]),
-              ]),
-              html.div([attr.class("flex justify-between items-center")], [
-                html.span([attr.class("text-zinc-500")], [html.text("Target URL:")]),
-                html.span([attr.class("break-all")], [html.text(url.target_url)]),
-              ]),
-              html.div([attr.class("flex justify-between items-center")], [
-                html.span([attr.class("text-zinc-500")], [html.text("Created By:")]),
-                html.span([], [html.text(url.created_by)]),
-              ]),
-              html.div([attr.class("flex justify-between items-center")], [
-                html.span([attr.class("text-zinc-500")], [html.text("Created:")]),
-                html.span([], [html.text(birl.from_unix_milli(url.created_at * 1000) |> birl.to_naive_date_string)]),
-              ]),
-              html.div([attr.class("flex justify-between items-center")], [
-                html.span([attr.class("text-zinc-500")], [html.text("Updated:")]),
-                html.span([], [html.text(birl.from_unix_milli(url.updated_at * 1000) |> birl.to_naive_date_string)]),
-              ]),
-              html.div([attr.class("flex justify-between items-center")], [
-                html.span([attr.class("text-zinc-500")], [html.text("Access Count:")]),
-                html.span([], [html.text(int.to_string(url.access_count))]),
-              ]),
-              html.div([attr.class("flex justify-between items-center")], [
-                html.span([attr.class("text-zinc-500")], [html.text("Status:")]),
-                case url.is_active {
-                  True -> {
-                    html.span([attr.class("text-green-400")], [html.text("Active")])
-                  }
-                  False -> {
-                    html.span([attr.class("text-red-400")], [html.text("Inactive")])
-                  }
-                }
-              ]),
-            ]),
-            html.div([attr.class("mt-6 flex gap-4")], [
-              html.button(
-                [
-                  attr.class("px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"),
-                  event.on_mouse_down(UserMouseDownNavigation(routes.to_uri(routes.UrlShortIndex))),
-                ],
-                [html.text("Back to URLs")],
+          html.div(
+            [
+              attr.class(
+                "mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700",
               ),
-              html.button(
-                [
-                  attr.class("px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors"),
-                  event.on_mouse_down(ShortUrlCopyClicked(url.short_code)),
-                ],
-                [html.text(case model.copy_feedback == Some(url.short_code) {
-                  True -> "Copied!"
-                  False -> "Copy URL"
-                })],
-              ),
-              html.button(
-                [
-                  attr.class(case url.is_active {
-                    True -> "px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 transition-colors"
-                    False -> "px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
-                  }),
-                  event.on_mouse_down(ShortUrlToggleActiveClicked(url.id, url.is_active)),
-                ],
-                [html.text(case url.is_active {
-                  True -> "Deactivate"
-                  False -> "Activate"
-                })],
-              ),
-              html.button(
-                [
-                  attr.class("px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"),
-                  event.on_mouse_down(ShortUrlDeleteClicked(url.id)),
-                ],
-                [html.text("Delete URL")],
-              ),
-            ])
-          ])
+            ],
+            [
+              html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
+                html.text("URL Details"),
+              ]),
+              html.div([attr.class("space-y-4 text-zinc-300")], [
+                html.div([attr.class("flex justify-between items-center")], [
+                  html.span([attr.class("text-zinc-500")], [
+                    html.text("Short Code:"),
+                  ]),
+                  html.span([attr.class("font-mono text-pink-700")], [
+                    html.text(url.short_code),
+                  ]),
+                ]),
+                html.div([attr.class("flex justify-between items-center")], [
+                  html.span([attr.class("text-zinc-500")], [
+                    html.text("Target URL:"),
+                  ]),
+                  html.span([attr.class("break-all")], [
+                    html.text(url.target_url),
+                  ]),
+                ]),
+                html.div([attr.class("flex justify-between items-center")], [
+                  html.span([attr.class("text-zinc-500")], [
+                    html.text("Created By:"),
+                  ]),
+                  html.span([], [html.text(url.created_by)]),
+                ]),
+                html.div([attr.class("flex justify-between items-center")], [
+                  html.span([attr.class("text-zinc-500")], [
+                    html.text("Created:"),
+                  ]),
+                  html.span([], [
+                    html.text(
+                      birl.from_unix_milli(url.created_at * 1000)
+                      |> birl.to_naive_date_string,
+                    ),
+                  ]),
+                ]),
+                html.div([attr.class("flex justify-between items-center")], [
+                  html.span([attr.class("text-zinc-500")], [
+                    html.text("Updated:"),
+                  ]),
+                  html.span([], [
+                    html.text(
+                      birl.from_unix_milli(url.updated_at * 1000)
+                      |> birl.to_naive_date_string,
+                    ),
+                  ]),
+                ]),
+                html.div([attr.class("flex justify-between items-center")], [
+                  html.span([attr.class("text-zinc-500")], [
+                    html.text("Access Count:"),
+                  ]),
+                  html.span([], [html.text(int.to_string(url.access_count))]),
+                ]),
+                html.div([attr.class("flex justify-between items-center")], [
+                  html.span([attr.class("text-zinc-500")], [
+                    html.text("Status:"),
+                  ]),
+                  case url.is_active {
+                    True -> {
+                      html.span([attr.class("text-green-400")], [
+                        html.text("Active"),
+                      ])
+                    }
+                    False -> {
+                      html.span([attr.class("text-red-400")], [
+                        html.text("Inactive"),
+                      ])
+                    }
+                  },
+                ]),
+              ]),
+              html.div([attr.class("mt-6 flex gap-4")], [
+                html.button(
+                  [
+                    attr.class(
+                      "px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors",
+                    ),
+                    event.on_mouse_down(
+                      UserMouseDownNavigation(routes.to_uri(
+                        routes.UrlShortIndex,
+                      )),
+                    ),
+                  ],
+                  [html.text("Back to URLs")],
+                ),
+                html.button(
+                  [
+                    attr.class(
+                      "px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors",
+                    ),
+                    event.on_mouse_down(ShortUrlCopyClicked(url.short_code)),
+                  ],
+                  [
+                    html.text(case model.copy_feedback == Some(url.short_code) {
+                      True -> "Copied!"
+                      False -> "Copy URL"
+                    }),
+                  ],
+                ),
+                html.button(
+                  [
+                    attr.class(case url.is_active {
+                      True ->
+                        "px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 transition-colors"
+                      False ->
+                        "px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+                    }),
+                    event.on_mouse_down(ShortUrlToggleActiveClicked(
+                      url.id,
+                      url.is_active,
+                    )),
+                  ],
+                  [
+                    html.text(case url.is_active {
+                      True -> "Deactivate"
+                      False -> "Activate"
+                    }),
+                  ],
+                ),
+                html.button(
+                  [
+                    attr.class(
+                      "px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors",
+                    ),
+                    event.on_mouse_down(ShortUrlDeleteClicked(url.id)),
+                  ],
+                  [html.text("Delete URL")],
+                ),
+              ]),
+            ],
+          ),
         ]
         Error(_) -> [
           view_title("URL Not Found", "url-not-found"),
@@ -2851,7 +3199,9 @@ fn view_leading(text: String, slug: String) -> Element(msg) {
   html.p(
     [
       attr.id("article-lead-" <> slug),
-      attr.class("font-medium text-zinc-300 pt-6 md:pt-8 border-b border-zinc-800 pb-4"),
+      attr.class(
+        "font-medium text-zinc-300 pt-6 md:pt-8 border-b border-zinc-800 pb-4",
+      ),
       attr.class("article-leading"),
     ],
     [html.text(text)],
@@ -2877,7 +3227,7 @@ fn view_simple_paragraph(text: String) -> Element(Msg) {
 }
 
 fn view_error(error_string: String) -> Element(Msg) {
-  html.p([attr.class("pt-8 text-orange-500")], [html.text(error_string)])
+  ui.error_state(ui.ErrorGeneric, "Something went wrong", error_string, None)
 }
 
 fn view_link(url: Uri, title: String) -> Element(Msg) {
@@ -2919,10 +3269,7 @@ fn view_link(url: Uri, title: String) -> Element(Msg) {
 // Content editor functions removed - now using simple Djot textarea
 
 fn view_article_listing_loading() -> List(Element(Msg)) {
-  [
-    view_title("Articles", "articles"),
-    view_simple_paragraph("Loading articles..."),
-  ]
+  [view_title("Articles", "articles"), ui.loading_indicator_small()]
 }
 
 fn view_internal_link(uri: Uri, content: List(Element(Msg))) -> Element(Msg) {

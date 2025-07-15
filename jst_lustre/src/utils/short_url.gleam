@@ -1,8 +1,8 @@
 import gleam/dynamic/decode.{type Decoder}
 import gleam/http as gleam_http
 import gleam/http/request
-import gleam/json.{type Json}
 import gleam/int
+import gleam/json.{type Json}
 import gleam/option.{None, Some}
 import gleam/uri.{type Uri}
 import lustre/effect.{type Effect}
@@ -24,10 +24,7 @@ pub type ShortUrl {
 }
 
 pub type ShortUrlCreateRequest {
-  ShortUrlCreateRequest(
-    short_code: String,
-    target_url: String,
-  )
+  ShortUrlCreateRequest(short_code: String, target_url: String)
 }
 
 pub type ShortUrlListResponse {
@@ -40,10 +37,7 @@ pub type ShortUrlListResponse {
 }
 
 pub type ShortUrlUpdateRequest {
-  ShortUrlUpdateRequest(
-    id: String,
-    is_active: option.Option(Bool),
-  )
+  ShortUrlUpdateRequest(id: String, is_active: option.Option(Bool))
 }
 
 // DECODERS -------------------------------------------------------------------
@@ -87,18 +81,13 @@ pub fn encode_short_url_create_request(req: ShortUrlCreateRequest) -> Json {
 }
 
 pub fn encode_short_url_update_request(req: ShortUrlUpdateRequest) -> Json {
-  let base_fields = [
-    #("id", json.string(req.id)),
-  ]
-  
+  let base_fields = [#("id", json.string(req.id))]
+
   let fields = case req.is_active {
-    Some(is_active) -> [
-      #("isActive", json.bool(is_active)),
-      ..base_fields
-    ]
+    Some(is_active) -> [#("isActive", json.bool(is_active)), ..base_fields]
     None -> base_fields
   }
-  
+
   json.object(fields)
 }
 
@@ -109,7 +98,8 @@ pub fn create_short_url(
   base_uri: Uri,
   req: ShortUrlCreateRequest,
 ) -> Effect(msg) {
-  let body = encode_short_url_create_request(req)
+  let body =
+    encode_short_url_create_request(req)
     |> json.to_string
 
   request.new()
@@ -126,8 +116,12 @@ pub fn list_short_urls(
   limit: Int,
   offset: Int,
 ) -> Effect(msg) {
-  let path = "/api/url?limit=" <> int.to_string(limit) <> "&offset=" <> int.to_string(offset)
-  
+  let path =
+    "/api/url?limit="
+    <> int.to_string(limit)
+    <> "&offset="
+    <> int.to_string(offset)
+
   request.new()
   |> request.set_method(gleam_http.Get)
   |> request.set_path(path)
@@ -135,11 +129,7 @@ pub fn list_short_urls(
   |> http.send(http.expect_json(short_url_list_response_decoder(), msg))
 }
 
-pub fn delete_short_url(
-  msg,
-  base_uri: Uri,
-  id: String,
-) -> Effect(msg) {
+pub fn delete_short_url(msg, base_uri: Uri, id: String) -> Effect(msg) {
   request.new()
   |> request.set_method(gleam_http.Delete)
   |> request.set_path("/api/url/" <> id)
@@ -152,7 +142,8 @@ pub fn update_short_url(
   base_uri: Uri,
   req: ShortUrlUpdateRequest,
 ) -> Effect(msg) {
-  let body = encode_short_url_update_request(req)
+  let body =
+    encode_short_url_update_request(req)
     |> json.to_string
 
   request.new()
@@ -163,11 +154,7 @@ pub fn update_short_url(
   |> http.send(http.expect_json(short_url_decoder(), msg))
 }
 
-pub fn get_short_url(
-  msg,
-  base_uri: Uri,
-  short_code: String,
-) -> Effect(msg) {
+pub fn get_short_url(msg, base_uri: Uri, short_code: String) -> Effect(msg) {
   request.new()
   |> request.set_method(gleam_http.Get)
   |> request.set_path("/api/url/" <> short_code)
@@ -195,4 +182,4 @@ fn add_base_uri(req, base_uri: Uri) {
   }
 
   req
-} 
+}
