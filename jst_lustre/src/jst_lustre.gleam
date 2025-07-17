@@ -1455,10 +1455,13 @@ fn view_login_modal(model: Model) -> Element(Msg) {
       ],
       [
         ui.button_secondary("Cancel", False, LoginFormToggled),
-        ui.button_primary(
-          "Sign In",
+        ui.button_action(
+          case model.login_loading {
+            True -> "Signing In..."
+            False -> "Sign In"
+          },
+          ui.ButtonTeal,
           model.login_username == "" || model.login_password == "",
-          model.login_loading,
           LoginFormSubmitted,
         ),
       ],
@@ -1471,7 +1474,7 @@ fn view_login_modal(model: Model) -> Element(Msg) {
 fn view_header(model: Model) -> Element(Msg) {
   let top_nav_attributes_small = [
     attr.class(
-      "block w-full text-left px-4 py-2 text-sm text-zinc-200 hover:bg-teal-800 transition-colors cursor-pointe",
+      "block w-full text-left px-4 py-2 text-sm text-zinc-400 hover:text-teal-300 hover:bg-teal-800/20 transition-colors cursor-pointer",
     ),
   ]
   html.nav(
@@ -1582,7 +1585,7 @@ fn view_header(model: Model) -> Element(Msg) {
                             html.button(
                               [
                                 attr.class(
-                                  "block w-full text-left px-4 py-2 text-sm text-zinc-200 hover:bg-green-800 transition-colors cursor-pointer",
+                                  "block w-full text-left px-4 py-2 text-sm text-zinc-400 hover:text-teal-300 hover:bg-teal-800/20 transition-colors cursor-pointer",
                                 ),
                                 event.on_mouse_down(LoginFormToggled),
                               ],
@@ -1593,7 +1596,7 @@ fn view_header(model: Model) -> Element(Msg) {
                             html.button(
                               [
                                 attr.class(
-                                  "block w-full text-left px-4 py-2 text-sm bg-zinc-700 text-zinc-400 hover:bg-orange-800 transition-colors cursor-not-allowed opacity-60",
+                                  "block w-full text-left px-4 py-2 text-sm bg-zinc-700 text-zinc-500 transition-colors cursor-not-allowed opacity-60",
                                 ),
                                 event.on_mouse_down(AuthLogoutClicked),
                               ],
@@ -1604,7 +1607,7 @@ fn view_header(model: Model) -> Element(Msg) {
                             html.button(
                               [
                                 attr.class(
-                                  "block w-full text-left px-4 py-2 text-sm text-zinc-200 hover:bg-orange-800 transition-colors cursor-pointe",
+                                  "block w-full text-left px-4 py-2 text-sm text-zinc-400 hover:text-orange-300 hover:bg-orange-800/20 transition-colors cursor-pointer",
                                 ),
                                 event.on_mouse_down(AuthLogoutClicked),
                               ],
@@ -1615,7 +1618,7 @@ fn view_header(model: Model) -> Element(Msg) {
                         html.button(
                           [
                             attr.class(
-                              "block w-full text-left px-4 py-2 text-sm text-zinc-200 hover:bg-teal-800 transition-colors cursor-pointe",
+                              "block w-full text-left px-4 py-2 text-sm text-zinc-400 hover:text-teal-300 hover:bg-teal-800/20 transition-colors cursor-pointer",
                             ),
                             event.on_mouse_down(AuthCheckClicked),
                           ],
@@ -1626,7 +1629,7 @@ fn view_header(model: Model) -> Element(Msg) {
                             html.button(
                               [
                                 attr.class(
-                                  "block w-full text-left px-4 py-2 text-sm text-zinc-200 hover:bg-orange-800 transition-colors cursor-pointe",
+                                  "block w-full text-left px-4 py-2 text-sm text-zinc-400 hover:text-orange-300 hover:bg-orange-800/20 transition-colors cursor-pointer",
                                 ),
                                 event.on_mouse_down(DebugToggleLocalStorage),
                               ],
@@ -1644,7 +1647,7 @@ fn view_header(model: Model) -> Element(Msg) {
                             html.button(
                               [
                                 attr.class(
-                                  "block w-full text-left px-4 py-2 text-sm text-zinc-200 hover:bg-green-800 transition-colors cursor-pointe",
+                                  "block w-full text-left px-4 py-2 text-sm text-zinc-400 hover:text-teal-300 hover:bg-teal-800/20 transition-colors cursor-pointer",
                                 ),
                                 event.on_mouse_down(DebugToggleLocalStorage),
                               ],
@@ -1681,8 +1684,8 @@ fn view_header_link(
   html.li(
     list.append(extra_attr, [
       attr.classes([
-        #("nav-link", True),
-        #("active", routes.is_sub(route: to, maybe_sub: curr)),
+        #("relative cursor-pointer transition-all duration-300 ease-out px-3 py-2 rounded-lg", True),
+        #("active text-pink-500", routes.is_sub(route: to, maybe_sub: curr)),
       ]),
       event.on_mouse_down(UserMouseDownNavigation(to |> routes.to_uri)),
     ]),
@@ -1695,41 +1698,45 @@ fn view_header_link(
 fn view_index() -> List(Element(Msg)) {
   let assert Ok(nats_uri) = uri.parse("/article/nats-all-the-way-down")
   [
-    view_title("Welcome to jst.dev!", "welcome"),
-    view_subtitle(
-      "...or, A lession on overengineering for fun and.. 
-      well just for fun.",
-      "welcome",
+    ui.page_header(
+      "Welcome to jst.dev!", 
+      Some("...or, A lesson on overengineering for fun and... well just for fun.")
     ),
-    view_leading(
-      "This site and it's underlying IT-infrastructure is the primary 
-      place for me to experiment with technologies and topologies. I 
-      also share some of my thoughts and learnings here.",
-      "welcome",
-    ),
-    html.p([attr.class("mt-14")], [
-      html.text(
-        "This site and it's underlying IT-infrastructure is the primary 
-        place for me to experiment with technologies and topologies. I 
-        also share some of my thoughts and learnings here. Feel free to 
-        check out my overview, ",
-      ),
-      view_link(nats_uri, "NATS all the way down ->"),
+    ui.content_container([
+      html.div([attr.class("prose prose-lg text-zinc-300 max-w-none")], [
+        html.p([attr.class("text-xl leading-relaxed mb-8")], [
+          html.text(
+            "This site and its underlying IT infrastructure is the primary 
+            place for me to experiment with technologies and topologies. I 
+            also share some of my thoughts and learnings here."
+          ),
+        ]),
+        html.p([attr.class("mb-6")], [
+          html.text(
+            "This site and its underlying IT infrastructure is the primary 
+            place for me to experiment with technologies and topologies. I 
+            also share some of my thoughts and learnings here. Feel free to 
+            check out my overview: "
+          ),
+          ui.link_primary("NATS all the way down →", UserMouseDownNavigation(nats_uri)),
+        ]),
+        html.p([attr.class("mb-6")], [
+          html.text("It too is a work in progress and I mostly keep it here for my own reference."),
+        ]),
+        html.p([attr.class("mb-6")], [
+          html.text(
+            "I'm a software developer and writer, exploring modern technologies 
+            and sharing insights from my experiments. This space serves as both 
+            a playground for new ideas and a platform for documenting the journey."
+          ),
+        ]),
+      ]),
     ]),
-    view_simple_paragraph(
-      "It to is a work in progress and I mostly keep it here for my own reference.",
-    ),
-    view_simple_paragraph(
-      "I'm also a software developer and a writer. I'm also a father and a 
-        husband. I'm also a software developer and a writer. I'm also a father 
-        and a husband. I'm also a software developer and a writer. I'm also a 
-        father and a husband. I'm also a software developer and a writer.",
-    ),
   ]
 }
 
 fn view_loading() -> List(Element(Msg)) {
-  [ui.loading_indicator_small()]
+  [ui.loading_state("Loading page...")]
 }
 
 fn view_article_listing(
@@ -1817,59 +1824,33 @@ fn view_article_listing(
       }
     })
 
-  let header_section = [
-    html.div([attr.class("flex justify-between items-center mb-4")], [
-      view_title("Articles", "articles"),
+    let header_section = [
+    ui.flex_between(
+      ui.page_title("Articles"),
       case session {
         session.Authenticated(_) ->
-          html.button(
-            [
-              attr.class(
-                "text-gray-500 pe-4 text-underline pt-2 hover:text-teal-300 hover:border-teal-300 border-t border-zinc-700 border-e",
-              ),
-              event.on_mouse_down(ArticleCreateClicked),
-            ],
-            [html.text("New")],
-          )
+          ui.button_action("New Article", ui.ButtonTeal, False, ArticleCreateClicked)
         _ -> element.none()
       },
-    ]),
+    ),
   ]
 
   // Show helpful message when no articles are available
   let content_section = case articles_elements {
     [] -> [
-      html.div([attr.class("mt-14 text-center")], [
-        html.div([attr.class("border-l border-zinc-700 pl-4 py-8")], [
-          html.h3([attr.class("text-xl text-zinc-500 font-light mb-4")], [
-            html.text("No articles yet"),
-          ]),
-          case session {
-            session.Authenticated(_) ->
-              html.div([attr.class("space-y-4")], [
-                view_simple_paragraph(
-                  "Ready to share your thoughts? Create your first article to get started.",
-                ),
-                html.button(
-                  [
-                    attr.class(
-                      "inline-block px-6 py-2 bg-pink-700 text-white rounded-md hover:bg-pink-600 transition-colors duration-200 font-medium",
-                    ),
-                    event.on_mouse_down(ArticleCreateClicked),
-                  ],
-                  [html.text("Create Your First Article")],
-                ),
-              ])
-            _ ->
-              html.div([attr.class("space-y-4")], [
-                view_simple_paragraph(
-                  "No published articles are available yet.",
-                ),
-                view_simple_paragraph("Check back later for new content!"),
-              ])
-          },
-        ]),
-      ]),
+      ui.empty_state(
+        "No articles yet",
+        case session {
+          session.Authenticated(_) ->
+            "Ready to share your thoughts? Create your first article to get started."
+          _ -> "No published articles are available yet. Check back later for new content!"
+        },
+        case session {
+          session.Authenticated(_) ->
+            Some(ui.button_action("Create Your First Article", ui.ButtonTeal, False, ArticleCreateClicked))
+          _ -> None
+        },
+      ),
     ]
     _ -> articles_elements
   }
@@ -1904,19 +1885,13 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
       [
         // Toggle button for mobile
         html.div([attr.class("lg:hidden mb-4 flex justify-center")], [
-          html.button(
-            [
-              attr.class(
-                "px-4 py-2 bg-pink-700 text-white rounded-md hover:bg-pink-700 transition-colors duration-200",
-              ),
-              event.on_mouse_down(EditViewModeToggled),
-            ],
-            [
-              case model.edit_view_mode {
-                EditViewModeEdit -> html.text("Show Preview")
-                EditViewModePreview -> html.text("Show Editor")
-              },
-            ],
+          ui.button_secondary(
+            case model.edit_view_mode {
+              EditViewModeEdit -> "Show Preview"
+              EditViewModePreview -> "Show Editor"
+            },
+            False,
+            EditViewModeToggled,
           ),
         ]),
         // Main content area
@@ -2752,7 +2727,7 @@ fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
           html.button(
             [
               attr.class(
-                "flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-100 bg-blue-600 hover:bg-blue-700 rounded transition-colors",
+                "flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-400 border border-zinc-600 rounded hover:text-teal-300 hover:border-teal-400 transition-colors",
               ),
               event.on_mouse_down(ShortUrlCopyClicked(url.short_code)),
             ],
@@ -2768,9 +2743,9 @@ fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
             [
               attr.class(case url.is_active {
                 True ->
-                  "flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-100 bg-orange-600 hover:bg-orange-700 rounded transition-colors"
+                  "flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-400 border border-zinc-600 rounded hover:text-orange-300 hover:border-orange-400 transition-colors"
                 False ->
-                  "flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-100 bg-green-600 hover:bg-green-700 rounded transition-colors"
+                  "flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-400 border border-zinc-600 rounded hover:text-teal-300 hover:border-teal-400 transition-colors"
               }),
               event.on_mouse_down(ShortUrlToggleActiveClicked(
                 url.id,
@@ -2793,7 +2768,7 @@ fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
           html.button(
             [
               attr.class(
-                "flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-100 bg-red-600 hover:bg-red-700 rounded transition-colors",
+                "flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-400 border border-zinc-600 rounded hover:text-red-300 hover:border-red-400 transition-colors",
               ),
               event.on_mouse_down(ShortUrlDeleteClicked(url.id)),
             ],
@@ -2856,7 +2831,7 @@ fn view_delete_confirmation(
             html.button(
               [
                 attr.class(
-                  "px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors",
+                  "px-4 py-2 text-zinc-400 border border-zinc-600 rounded hover:text-red-300 hover:border-red-400 transition-colors",
                 ),
                 event.on_mouse_down(ShortUrlDeleteConfirmClicked(delete_id)),
               ],
@@ -2955,61 +2930,38 @@ fn view_url_info_page(model: Model, short_code: String) -> List(Element(Msg)) {
                 ]),
               ]),
               html.div([attr.class("mt-6 flex gap-4")], [
-                html.button(
-                  [
-                    attr.class(
-                      "px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors",
-                    ),
-                    event.on_mouse_down(
-                      UserMouseDownNavigation(routes.to_uri(
-                        routes.UrlShortIndex,
-                      )),
-                    ),
-                  ],
-                  [html.text("Back to URLs")],
+                ui.button_action(
+                  "Back to URLs",
+                  ui.ButtonTeal,
+                  False,
+                  UserMouseDownNavigation(routes.to_uri(routes.UrlShortIndex)),
                 ),
-                html.button(
-                  [
-                    attr.class(
-                      "px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors",
-                    ),
-                    event.on_mouse_down(ShortUrlCopyClicked(url.short_code)),
-                  ],
-                  [
-                    html.text(case model.copy_feedback == Some(url.short_code) {
-                      True -> "Copied!"
-                      False -> "Copy URL"
-                    }),
-                  ],
+                ui.button_action(
+                  case model.copy_feedback == Some(url.short_code) {
+                    True -> "Copied!"
+                    False -> "Copy URL"
+                  },
+                  ui.ButtonTeal,
+                  False,
+                  ShortUrlCopyClicked(url.short_code),
                 ),
-                html.button(
-                  [
-                    attr.class(case url.is_active {
-                      True ->
-                        "px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 transition-colors"
-                      False ->
-                        "px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
-                    }),
-                    event.on_mouse_down(ShortUrlToggleActiveClicked(
-                      url.id,
-                      url.is_active,
-                    )),
-                  ],
-                  [
-                    html.text(case url.is_active {
-                      True -> "Deactivate"
-                      False -> "Activate"
-                    }),
-                  ],
+                ui.button_action(
+                  case url.is_active {
+                    True -> "Deactivate"
+                    False -> "Activate"
+                  },
+                  case url.is_active {
+                    True -> ui.ButtonOrange
+                    False -> ui.ButtonTeal
+                  },
+                  False,
+                  ShortUrlToggleActiveClicked(url.id, url.is_active),
                 ),
-                html.button(
-                  [
-                    attr.class(
-                      "px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors",
-                    ),
-                    event.on_mouse_down(ShortUrlDeleteClicked(url.id)),
-                  ],
-                  [html.text("Delete URL")],
+                ui.button_action(
+                  "Delete URL",
+                  ui.ButtonRed,
+                  False,
+                  ShortUrlDeleteClicked(url.id),
                 ),
               ]),
             ],
@@ -3177,8 +3129,7 @@ fn view_title(title: String, slug: String) -> Element(msg) {
   html.h1(
     [
       attr.id("article-title-" <> slug),
-      attr.class("text-2xl sm:text-3xl md:text-4xl text-pink-600 font-light"),
-      attr.class("article-title leading-tight"),
+      attr.class("page-title"),
     ],
     [html.text(title)],
   )
@@ -3188,8 +3139,7 @@ fn view_subtitle(title: String, slug: String) -> Element(msg) {
   html.div(
     [
       attr.id("article-subtitle-" <> slug),
-      attr.class("text-md text-zinc-500 font-light italic"),
-      attr.class("article-subtitle"),
+      attr.class("page-subtitle"),
     ],
     [html.text(title)],
   )
@@ -3269,7 +3219,7 @@ fn view_link(url: Uri, title: String) -> Element(Msg) {
 // Content editor functions removed - now using simple Djot textarea
 
 fn view_article_listing_loading() -> List(Element(Msg)) {
-  [view_title("Articles", "articles"), ui.loading_indicator_small()]
+  [ui.page_title("Articles"), ui.loading_state("Loading articles...")]
 }
 
 fn view_internal_link(uri: Uri, content: List(Element(Msg))) -> Element(Msg) {
