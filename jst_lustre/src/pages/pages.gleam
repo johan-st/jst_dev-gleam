@@ -16,13 +16,19 @@ pub type Page {
 
   // Article-related pages
   PageArticle(article: Article, session: Session)
-  PageArticleEdit(article: Article)
+  PageArticleEdit(
+    article: Article,
+    session_authenticated: session.SessionAuthenticated,
+  )
   PageArticleList(articles: List(Article), session: Session)
   PageArticleListLoading
 
   // Url Shortener pages
-  PageUrlShortIndex
-  PageUrlShortInfo(short: String)
+  PageUrlShortIndex(session_authenticated: session.SessionAuthenticated)
+  PageUrlShortInfo(
+    short: String,
+    session_authenticated: session.SessionAuthenticated,
+  )
 
   // Error states  
   PageError(error: PageError)
@@ -63,15 +69,15 @@ pub fn to_uri(page: Page) -> Uri {
       let assert Ok(uri) = uri.parse("/article/" <> article.slug)
       uri
     }
-    PageArticleEdit(article) -> {
+    PageArticleEdit(article, _) -> {
       let assert Ok(uri) = uri.parse("/article/" <> article.id <> "/edit")
       uri
     }
-    PageUrlShortIndex -> {
+    PageUrlShortIndex(_) -> {
       let assert Ok(uri) = uri.parse("/url/")
       uri
     }
-    PageUrlShortInfo(short:) -> {
+    PageUrlShortInfo(short, _) -> {
       let assert Ok(uri) = uri.parse("/url/")
       uri
     }
@@ -178,14 +184,32 @@ pub fn from_route(
               case find_article_by_id(allowed_articles, id) {
                 Ok(article) -> {
                   case article.can_edit(article, session), article.draft {
-                    True, Some(_) -> PageArticleEdit(article)
-                    True, None ->
-                      PageArticleEdit(
-                        article.ArticleV1(
-                          ..article,
-                          draft: article.to_draft(article),
-                        ),
-                      )
+                    True, Some(_) -> {
+                      case session {
+                        session.Authenticated(session_auth) ->
+                          PageArticleEdit(article, session_auth)
+                        session.Unauthenticated ->
+                          PageError(AuthenticationRequired("edit article"))
+                        session.Pending ->
+                          PageError(AuthenticationRequired("edit article"))
+                      }
+                    }
+                    True, None -> {
+                      case session {
+                        session.Authenticated(session_auth) ->
+                          PageArticleEdit(
+                            article.ArticleV1(
+                              ..article,
+                              draft: article.to_draft(article),
+                            ),
+                            session_auth,
+                          )
+                        session.Unauthenticated ->
+                          PageError(AuthenticationRequired("edit article"))
+                        session.Pending ->
+                          PageError(AuthenticationRequired("edit article"))
+                      }
+                    }
                     False, _ ->
                       PageError(AuthenticationRequired("edit article"))
                   }
@@ -197,8 +221,26 @@ pub fn from_route(
         }
         routes.About -> PageAbout
         routes.DjotDemo -> PageDjotDemo("")
-        routes.UrlShortIndex -> PageUrlShortIndex
-        routes.UrlShortInfo(short) -> PageUrlShortInfo(short)
+        routes.UrlShortIndex -> {
+          case session {
+            session.Authenticated(session_auth) ->
+              PageUrlShortIndex(session_auth)
+            session.Unauthenticated ->
+              PageError(AuthenticationRequired("access URL shortener"))
+            session.Pending ->
+              PageError(AuthenticationRequired("access URL shortener"))
+          }
+        }
+        routes.UrlShortInfo(short) -> {
+          case session {
+            session.Authenticated(session_auth) ->
+              PageUrlShortInfo(short, session_auth)
+            session.Unauthenticated ->
+              PageError(AuthenticationRequired("access URL shortener info"))
+            session.Pending ->
+              PageError(AuthenticationRequired("access URL shortener info"))
+          }
+        }
         routes.NotFound(uri) -> PageNotFound(uri)
       }
     }

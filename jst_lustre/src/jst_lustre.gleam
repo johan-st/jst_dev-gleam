@@ -1266,7 +1266,7 @@ fn view(model: Model) -> Element(Msg) {
       view_article_listing(articles, session)
     pages.PageArticleListLoading -> view_article_listing_loading()
     pages.PageArticle(article, session) -> view_article(article, session)
-    pages.PageArticleEdit(article) -> view_article_edit(model, article)
+    pages.PageArticleEdit(article, _) -> view_article_edit(model, article)
     pages.PageError(error) -> {
       case error {
         pages.ArticleNotFound(slug, _) ->
@@ -1283,13 +1283,13 @@ fn view(model: Model) -> Element(Msg) {
       }
     }
     pages.PageAbout -> view_about()
-    pages.PageUrlShortIndex -> view_url_index(model)
-    pages.PageUrlShortInfo(short:) -> view_url_info_page(model, short)
+    pages.PageUrlShortIndex(_) -> view_url_index(model)
+    pages.PageUrlShortInfo(short, _) -> view_url_info_page(model, short)
     pages.PageDjotDemo(content) -> view_djot_demo(content)
     pages.PageNotFound(uri) -> view_not_found(uri)
   }
   let layout = case page {
-    pages.PageDjotDemo(_) | pages.PageArticleEdit(_) -> {
+    pages.PageDjotDemo(_) | pages.PageArticleEdit(_, _) -> {
       fn(content) {
         html.div(
           [
@@ -1378,14 +1378,28 @@ fn page_from_model(model: Model) -> pages.Page {
             Ok(article) -> {
               case article.can_edit(article, model.session), article.draft {
                 // TODO: this should be refactored.. the draft should be on the actual article and not on the one in the Page
-                True, Some(_) -> pages.PageArticleEdit(article)
-                True, None ->
-                  pages.PageArticleEdit(
-                    article.ArticleV1(
-                      ..article,
-                      draft: article.to_draft(article),
-                    ),
-                  )
+                True, Some(_) -> {
+                  case model.session {
+                    session.Authenticated(session_auth) ->
+                      pages.PageArticleEdit(article, session_auth)
+                    _ ->
+                      pages.PageError(pages.AuthenticationRequired("edit article"))
+                  }
+                }
+                True, None -> {
+                  case model.session {
+                    session.Authenticated(session_auth) ->
+                      pages.PageArticleEdit(
+                        article.ArticleV1(
+                          ..article,
+                          draft: article.to_draft(article),
+                        ),
+                        session_auth,
+                      )
+                    _ ->
+                      pages.PageError(pages.AuthenticationRequired("edit article"))
+                  }
+                }
                 False, _ ->
                   pages.PageError(pages.AuthenticationRequired("edit article"))
               }
@@ -1395,8 +1409,22 @@ fn page_from_model(model: Model) -> pages.Page {
         }
       }
     }
-    routes.UrlShortIndex -> pages.PageUrlShortIndex
-    routes.UrlShortInfo(short_code) -> pages.PageUrlShortInfo(short_code)
+    routes.UrlShortIndex -> {
+      case model.session {
+        session.Authenticated(session_auth) ->
+          pages.PageUrlShortIndex(session_auth)
+        _ ->
+          pages.PageError(pages.AuthenticationRequired("access URL shortener"))
+      }
+    }
+    routes.UrlShortInfo(short_code) -> {
+      case model.session {
+        session.Authenticated(session_auth) ->
+          pages.PageUrlShortInfo(short_code, session_auth)
+        _ ->
+          pages.PageError(pages.AuthenticationRequired("access URL shortener info"))
+      }
+    }
     routes.DjotDemo -> pages.PageDjotDemo(model.djot_demo_content)
     routes.About -> pages.PageAbout
     routes.NotFound(uri) -> pages.PageNotFound(uri)
@@ -1494,32 +1522,43 @@ fn view_header(model: Model) -> Element(Msg) {
           ]),
           html.div([attr.class("flex items-center space-x-8")], [
             // Desktop navigation
-            html.ul([attr.class("hidden sm:flex space-x-8 pr-2")], [
-              view_header_link(
-                target: routes.Articles,
-                current: model.route,
-                label: "Articles",
-                attributes: [],
-              ),
-              view_header_link(
-                target: routes.About,
-                current: model.route,
-                label: "About",
-                attributes: [],
-              ),
-              view_header_link(
-                target: routes.UrlShortIndex,
-                current: model.route,
-                label: "Short Urls",
-                attributes: [],
-              ),
-              view_header_link(
-                target: routes.DjotDemo,
-                current: model.route,
-                label: "Djot Demo",
-                attributes: [],
-              ),
-            ]),
+            html.ul([attr.class("hidden sm:flex space-x-8 pr-2")], 
+              list.flatten([
+                [
+                  view_header_link(
+                    target: routes.Articles,
+                    current: model.route,
+                    label: "Articles",
+                    attributes: [],
+                  ),
+                  view_header_link(
+                    target: routes.About,
+                    current: model.route,
+                    label: "About",
+                    attributes: [],
+                  ),
+                ],
+                case model.session {
+                  session.Authenticated(_) -> [
+                    view_header_link(
+                      target: routes.UrlShortIndex,
+                      current: model.route,
+                      label: "Short Urls",
+                      attributes: [],
+                    ),
+                  ]
+                  _ -> []
+                },
+                [
+                  view_header_link(
+                    target: routes.DjotDemo,
+                    current: model.route,
+                    label: "Djot Demo",
+                    attributes: [],
+                  ),
+                ],
+              ])
+            ),
             // Hamburger menu for auth actions
             html.div([attr.class("relative")], [
               html.button(
@@ -1553,32 +1592,41 @@ fn view_header(model: Model) -> Element(Msg) {
                               "sm:hidden flex flex-col border-b border-zinc-400",
                             ),
                           ],
-                          [
-                            view_header_link(
-                              target: routes.Articles,
-                              current: model.route,
-                              label: "Articles",
-                              attributes: top_nav_attributes_small,
-                            ),
-                            view_header_link(
-                              target: routes.About,
-                              current: model.route,
-                              label: "About",
-                              attributes: top_nav_attributes_small,
-                            ),
-                            view_header_link(
-                              target: routes.UrlShortIndex,
-                              current: model.route,
-                              label: "Short urls",
-                              attributes: top_nav_attributes_small,
-                            ),
-                            view_header_link(
-                              target: routes.DjotDemo,
-                              current: model.route,
-                              label: "Djot Demo",
-                              attributes: top_nav_attributes_small,
-                            ),
-                          ],
+                          list.flatten([
+                            [
+                              view_header_link(
+                                target: routes.Articles,
+                                current: model.route,
+                                label: "Articles",
+                                attributes: top_nav_attributes_small,
+                              ),
+                              view_header_link(
+                                target: routes.About,
+                                current: model.route,
+                                label: "About",
+                                attributes: top_nav_attributes_small,
+                              ),
+                            ],
+                            case model.session {
+                              session.Authenticated(_) -> [
+                                view_header_link(
+                                  target: routes.UrlShortIndex,
+                                  current: model.route,
+                                  label: "Short urls",
+                                  attributes: top_nav_attributes_small,
+                                ),
+                              ]
+                              _ -> []
+                            },
+                            [
+                              view_header_link(
+                                target: routes.DjotDemo,
+                                current: model.route,
+                                label: "Djot Demo",
+                                attributes: top_nav_attributes_small,
+                              ),
+                            ],
+                          ])
                         ),
                         case model.session {
                           session.Unauthenticated -> {
@@ -3129,7 +3177,7 @@ fn view_title(title: String, slug: String) -> Element(msg) {
   html.h1(
     [
       attr.id("article-title-" <> slug),
-      attr.class("page-title"),
+      attr.class("page-title text-2xl sm:text-3xl md:text-4xl text-pink-600 font-light article-title leading-tight"),
     ],
     [html.text(title)],
   )
