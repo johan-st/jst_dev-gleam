@@ -1,11 +1,13 @@
 import article/article.{type Article}
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/set.{type Set}
 import gleam/uri.{type Uri}
 import routes/routes.{type Route}
 import utils/http.{type HttpError}
 import utils/remote_data.{type RemoteData}
 import utils/session.{type Session}
+import utils/short_url.{type ShortUrl}
 
 // Improved Page type with better state management
 pub type Page {

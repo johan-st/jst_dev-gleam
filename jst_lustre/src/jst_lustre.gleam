@@ -34,6 +34,7 @@ import utils/short_url.{
   type ShortUrl, type ShortUrlCreateRequest, type ShortUrlListResponse,
   type ShortUrlUpdateRequest,
 }
+import helpers
 
 @external(javascript, "./app.ffi.mjs", "clipboard_copy")
 fn clipboard_copy(text: String) -> Nil
@@ -41,75 +42,7 @@ fn clipboard_copy(text: String) -> Nil
 @external(javascript, "./app.ffi.mjs", "set_timeout")
 fn set_timeout(callback: fn() -> Nil, delay: Int) -> Nil
 
-fn validate_target_url(url_string: String) -> #(Bool, Option(String)) {
-  case url_string {
-    "" -> #(False, Some("URL is required"))
-    _ -> {
-      case uri.parse(url_string) {
-        Ok(parsed_uri) -> {
-          case parsed_uri.scheme, parsed_uri.host {
-            Some(scheme), Some(host) -> {
-              case scheme {
-                "http" | "https" -> {
-                  case validate_host(host) {
-                    True -> #(True, None)
-                    False -> #(
-                      False,
-                      Some(
-                        "Host must be a valid domain with a TLD (e.g., example.com)",
-                      ),
-                    )
-                  }
-                }
-                _ -> #(False, Some("URL must use http or https protocol"))
-              }
-            }
-            None, Some(_) -> #(
-              False,
-              Some("URL must include a protocol (http or https)"),
-            )
-            Some(_), None -> #(False, Some("URL must include a host"))
-            None, None -> #(
-              False,
-              Some("URL must include both protocol and host"),
-            )
-          }
-        }
-        Error(_) -> #(False, Some("Invalid URL format"))
-      }
-    }
-  }
-}
 
-fn validate_host(host: String) -> Bool {
-  case host {
-    "" -> False
-    _ -> {
-      // Check if host contains at least one dot (for TLD)
-      case string.contains(host, ".") {
-        True -> {
-          let parts = string.split(host, ".")
-          case list.length(parts) >= 2 {
-            True -> {
-              // Check that no part is empty and last part (TLD) is at least 2 characters
-              case list.all(parts, fn(part) { string.length(part) > 0 }) {
-                True -> {
-                  case list.last(parts) {
-                    Ok(tld) -> string.length(tld) >= 2
-                    Error(_) -> False
-                  }
-                }
-                False -> False
-              }
-            }
-            False -> False
-          }
-        }
-        False -> False
-      }
-    }
-  }
-}
 
 // MAIN ------------------------------------------------------------------------
 
@@ -123,7 +56,7 @@ pub fn main() {
 
 // MODEL -----------------------------------------------------------------------
 
-type Model {
+pub type Model {
   Model(
     base_uri: Uri,
     route: Route,
@@ -140,7 +73,6 @@ type Model {
     delete_confirmation: option.Option(String),
     copy_feedback: option.Option(String),
     expanded_urls: Set(String),
-    // Login form state
     login_form_open: Bool,
     login_username: String,
     login_password: String,
@@ -148,7 +80,7 @@ type Model {
   )
 }
 
-type EditViewMode {
+pub type EditViewMode {
   EditViewModeEdit
   EditViewModePreview
 }
@@ -211,28 +143,20 @@ fn init(_) -> #(Model, Effect(Msg)) {
 
 // UPDATE ----------------------------------------------------------------------
 
-type Msg {
-  // NAVIGATION
+pub type Msg {
   UserNavigatedTo(uri: Uri)
   UserMouseDownNavigation(uri: Uri)
-  // HAMBURGER MENU
   ProfileMenuToggled
-  // MESSAGES
-  // UserMessageDismissed(msg: UserMessage)
   NoticeCleared
-  // LOCALSTORAGE
   PersistGotModel(opt: Option(PersistentModel))
-  // ARTICLES
   ArticleHovered(article: Article)
   ArticleGot(id: String, result: Result(Article, HttpError))
   ArticleMetaGot(result: Result(List(Article), HttpError))
-  // ARTICLE DRAFT
   ArticleDraftUpdatedSlug(article: Article, text: String)
   ArticleDraftUpdatedTitle(article: Article, text: String)
   ArticleDraftUpdatedLeading(article: Article, text: String)
   ArticleDraftUpdatedSubtitle(article: Article, text: String)
   ArticleDraftUpdatedContent(article: Article, content: String)
-  // ARTICLE ACTIONS
   ArticleUpdateResponse(id: String, result: Result(Article, HttpError))
   ArticleDraftSaveClicked(article: Article)
   ArticleDraftDiscardClicked(article: Article)
@@ -242,18 +166,13 @@ type Msg {
   ArticleDeleteResponse(id: String, result: Result(String, HttpError))
   ArticlePublishClicked(article: Article)
   ArticleUnpublishClicked(article: Article)
-  // AUTH
   AuthLoginClicked(username: String, password: String)
   AuthLoginResponse(result: Result(session.Session, HttpError))
   AuthLogoutClicked
   AuthLogoutResponse(result: Result(String, HttpError))
   AuthCheckClicked
   AuthCheckResponse(result: Result(session.Session, HttpError))
-  // CHAT
-  // ChatMsg(msg: chat.Msg)
-  // DJOT DEMO
   DjotDemoContentUpdated(content: String)
-  // SHORT URLS
   ShortUrlCreateClicked(short_code: String, target_url: String)
   ShortUrlCreateResponse(result: Result(ShortUrl, HttpError))
   ShortUrlListGot(result: Result(ShortUrlListResponse, HttpError))
@@ -261,7 +180,6 @@ type Msg {
   ShortUrlDeleteResponse(id: String, result: Result(String, HttpError))
   ShortUrlDeleteConfirmClicked(id: String)
   ShortUrlDeleteCancelClicked
-
   ShortUrlFormShortCodeUpdated(text: String)
   ShortUrlFormTargetUrlUpdated(text: String)
   ShortUrlCopyClicked(short_code: String)
@@ -269,12 +187,9 @@ type Msg {
   ShortUrlToggleActiveClicked(id: String, is_active: Bool)
   ShortUrlToggleActiveResponse(id: String, result: Result(ShortUrl, HttpError))
   ShortUrlToggleExpanded(id: String)
-  // EDIT VIEW TOGGLE
   EditViewModeToggled
-  // DEBUG
   DebugToggleLocalStorage
   GotLocalModelResult(res: Option(PersistentModel))
-  // LOGIN FORM
   LoginFormToggled
   LoginUsernameUpdated(String)
   LoginPasswordUpdated(String)
@@ -956,7 +871,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     // SHORT URLS
     ShortUrlCreateClicked(short_code, target_url) -> {
-      let #(is_valid, _) = validate_target_url(target_url)
+      let #(is_valid, _) = helpers.validate_target_url(target_url)
       case is_valid, model.session {
         True, session.Authenticated(_session_data) -> {
           let req =
@@ -2346,7 +2261,7 @@ fn view_url_create_form(model: Model) -> Element(Msg) {
           ),
           html.input([
             attr.class(
-              case validate_target_url(model.short_url_form_target_url) {
+              case helpers.validate_target_url(model.short_url_form_target_url) {
                 #(_, Some(_)) ->
                   "w-full px-3 py-2 bg-zinc-700 border border-red-500 rounded-md text-zinc-100 focus:outline-none focus:border-red-400"
                 #(_, None) ->
@@ -2358,7 +2273,7 @@ fn view_url_create_form(model: Model) -> Element(Msg) {
             attr.value(model.short_url_form_target_url),
             event.on_input(ShortUrlFormTargetUrlUpdated),
           ]),
-          case validate_target_url(model.short_url_form_target_url) {
+          case helpers.validate_target_url(model.short_url_form_target_url) {
             #(_, Some(error_msg)) ->
               html.p([attr.class("text-xs text-red-400 mt-1")], [
                 html.text(error_msg),
@@ -2398,7 +2313,7 @@ fn view_url_create_form(model: Model) -> Element(Msg) {
         html.button(
           [
             attr.class(
-              case validate_target_url(model.short_url_form_target_url) {
+              case helpers.validate_target_url(model.short_url_form_target_url) {
                 #(True, None) ->
                   "w-full px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700 transition-colors"
                 _ ->
@@ -2406,7 +2321,7 @@ fn view_url_create_form(model: Model) -> Element(Msg) {
               },
             ),
             attr.disabled(
-              case validate_target_url(model.short_url_form_target_url) {
+              case helpers.validate_target_url(model.short_url_form_target_url) {
                 #(True, None) -> False
                 _ -> True
               },
