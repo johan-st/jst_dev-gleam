@@ -1206,7 +1206,7 @@ fn view(model: Model) -> Element(Msg) {
           [
             view_notice(model.notice),
             view_header(model),
-            html.main([attr.class("mx-auto px-4 sm:px-6 md:px-10 py-6 sm:py-8 md:py-10")], content),
+            html.main([attr.class("max-w-screen-md mx-auto px-4 sm:px-6 md:px-10 py-6 sm:py-8 md:py-10")], content),
             view_modals(model),
           ],
         )
@@ -2616,100 +2616,79 @@ fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
           ),
         ]),
         // Metadata grid
-        html.div([attr.class("grid grid-cols-2 gap-4 text-sm mb-4")], [
-          html.div([attr.class("space-y-2")], [
-            html.div([attr.class("flex justify-between")], [
-              html.span([attr.class("text-zinc-500")], [
-                html.text("Created By:"),
-              ]),
-              html.span([attr.class("text-zinc-300")], [
-                html.text(url.created_by),
-              ]),
+        html.div([attr.class("space-y-3 text-sm mb-4")], [
+          html.div([attr.class("flex justify-between items-center")], [
+            html.span([attr.class("text-zinc-500 shrink-0")], [
+              html.text("Created By:"),
             ]),
-            html.div([attr.class("flex justify-between")], [
-              html.span([attr.class("text-zinc-500")], [
-                html.text("Access Count:"),
-              ]),
-              html.span([attr.class("text-zinc-300 font-mono")], [
-                html.text(int.to_string(url.access_count)),
-              ]),
+            html.span([attr.class("text-zinc-300 truncate ml-2")], [
+              html.text(url.created_by),
             ]),
           ]),
-          html.div([attr.class("space-y-2")], [
-            html.div([attr.class("flex justify-between")], [
-              html.span([attr.class("text-zinc-500")], [html.text("Created:")]),
-              html.span([attr.class("text-zinc-300")], [
-                html.text(
-                  birl.from_unix_milli(url.created_at * 1000)
-                  |> birl.to_naive_date_string,
-                ),
-              ]),
+          html.div([attr.class("flex justify-between items-center")], [
+            html.span([attr.class("text-zinc-500 shrink-0")], [
+              html.text("Access Count:"),
             ]),
-            html.div([attr.class("flex justify-between")], [
-              html.span([attr.class("text-zinc-500")], [html.text("Updated:")]),
-              html.span([attr.class("text-zinc-300")], [
-                html.text(
-                  birl.from_unix_milli(url.updated_at * 1000)
-                  |> birl.to_naive_date_string,
-                ),
-              ]),
+            html.span([attr.class("text-zinc-300 font-mono")], [
+              html.text(int.to_string(url.access_count)),
+            ]),
+          ]),
+          html.div([attr.class("flex justify-between items-center")], [
+            html.span([attr.class("text-zinc-500 shrink-0")], [html.text("Created:")]),
+            html.span([attr.class("text-zinc-300")], [
+              html.text(
+                birl.from_unix_milli(url.created_at * 1000)
+                |> birl.to_naive_date_string,
+              ),
+            ]),
+          ]),
+          html.div([attr.class("flex justify-between items-center")], [
+            html.span([attr.class("text-zinc-500 shrink-0")], [html.text("Updated:")]),
+            html.span([attr.class("text-zinc-300")], [
+              html.text(
+                birl.from_unix_milli(url.updated_at * 1000)
+                |> birl.to_naive_date_string,
+              ),
             ]),
           ]),
         ]),
         // Action buttons
-        html.div([attr.class("flex gap-2")], [
+        html.div([attr.class("space-y-2")], [
           html.button(
             [
               attr.class(
-                "flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-400 border border-zinc-600 rounded hover:text-teal-300 hover:border-teal-400 transition-colors",
+                "w-full px-4 py-3 text-sm font-medium text-teal-400 border border-teal-600 bg-teal-500/10 hover:bg-teal-950/50 hover:text-teal-300 hover:border-teal-400 cursor-pointer transition-colors duration-200 rounded",
               ),
               event.on_mouse_down(ShortUrlCopyClicked(url.short_code)),
             ],
-            [
-              html.div([attr.class("text-sm")], [html.text("📋")]),
-              html.text(case model.copy_feedback == Some(url.short_code) {
-                True -> "Copied!"
-                False -> "Copy URL"
-              }),
-            ],
+            [html.text(case model.copy_feedback == Some(url.short_code) {
+              True -> "Copied!"
+              False -> "Copy URL"
+            })],
           ),
           html.button(
             [
               attr.class(case url.is_active {
                 True ->
-                  "flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-400 border border-zinc-600 rounded hover:text-orange-300 hover:border-orange-400 transition-colors"
+                  "w-full px-4 py-3 text-sm font-medium text-orange-400 border border-orange-600 bg-orange-500/10 hover:bg-orange-950/50 hover:text-orange-300 hover:border-orange-400 cursor-pointer transition-colors duration-200 rounded"
                 False ->
-                  "flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-400 border border-zinc-600 rounded hover:text-teal-300 hover:border-teal-400 transition-colors"
+                  "w-full px-4 py-3 text-sm font-medium text-teal-400 border border-teal-600 bg-teal-500/10 hover:bg-teal-950/50 hover:text-teal-300 hover:border-teal-400 cursor-pointer transition-colors duration-200 rounded"
               }),
-              event.on_mouse_down(ShortUrlToggleActiveClicked(
-                url.id,
-                url.is_active,
-              )),
+              event.on_mouse_down(ShortUrlToggleActiveClicked(url.id, url.is_active)),
             ],
-            [
-              html.div([attr.class("text-sm")], [
-                html.text(case url.is_active {
-                  True -> "⏸"
-                  False -> "▶"
-                }),
-              ]),
-              html.text(case url.is_active {
-                True -> "Deactivate"
-                False -> "Activate"
-              }),
-            ],
+            [html.text(case url.is_active {
+              True -> "Deactivate"
+              False -> "Activate"
+            })],
           ),
           html.button(
             [
               attr.class(
-                "flex-1 inline-flex items-center justify-center gap-x-2 py-3 text-sm font-medium text-zinc-400 border border-zinc-600 rounded hover:text-red-300 hover:border-red-400 transition-colors",
+                "w-full px-4 py-3 text-sm font-medium text-red-400 border border-red-600 bg-red-500/10 hover:bg-red-950/50 hover:text-red-300 hover:border-red-400 cursor-pointer transition-colors duration-200 rounded",
               ),
               event.on_mouse_down(ShortUrlDeleteClicked(url.id)),
             ],
-            [
-              html.div([attr.class("text-sm")], [html.text("🗑")]),
-              html.text("Delete"),
-            ],
+            [html.text("Delete")],
           ),
         ]),
       ]),
