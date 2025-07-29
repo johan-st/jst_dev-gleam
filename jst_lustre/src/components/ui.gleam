@@ -130,7 +130,8 @@ pub fn error_state(
       ]),
       html.p([attr.class("text-zinc-400 text-lg mb-8")], [html.text(message)]),
       case retry_action {
-        Some(action) -> button_secondary("Try Again", ButtonStateNormal, action)
+        Some(action) ->
+          button("Try Again", ButtonTeal, ButtonStateNormal, action)
         None -> element.none()
       },
     ]),
@@ -152,23 +153,6 @@ pub type ButtonState {
   ButtonStateDisabled
 }
 
-pub fn button_secondary(
-  text: String,
-  state: ButtonState,
-  onclick: msg,
-) -> Element(msg) {
-  html.button(
-    [
-      attr.class(
-        "btn-secondary px-6 py-3 text-zinc-200 rounded-lg font-medium transition-all duration-300 ease-out disabled:opacity-50 disabled:cursor-not-allowed",
-      ),
-      attr.disabled(state == ButtonStateDisabled),
-      event.on_click(onclick),
-    ],
-    [html.text(text)],
-  )
-}
-
 /// Menu-style button for dropdowns and navigation
 pub fn button_menu(
   text: String,
@@ -176,66 +160,41 @@ pub fn button_menu(
   state: ButtonState,
   onclick: msg,
 ) -> Element(msg) {
-  let #(text_color, border_color, hover_bg, hover_text, hover_border) = case
-    variant
-  {
-    ButtonTeal -> #(
-      "text-teal-400",
-      "border-teal-600",
-      "hover:bg-teal-500/10",
-      "hover:text-teal-300",
-      "hover:border-l-teal-400",
-    )
-    ButtonOrange -> #(
-      "text-orange-400",
-      "border-orange-600",
-      "hover:bg-orange-500/10",
-      "hover:text-orange-300",
-      "hover:border-l-orange-400",
-    )
-    ButtonRed -> #(
-      "text-red-400",
-      "border-red-600",
-      "hover:bg-red-500/10",
-      "hover:text-red-300",
-      "hover:border-l-red-400",
-    )
-    ButtonGreen -> #(
-      "text-green-400",
-      "border-green-600",
-      "hover:bg-green-500/10",
-      "hover:text-green-300",
-      "hover:border-l-green-400",
-    )
-  }
+  let tailwind_classes = case variant, state {
+    ButtonTeal, ButtonStateNormal ->
+      "text-teal-400 border-teal-600 hover:bg-teal-950/50 hover:text-teal-300 hover:border-teal-400 cursor-pointer"
+    ButtonTeal, ButtonStatePending ->
+      "text-teal-400 border-teal-600 opacity-70 cursor-wait"
+    ButtonTeal, ButtonStateDisabled ->
+      "text-zinc-400 border-zinc-600 opacity-50 cursor-not-allowed"
 
-  let #(final_text_color, cursor_class, opacity_class) = case state {
-    ButtonStateNormal -> #(text_color, "cursor-default", "")
-    ButtonStatePending -> #("text-zinc-500", "cursor-wait", "opacity-60")
-    ButtonStateDisabled -> #(
-      "text-zinc-500",
-      "cursor-not-allowed",
-      "opacity-50",
-    )
+    ButtonOrange, ButtonStateNormal ->
+      "text-orange-400 border-orange-600 hover:bg-orange-950/50 hover:text-orange-300 hover:border-orange-400 cursor-pointer"
+    ButtonOrange, ButtonStatePending ->
+      "text-orange-400 border-orange-600  opacity-70 cursor-wait"
+    ButtonOrange, ButtonStateDisabled ->
+      "text-zinc-400 border-zinc-600 opacity-50 cursor-not-allowed"
+
+    ButtonRed, ButtonStateNormal ->
+      "text-red-400 border-red-600 hover:bg-red-950/50 hover:text-red-300 hover:border-red-400 cursor-pointer"
+    ButtonRed, ButtonStatePending ->
+      "text-red-400 border-red-600 opacity-70 cursor-wait"
+    ButtonRed, ButtonStateDisabled ->
+      "text-zinc-400 border-zinc-600 opacity-50 cursor-not-allowed"
+
+    ButtonGreen, ButtonStateNormal ->
+      "text-green-400 border-green-600 hover:bg-green-950/50 hover:text-green-300 hover:border-green-400"
+    ButtonGreen, ButtonStatePending ->
+      "text-green-400 border-green-600 opacity-70 cursor-wait"
+    ButtonGreen, ButtonStateDisabled ->
+      "text-zinc-400 border-zinc-600 opacity-50 cursor-not-allowed"
   }
 
   html.button(
     [
       attr.class(
-        "block w-full text-left px-4 py-2 text-sm "
-        <> final_text_color
-        <> " border-l "
-        <> border_color
-        <> " "
-        <> hover_bg
-        <> " "
-        <> hover_text
-        <> " "
-        <> hover_border
-        <> " transition-colors "
-        <> cursor_class
-        <> " "
-        <> opacity_class,
+        "block w-full text-left px-4 py-2 text-sm transition-colors duration-200 border-l-2 -left-[1px] relative "
+        <> tailwind_classes,
       ),
       attr.disabled(case state {
         ButtonStateNormal -> False
@@ -254,66 +213,41 @@ pub fn button_menu_custom(
   state: ButtonState,
   onclick: msg,
 ) -> Element(msg) {
-  let #(text_color, border_color, hover_bg, hover_text, hover_border) = case
-    variant
-  {
-    ButtonTeal -> #(
-      "text-teal-400",
-      "border-teal-600",
-      "hover:bg-teal-500/10",
-      "hover:text-teal-300",
-      "hover:border-l-teal-400",
-    )
-    ButtonOrange -> #(
-      "text-orange-400",
-      "border-orange-600",
-      "hover:bg-orange-500/10",
-      "hover:text-orange-300",
-      "hover:border-l-orange-400",
-    )
-    ButtonRed -> #(
-      "text-red-400",
-      "border-red-600",
-      "hover:bg-red-500/10",
-      "hover:text-red-300",
-      "hover:border-l-red-400",
-    )
-    ButtonGreen -> #(
-      "text-green-400",
-      "border-green-600",
-      "hover:bg-green-500/10",
-      "hover:text-green-300",
-      "hover:border-l-green-400",
-    )
-  }
+ let tailwind_classes = case variant, state {
+    ButtonTeal, ButtonStateNormal ->
+      "text-teal-400 border-teal-600 hover:bg-teal-950/50 hover:text-teal-300 hover:border-teal-400 cursor-pointer"
+    ButtonTeal, ButtonStatePending ->
+      "text-teal-400 border-teal-600 opacity-70 cursor-wait"
+    ButtonTeal, ButtonStateDisabled ->
+      "text-zinc-400 border-zinc-600 opacity-50 cursor-not-allowed"
 
-  let #(final_text_color, cursor_class, opacity_class) = case state {
-    ButtonStateNormal -> #(text_color, "cursor-default", "")
-    ButtonStatePending -> #("text-zinc-500", "cursor-wait", "opacity-60")
-    ButtonStateDisabled -> #(
-      "text-zinc-500",
-      "cursor-not-allowed",
-      "opacity-50",
-    )
+    ButtonOrange, ButtonStateNormal ->
+      "text-orange-400 border-orange-600 hover:bg-orange-950/50 hover:text-orange-300 hover:border-orange-400 cursor-pointer"
+    ButtonOrange, ButtonStatePending ->
+      "text-orange-400 border-orange-600  opacity-70 cursor-wait"
+    ButtonOrange, ButtonStateDisabled ->
+      "text-zinc-400 border-zinc-600 opacity-50 cursor-not-allowed"
+
+    ButtonRed, ButtonStateNormal ->
+      "text-red-400 border-red-600 hover:bg-red-950/50 hover:text-red-300 hover:border-red-400 cursor-pointer"
+    ButtonRed, ButtonStatePending ->
+      "text-red-400 border-red-600 opacity-70 cursor-wait"
+    ButtonRed, ButtonStateDisabled ->
+      "text-zinc-400 border-zinc-600 opacity-50 cursor-not-allowed"
+
+    ButtonGreen, ButtonStateNormal ->
+      "text-green-400 border-green-600 hover:bg-green-950/50 hover:text-green-300 hover:border-green-400"
+    ButtonGreen, ButtonStatePending ->
+      "text-green-400 border-green-600 opacity-70 cursor-wait"
+    ButtonGreen, ButtonStateDisabled ->
+      "text-zinc-400 border-zinc-600 opacity-50 cursor-not-allowed"
   }
 
   html.button(
     [
       attr.class(
-        "block w-full text-left px-4 py-2 text-sm "
-        <> final_text_color
-        <> " border-l "
-        <> border_color
-        <> " "
-        <> hover_bg
-        <> " "
-        <> hover_text
-        <> " "
-        <> hover_border
-        <> " transition-colors "
-        <> cursor_class
-        <> " "
-        <> opacity_class,
+        "block w-full text-left px-4 py-2 text-sm transition-colors duration-200 border-l-2 -left-[1px] relative "
+        <> tailwind_classes,
       ),
       attr.disabled(case state {
         ButtonStateNormal -> False
@@ -325,68 +259,53 @@ pub fn button_menu_custom(
   )
 }
 
-/// Primary button for forms and main actions
-pub fn button_primary(
-  text: String,
-  disabled: Bool,
-  onclick: msg,
-) -> Element(msg) {
-  html.button(
-    [
-      attr.classes([
-        #(
-          "w-full px-4 py-2 bg-gray-600 text-gray-300 rounded-md cursor-not-allowed transition-colors",
-          disabled,
-        ),
-        #(
-          "w-full px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700 transition-colors",
-          !disabled,
-        ),
-      ]),
-      attr.disabled(disabled),
-      event.on_mouse_down(onclick),
-    ],
-    [html.text(text)],
-  )
-}
-
 /// Consistent button for actions with mouse_down events
-pub fn button_action(
+pub fn button(
   text: String,
   variant: ButtonVariant,
-  disabled: Bool,
+  state: ButtonState,
   onmousedown: msg,
 ) -> Element(msg) {
-  let #(tailwind_classes_active, tailwind_classes_inactive) = case variant {
-    ButtonTeal -> #(
-      "text-teal-400 border-teal-600 bg-teal-500/10 hover:bg-teal-950/50 hover:text-teal-300 hover:border-teal-400",
-      "text-zinc-400 border-zinc-600 bg-zinc-500/10",
-    )
-    ButtonOrange -> #(
-      "text-orange-400 border-orange-600 bg-orange-500/10 hover:bg-orange-950/50 hover:text-orange-300 hover:border-orange-400",
-      "text-zinc-400 border-zinc-600 bg-zinc-500/10",
-    )
-    ButtonRed -> #(
-      "text-red-400 border-red-600 bg-red-500/10 hover:bg-red-950/50 hover:text-red-300 hover:border-red-400",
-      "text-zinc-400 border-zinc-600 bg-zinc-500/10",
-    )
-    ButtonGreen -> #(
-      "text-green-400 border-green-600 bg-green-500/10 hover:bg-green-950/50 hover:text-green-300 hover:border-green-400",
-      "text-zinc-400 border-zinc-600 bg-zinc-500/10",
-    )
-  }
+  let tailwind_classes = case variant, state {
+    ButtonTeal, ButtonStateNormal ->
+      "text-teal-400 border-teal-600 bg-teal-500/10 hover:bg-teal-950/50 hover:text-teal-300 hover:border-teal-400 cursor-pointer"
+    ButtonTeal, ButtonStatePending ->
+      "text-teal-400 border-teal-600 bg-teal-500/10 opacity-70 cursor-wait"
+    ButtonTeal, ButtonStateDisabled ->
+      "text-zinc-400 border-zinc-600 bg-zinc-500/10 opacity-50 cursor-not-allowed"
 
-  let tailwind_classes_common =
-    "px-4 py-2 border-r border-l transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+    ButtonOrange, ButtonStateNormal ->
+      "text-orange-400 border-orange-600 bg-orange-500/10 hover:bg-orange-950/50 hover:text-orange-300 hover:border-orange-400 cursor-pointer"
+    ButtonOrange, ButtonStatePending ->
+      "text-orange-400 border-orange-600 bg-orange-500/10 opacity-70 cursor-wait"
+    ButtonOrange, ButtonStateDisabled ->
+      "text-zinc-400 border-zinc-600 bg-zinc-500/10 opacity-50 cursor-not-allowed"
+
+    ButtonRed, ButtonStateNormal ->
+      "text-red-400 border-red-600 bg-red-500/10 hover:bg-red-950/50 hover:text-red-300 hover:border-red-400 cursor-pointer"
+    ButtonRed, ButtonStatePending ->
+      "text-red-400 border-red-600 bg-red-500/10 opacity-70 cursor-wait"
+    ButtonRed, ButtonStateDisabled ->
+      "text-zinc-400 border-zinc-600 bg-zinc-500/10 opacity-50 cursor-not-allowed"
+
+    ButtonGreen, ButtonStateNormal ->
+      "text-green-400 border-green-600 bg-green-500/10 hover:bg-green-950/50 hover:text-green-300 hover:border-green-400"
+    ButtonGreen, ButtonStatePending ->
+      "text-green-400 border-green-600 bg-green-500/10 opacity-70 cursor-wait"
+    ButtonGreen, ButtonStateDisabled ->
+      "text-zinc-400 border-zinc-600 bg-zinc-500/10 opacity-50 cursor-not-allowed"
+  }
 
   html.button(
     [
-      attr.classes([
-        #(tailwind_classes_common, True),
-        #(tailwind_classes_active, !disabled),
-        #(tailwind_classes_inactive, disabled),
-      ]),
-      attr.disabled(disabled),
+      attr.class(
+        "px-4 py-2 border-r border-l transition-colors duration-200 "
+        <> tailwind_classes,
+      ),
+      attr.disabled(case state {
+        ButtonStateNormal -> False
+        _ -> True
+      }),
       event.on_mouse_down(onmousedown),
     ],
     [html.text(text)],
@@ -607,10 +526,6 @@ pub fn content_container(content: List(Element(msg))) -> Element(msg) {
 
 pub fn flex_between(left: Element(msg), right: Element(msg)) -> Element(msg) {
   html.div([attr.class("flex items-center justify-between")], [left, right])
-}
-
-pub fn flex_center(content: List(Element(msg))) -> Element(msg) {
-  html.div([attr.class("flex items-center justify-center")], content)
 }
 
 // MODERN UTILITIES -----------------------------------------------------------

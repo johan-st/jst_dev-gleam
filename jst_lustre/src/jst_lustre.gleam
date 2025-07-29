@@ -11,6 +11,7 @@ import gleam/order
 import gleam/set.{type Set}
 import gleam/string
 import gleam/uri.{type Uri}
+import helpers
 import lustre
 import lustre/attribute.{type Attribute} as attr
 import lustre/effect.{type Effect}
@@ -34,15 +35,12 @@ import utils/short_url.{
   type ShortUrl, type ShortUrlCreateRequest, type ShortUrlListResponse,
   type ShortUrlUpdateRequest,
 }
-import helpers
 
 @external(javascript, "./app.ffi.mjs", "clipboard_copy")
 fn clipboard_copy(text: String) -> Nil
 
 @external(javascript, "./app.ffi.mjs", "set_timeout")
 fn set_timeout(callback: fn() -> Nil, delay: Int) -> Nil
-
-
 
 // MAIN ------------------------------------------------------------------------
 
@@ -194,6 +192,9 @@ pub type Msg {
   LoginUsernameUpdated(String)
   LoginPasswordUpdated(String)
   LoginFormSubmitted
+
+  // UI Components
+  NoOp
 }
 
 fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -1048,6 +1049,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         effect.none(),
       )
     }
+    NoOp -> #(model, effect.none())
   }
 }
 
@@ -1298,7 +1300,9 @@ fn page_from_model(model: Model) -> pages.Page {
                     session.Authenticated(session_auth) ->
                       pages.PageArticleEdit(article, session_auth)
                     _ ->
-                      pages.PageError(pages.AuthenticationRequired("edit article"))
+                      pages.PageError(pages.AuthenticationRequired(
+                        "edit article",
+                      ))
                   }
                 }
                 True, None -> {
@@ -1312,7 +1316,9 @@ fn page_from_model(model: Model) -> pages.Page {
                         session_auth,
                       )
                     _ ->
-                      pages.PageError(pages.AuthenticationRequired("edit article"))
+                      pages.PageError(pages.AuthenticationRequired(
+                        "edit article",
+                      ))
                   }
                 }
                 False, _ ->
@@ -1337,7 +1343,9 @@ fn page_from_model(model: Model) -> pages.Page {
         session.Authenticated(session_auth) ->
           pages.PageUrlShortInfo(short_code, session_auth)
         _ ->
-          pages.PageError(pages.AuthenticationRequired("access URL shortener info"))
+          pages.PageError(pages.AuthenticationRequired(
+            "access URL shortener info",
+          ))
       }
     }
     routes.DjotDemo -> pages.PageDjotDemo(model.djot_demo_content)
@@ -1405,14 +1413,22 @@ fn view_login_modal(model: Model) -> Element(Msg) {
         ),
       ],
       [
-        ui.button_action("Cancel", ui.ButtonRed, False, LoginFormToggled),
-        ui.button_action(
+        ui.button(
+          "Cancel",
+          ui.ButtonRed,
+          ui.ButtonStateNormal,
+          LoginFormToggled,
+        ),
+        ui.button(
           case model.login_loading {
             True -> "Signing In..."
             False -> "Sign In →"
           },
           ui.ButtonTeal,
-          model.login_username == "" || model.login_password == "",
+          case model.login_username == "" || model.login_password == "" {
+            True -> ui.ButtonStateDisabled
+            False -> ui.ButtonStateNormal
+          },
           LoginFormSubmitted,
         ),
       ],
@@ -1445,7 +1461,8 @@ fn view_header(model: Model) -> Element(Msg) {
           ]),
           html.div([attr.class("flex items-center space-x-8")], [
             // Desktop navigation
-            html.ul([attr.class("hidden sm:flex space-x-8 pr-2")], 
+            html.ul(
+              [attr.class("hidden sm:flex space-x-8 pr-2")],
               list.flatten([
                 [
                   view_header_link(
@@ -1486,14 +1503,14 @@ fn view_header(model: Model) -> Element(Msg) {
                     attributes: [],
                   ),
                 ],
-              ])
+              ]),
             ),
             // Hamburger menu for auth actions
             html.div([attr.class("relative")], [
               html.button(
                 [
                   attr.class(
-                    "px-4 py-2 border-l-2 border-teal-600 border-r border-r-zinc-700 border-t border-t-zinc-700 border-b border-b-zinc-700 bg-zinc-800 hover:bg-teal-500/10 hover:border-l-teal-400 transition-colors duration-200",
+                    "px-4 py-2 bg-zinc-800 hover:bg-teal-500/10 transition-colors duration-200",
                   ),
                   event.on_mouse_down(ProfileMenuToggled),
                 ],
@@ -1510,7 +1527,7 @@ fn view_header(model: Model) -> Element(Msg) {
                   html.div(
                     [
                       attr.class(
-                        "absolute right-0 mt-2 w-48 shadow-lg bg-zinc-800 border-l-2 border-teal-600 border-r border-r-zinc-700 border-t border-t-zinc-700 border-b border-b-zinc-700 z-50",
+                        "absolute right-0 mt-2 w-48 shadow-lg bg-zinc-800 border border-l-2 border-zinc-700  z-50",
                       ),
                     ],
                     [
@@ -1561,17 +1578,37 @@ fn view_header(model: Model) -> Element(Msg) {
                                 attributes: top_nav_attributes_small,
                               ),
                             ],
-                          ])
+                          ]),
                         ),
                         case model.session {
-                          session.Unauthenticated -> 
-                            ui.button_menu("Login", ui.ButtonTeal, ui.ButtonStateNormal, LoginFormToggled)
-                          session.Pending -> 
-                            ui.button_menu("logging in..", ui.ButtonTeal, ui.ButtonStatePending, AuthLogoutClicked)
-                          session.Authenticated(_auth_sess) -> 
-                            ui.button_menu("Logout", ui.ButtonOrange, ui.ButtonStateNormal, AuthLogoutClicked)
+                          session.Unauthenticated ->
+                            ui.button_menu(
+                              "Login",
+                              ui.ButtonTeal,
+                              ui.ButtonStateNormal,
+                              LoginFormToggled,
+                            )
+                          session.Pending ->
+                            ui.button_menu(
+                              "logging in..",
+                              ui.ButtonTeal,
+                              ui.ButtonStatePending,
+                              AuthLogoutClicked,
+                            )
+                          session.Authenticated(_auth_sess) ->
+                            ui.button_menu(
+                              "Logout",
+                              ui.ButtonOrange,
+                              ui.ButtonStateNormal,
+                              AuthLogoutClicked,
+                            )
                         },
-                        ui.button_menu("Check", ui.ButtonTeal, ui.ButtonStateNormal, AuthCheckClicked),
+                        ui.button_menu(
+                          "Check",
+                          ui.ButtonTeal,
+                          ui.ButtonStateNormal,
+                          AuthCheckClicked,
+                        ),
                         case model.debug_use_local_storage {
                           True ->
                             ui.button_menu_custom(
@@ -1626,7 +1663,10 @@ fn view_header_link(
   html.li(
     list.append(extra_attr, [
       attr.classes([
-        #("relative cursor-pointer transition-all duration-300 ease-out px-3 py-2 rounded-lg", True),
+        #(
+          "relative cursor-pointer transition-all duration-300 ease-out px-3 py-2 rounded-lg",
+          True,
+        ),
         #("active text-pink-500", routes.is_sub(route: to, maybe_sub: curr)),
       ]),
       event.on_mouse_down(UserMouseDownNavigation(to |> routes.to_uri)),
@@ -1641,8 +1681,10 @@ fn view_index() -> List(Element(Msg)) {
   let assert Ok(nats_uri) = uri.parse("/article/nats-all-the-way-down")
   [
     ui.page_header(
-      "Welcome to jst.dev!", 
-      Some("...or, A lesson on overengineering for fun and... well just for fun.")
+      "Welcome to jst.dev!",
+      Some(
+        "...or, A lesson on overengineering for fun and... well just for fun.",
+      ),
     ),
     ui.content_container([
       html.div([attr.class("prose prose-lg text-zinc-300 max-w-none")], [
@@ -1650,7 +1692,7 @@ fn view_index() -> List(Element(Msg)) {
           html.text(
             "This site and its underlying IT infrastructure is the primary 
             place for me to experiment with technologies and topologies. I 
-            also share some of my thoughts and learnings here."
+            also share some of my thoughts and learnings here.",
           ),
         ]),
         html.p([attr.class("mb-6")], [
@@ -1658,18 +1700,23 @@ fn view_index() -> List(Element(Msg)) {
             "This site and its underlying IT infrastructure is the primary 
             place for me to experiment with technologies and topologies. I 
             also share some of my thoughts and learnings here. Feel free to 
-            check out my overview: "
+            check out my overview: ",
           ),
-          ui.link_primary("NATS all the way down →", UserMouseDownNavigation(nats_uri)),
+          ui.link_primary(
+            "NATS all the way down →",
+            UserMouseDownNavigation(nats_uri),
+          ),
         ]),
         html.p([attr.class("mb-6")], [
-          html.text("It too is a work in progress and I mostly keep it here for my own reference."),
+          html.text(
+            "It too is a work in progress and I mostly keep it here for my own reference.",
+          ),
         ]),
         html.p([attr.class("mb-6")], [
           html.text(
             "I'm a software developer and writer, exploring modern technologies 
             and sharing insights from my experiments. This space serves as both 
-            a playground for new ideas and a platform for documenting the journey."
+            a playground for new ideas and a platform for documenting the journey.",
           ),
         ]),
       ]),
@@ -1766,15 +1813,17 @@ fn view_article_listing(
       }
     })
 
-    let header_section = [
-    ui.flex_between(
-      ui.page_title("Articles"),
-      case session {
-        session.Authenticated(_) ->
-          ui.button_action("New Article", ui.ButtonTeal, False, ArticleCreateClicked)
-        _ -> element.none()
-      },
-    ),
+  let header_section = [
+    ui.flex_between(ui.page_title("Articles"), case session {
+      session.Authenticated(_) ->
+        ui.button(
+          "New Article",
+          ui.ButtonTeal,
+          ui.ButtonStateNormal,
+          ArticleCreateClicked,
+        )
+      _ -> element.none()
+    }),
   ]
 
   // Show helpful message when no articles are available
@@ -1785,11 +1834,17 @@ fn view_article_listing(
         case session {
           session.Authenticated(_) ->
             "Ready to share your thoughts? Create your first article to get started."
-          _ -> "No published articles are available yet. Check back later for new content!"
+          _ ->
+            "No published articles are available yet. Check back later for new content!"
         },
         case session {
           session.Authenticated(_) ->
-            Some(ui.button_action("Create Your First Article", ui.ButtonTeal, False, ArticleCreateClicked))
+            Some(ui.button(
+              "Create Your First Article",
+              ui.ButtonTeal,
+              ui.ButtonStateNormal,
+              ArticleCreateClicked,
+            ))
           _ -> None
         },
       ),
@@ -1827,14 +1882,15 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
       [
         // Toggle button for mobile
         html.div([attr.class("lg:hidden mb-4 flex justify-center")], [
-                  ui.button_secondary(
-          case model.edit_view_mode {
-            EditViewModeEdit -> "Show Preview"
-            EditViewModePreview -> "Show Editor"
-          },
-          ui.ButtonStateNormal,
-          EditViewModeToggled,
-        ),
+          ui.button(
+            case model.edit_view_mode {
+              EditViewModeEdit -> "Show Preview"
+              EditViewModePreview -> "Show Editor"
+            },
+            ui.ButtonTeal,
+            ui.ButtonStateNormal,
+            EditViewModeToggled,
+          ),
         ]),
         // Main content area
         html.div(
@@ -2254,11 +2310,12 @@ fn view_url_create_form(model: Model) -> Element(Msg) {
           None,
           ShortUrlFormShortCodeUpdated,
         ),
-        ui.button_primary(
+        ui.button(
           "Create Short URL",
+          ui.ButtonTeal,
           case helpers.validate_target_url(model.short_url_form_target_url) {
-            #(True, None) -> False
-            _ -> True
+            #(True, None) -> ui.ButtonStateNormal
+            _ -> ui.ButtonStateDisabled
           },
           ShortUrlCreateClicked(
             model.short_url_form_short_code,
@@ -2700,8 +2757,18 @@ fn view_delete_confirmation(
         ]),
       ],
       [
-        ui.button_secondary("Cancel", ui.ButtonStateNormal, ShortUrlDeleteCancelClicked),
-        ui.button_action("Delete", ui.ButtonRed, False, ShortUrlDeleteConfirmClicked(delete_id)),
+        ui.button(
+          "Cancel",
+          ui.ButtonTeal,
+          ui.ButtonStateNormal,
+          ShortUrlDeleteCancelClicked,
+        ),
+        ui.button(
+          "Delete",
+          ui.ButtonRed,
+          ui.ButtonStateNormal,
+          ShortUrlDeleteConfirmClicked(delete_id),
+        ),
       ],
       ShortUrlDeleteCancelClicked,
     ),
@@ -2794,22 +2861,22 @@ fn view_url_info_page(model: Model, short_code: String) -> List(Element(Msg)) {
                 ]),
               ]),
               html.div([attr.class("mt-6 flex gap-4")], [
-                ui.button_action(
+                ui.button(
                   "Back to URLs",
                   ui.ButtonTeal,
-                  False,
+                  ui.ButtonStateNormal,
                   UserMouseDownNavigation(routes.to_uri(routes.UrlShortIndex)),
                 ),
-                ui.button_action(
+                ui.button(
                   case model.copy_feedback == Some(url.short_code) {
                     True -> "Copied!"
                     False -> "Copy URL"
                   },
                   ui.ButtonTeal,
-                  False,
+                  ui.ButtonStateNormal,
                   ShortUrlCopyClicked(url.short_code),
                 ),
-                ui.button_action(
+                ui.button(
                   case url.is_active {
                     True -> "Deactivate"
                     False -> "Activate"
@@ -2818,13 +2885,13 @@ fn view_url_info_page(model: Model, short_code: String) -> List(Element(Msg)) {
                     True -> ui.ButtonOrange
                     False -> ui.ButtonTeal
                   },
-                  False,
+                  ui.ButtonStateNormal,
                   ShortUrlToggleActiveClicked(url.id, url.is_active),
                 ),
-                ui.button_action(
+                ui.button(
                   "Delete URL",
                   ui.ButtonRed,
-                  False,
+                  ui.ButtonStateNormal,
                   ShortUrlDeleteClicked(url.id),
                 ),
               ]),
@@ -2993,20 +3060,18 @@ fn view_title(title: String, slug: String) -> Element(msg) {
   html.h1(
     [
       attr.id("article-title-" <> slug),
-      attr.class("page-title text-2xl sm:text-3xl md:text-4xl text-pink-600 font-light article-title leading-tight"),
+      attr.class(
+        "page-title text-2xl sm:text-3xl md:text-4xl text-pink-600 font-light article-title leading-tight",
+      ),
     ],
     [html.text(title)],
   )
 }
 
 fn view_subtitle(title: String, slug: String) -> Element(msg) {
-  html.div(
-    [
-      attr.id("article-subtitle-" <> slug),
-      attr.class("page-subtitle"),
-    ],
-    [html.text(title)],
-  )
+  html.div([attr.id("article-subtitle-" <> slug), attr.class("page-subtitle")], [
+    html.text(title),
+  ])
 }
 
 fn view_leading(text: String, slug: String) -> Element(msg) {
@@ -3485,8 +3550,10 @@ to find about the new constructions that are available.
 
 fn view_ui_components() -> List(Element(Msg)) {
   [
-    ui.page_header("UI Components", Some("Showcase of all available UI components")),
-    
+    ui.page_header(
+      "UI Components",
+      Some("Showcase of all available UI components"),
+    ),
     // Loading States Section
     html.section([attr.class("space-y-6")], [
       html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
@@ -3521,7 +3588,6 @@ fn view_ui_components() -> List(Element(Msg)) {
         ]),
       ]),
     ]),
-
     // Buttons Section
     html.section([attr.class("space-y-6")], [
       html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
@@ -3529,38 +3595,144 @@ fn view_ui_components() -> List(Element(Msg)) {
       ]),
       ui.card([
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
-          html.text("Button States"),
-        ]),
-        html.div([attr.class("space-y-4")], [
-          html.div([attr.class("flex flex-wrap gap-4")], [
-            ui.button_secondary("Normal", ui.ButtonStateNormal, UserNavigatedTo(routes.to_uri(routes.UiComponents))),
-            ui.button_secondary("Pending", ui.ButtonStatePending, UserNavigatedTo(routes.to_uri(routes.UiComponents))),
-            ui.button_secondary("Disabled", ui.ButtonStateDisabled, UserNavigatedTo(routes.to_uri(routes.UiComponents))),
-          ]),
-        ]),
-        html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4 mt-8")], [
           html.text("Button Variants"),
         ]),
-        html.div([attr.class("space-y-4")], [
-          html.div([attr.class("flex flex-wrap gap-4")], [
-            ui.button_action("Teal", ui.ButtonTeal, False, UserNavigatedTo(routes.to_uri(routes.UiComponents))),
-            ui.button_action("Orange", ui.ButtonOrange, False, UserNavigatedTo(routes.to_uri(routes.UiComponents))),
-            ui.button_action("Red", ui.ButtonRed, False, UserNavigatedTo(routes.to_uri(routes.UiComponents))),
-            ui.button_action("Green", ui.ButtonGreen, False, UserNavigatedTo(routes.to_uri(routes.UiComponents))),
+        // Teal Variant - All States
+        html.div([attr.class("mb-6")], [
+          html.h4([attr.class("text-md font-medium text-teal-400 mb-3")], [
+            html.text("Teal"),
+          ]),
+          html.div([attr.class("flex flex-wrap gap-3")], [
+            ui.button(
+              "Normal",
+              ui.ButtonTeal,
+              ui.ButtonStateNormal,
+              UserNavigatedTo(routes.to_uri(routes.UiComponents)),
+            ),
+            ui.button(
+              "Pending",
+              ui.ButtonTeal,
+              ui.ButtonStatePending,
+              UserNavigatedTo(routes.to_uri(routes.UiComponents)),
+            ),
+            ui.button(
+              "Disabled",
+              ui.ButtonTeal,
+              ui.ButtonStateDisabled,
+              UserNavigatedTo(routes.to_uri(routes.UiComponents)),
+            ),
+          ]),
+        ]),
+        // Orange Variant - All States
+        html.div([attr.class("mb-6")], [
+          html.h4([attr.class("text-md font-medium text-orange-400 mb-3")], [
+            html.text("Orange"),
+          ]),
+          html.div([attr.class("flex flex-wrap gap-3")], [
+            ui.button(
+              "Normal",
+              ui.ButtonOrange,
+              ui.ButtonStateNormal,
+              UserNavigatedTo(routes.to_uri(routes.UiComponents)),
+            ),
+            ui.button(
+              "Pending",
+              ui.ButtonOrange,
+              ui.ButtonStatePending,
+              UserNavigatedTo(routes.to_uri(routes.UiComponents)),
+            ),
+            ui.button(
+              "Disabled",
+              ui.ButtonOrange,
+              ui.ButtonStateDisabled,
+              UserNavigatedTo(routes.to_uri(routes.UiComponents)),
+            ),
+          ]),
+        ]),
+        // Red Variant - All States
+        html.div([attr.class("mb-6")], [
+          html.h4([attr.class("text-md font-medium text-red-400 mb-3")], [
+            html.text("Red"),
+          ]),
+          html.div([attr.class("flex flex-wrap gap-3")], [
+            ui.button(
+              "Normal",
+              ui.ButtonRed,
+              ui.ButtonStateNormal,
+              UserNavigatedTo(routes.to_uri(routes.UiComponents)),
+            ),
+            ui.button(
+              "Pending",
+              ui.ButtonRed,
+              ui.ButtonStatePending,
+              UserNavigatedTo(routes.to_uri(routes.UiComponents)),
+            ),
+            ui.button(
+              "Disabled",
+              ui.ButtonRed,
+              ui.ButtonStateDisabled,
+              UserNavigatedTo(routes.to_uri(routes.UiComponents)),
+            ),
+          ]),
+        ]),
+        // Green Variant - All States
+        html.div([attr.class("mb-6")], [
+          html.h4([attr.class("text-md font-medium text-green-400 mb-3")], [
+            html.text("Green"),
+          ]),
+          html.div([attr.class("flex flex-wrap gap-3")], [
+            ui.button(
+              "Normal",
+              ui.ButtonGreen,
+              ui.ButtonStateNormal,
+              UserNavigatedTo(routes.to_uri(routes.UiComponents)),
+            ),
+            ui.button(
+              "Pending",
+              ui.ButtonGreen,
+              ui.ButtonStatePending,
+              UserNavigatedTo(routes.to_uri(routes.UiComponents)),
+            ),
+            ui.button(
+              "Disabled",
+              ui.ButtonGreen,
+              ui.ButtonStateDisabled,
+              UserNavigatedTo(routes.to_uri(routes.UiComponents)),
+            ),
           ]),
         ]),
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4 mt-8")], [
           html.text("Menu Buttons"),
         ]),
-        html.div([attr.class("max-w-sm")], [
-          ui.button_menu("Teal Menu", ui.ButtonTeal, ui.ButtonStateNormal, UserNavigatedTo(routes.to_uri(routes.UiComponents))),
-          ui.button_menu("Orange Menu", ui.ButtonOrange, ui.ButtonStateNormal, UserNavigatedTo(routes.to_uri(routes.UiComponents))),
-          ui.button_menu("Red Menu", ui.ButtonRed, ui.ButtonStateNormal, UserNavigatedTo(routes.to_uri(routes.UiComponents))),
-          ui.button_menu("Green Menu", ui.ButtonGreen, ui.ButtonStateNormal, UserNavigatedTo(routes.to_uri(routes.UiComponents))),
-        ]),
+        html.div(
+          [attr.class("max-w-sm")],
+          list.map(
+            [
+              #(ui.ButtonTeal, ui.ButtonStateNormal, "Teal Menu (Normal)"),
+              #(ui.ButtonTeal, ui.ButtonStatePending, "Teal Menu (Pending)"),
+              #(ui.ButtonTeal, ui.ButtonStateDisabled, "Teal Menu (Disabled)"),
+              #(ui.ButtonOrange, ui.ButtonStateNormal, "Orange Menu (Normal)"),
+              #(ui.ButtonOrange, ui.ButtonStatePending, "Orange Menu (Pending)"),
+              #(
+                ui.ButtonOrange,
+                ui.ButtonStateDisabled,
+                "Orange Menu (Disabled)",
+              ),
+              #(ui.ButtonRed, ui.ButtonStateNormal, "Red Menu (Normal)"),
+              #(ui.ButtonRed, ui.ButtonStatePending, "Red Menu (Pending)"),
+              #(ui.ButtonRed, ui.ButtonStateDisabled, "Red Menu (Disabled)"),
+              #(ui.ButtonGreen, ui.ButtonStateNormal, "Green Menu (Normal)"),
+              #(ui.ButtonGreen, ui.ButtonStatePending, "Green Menu (Pending)"),
+              #(ui.ButtonGreen, ui.ButtonStateDisabled, "Green Menu (Disabled)"),
+            ],
+            fn(btn_var) {
+              let #(variant, state, text) = btn_var
+              ui.button_menu(text, variant, state, NoOp)
+            },
+          ),
+        ),
       ]),
     ]),
-
     // Form Components Section
     html.section([attr.class("space-y-6")], [
       html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
@@ -3571,13 +3743,36 @@ fn view_ui_components() -> List(Element(Msg)) {
           html.text("Input Fields"),
         ]),
         html.div([attr.class("max-w-md space-y-6")], [
-          ui.form_input("Email", "user@example.com", "Enter your email", "email", True, None, fn(_) { UserNavigatedTo(routes.to_uri(routes.UiComponents)) }),
-          ui.form_input("Error State", "", "This field has an error", "text", True, Some("This field is required"), fn(_) { UserNavigatedTo(routes.to_uri(routes.UiComponents)) }),
-          ui.form_textarea("Description", "Sample content", "Enter description", "h-32", False, None, fn(_) { UserNavigatedTo(routes.to_uri(routes.UiComponents)) }),
+          ui.form_input(
+            "Email",
+            "user@example.com",
+            "Enter your email",
+            "email",
+            True,
+            None,
+            fn(_) { UserNavigatedTo(routes.to_uri(routes.UiComponents)) },
+          ),
+          ui.form_input(
+            "Error State",
+            "",
+            "This field has an error",
+            "text",
+            True,
+            Some("This field is required"),
+            fn(_) { UserNavigatedTo(routes.to_uri(routes.UiComponents)) },
+          ),
+          ui.form_textarea(
+            "Description",
+            "Sample content",
+            "Enter description",
+            "h-32",
+            False,
+            None,
+            fn(_) { UserNavigatedTo(routes.to_uri(routes.UiComponents)) },
+          ),
         ]),
       ]),
     ]),
-
     // Status & Feedback Section
     html.section([attr.class("space-y-6")], [
       html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
@@ -3597,14 +3792,28 @@ fn view_ui_components() -> List(Element(Msg)) {
           html.text("Notices"),
         ]),
         html.div([attr.class("space-y-4")], [
-          ui.notice("Success message", ui.ButtonGreen, True, Some(UserNavigatedTo(routes.to_uri(routes.UiComponents)))),
-          ui.notice("Warning message", ui.ButtonOrange, True, Some(UserNavigatedTo(routes.to_uri(routes.UiComponents)))),
-          ui.notice("Error message", ui.ButtonRed, True, Some(UserNavigatedTo(routes.to_uri(routes.UiComponents)))),
+          ui.notice(
+            "Success message",
+            ui.ButtonGreen,
+            True,
+            Some(UserNavigatedTo(routes.to_uri(routes.UiComponents))),
+          ),
+          ui.notice(
+            "Warning message",
+            ui.ButtonOrange,
+            True,
+            Some(UserNavigatedTo(routes.to_uri(routes.UiComponents))),
+          ),
+          ui.notice(
+            "Error message",
+            ui.ButtonRed,
+            True,
+            Some(UserNavigatedTo(routes.to_uri(routes.UiComponents))),
+          ),
           ui.notice("Info message", ui.ButtonTeal, False, None),
         ]),
       ]),
     ]),
-
     // Error States Section
     html.section([attr.class("space-y-6")], [
       html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
@@ -3612,12 +3821,21 @@ fn view_ui_components() -> List(Element(Msg)) {
       ]),
       ui.card([
         html.div([attr.class("space-y-8")], [
-          ui.error_state(ui.ErrorNetwork, "Network Error", "Failed to connect to server", Some(UserNavigatedTo(routes.to_uri(routes.UiComponents)))),
-          ui.error_state(ui.ErrorNotFound, "Not Found", "The requested resource was not found", None),
+          ui.error_state(
+            ui.ErrorNetwork,
+            "Network Error",
+            "Failed to connect to server",
+            Some(UserNavigatedTo(routes.to_uri(routes.UiComponents))),
+          ),
+          ui.error_state(
+            ui.ErrorNotFound,
+            "Not Found",
+            "The requested resource was not found",
+            None,
+          ),
         ]),
       ]),
     ]),
-
     // Layout Components Section  
     html.section([attr.class("space-y-6")], [
       html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
@@ -3648,11 +3866,15 @@ fn view_ui_components() -> List(Element(Msg)) {
         ui.empty_state(
           "No Items Found",
           "There are no items to display at the moment.",
-          Some(ui.button_primary("Create New", False, UserNavigatedTo(routes.to_uri(routes.UiComponents))))
+          Some(ui.button(
+            "Create New",
+            ui.ButtonTeal,
+            ui.ButtonStateNormal,
+            UserNavigatedTo(routes.to_uri(routes.UiComponents)),
+          )),
         ),
       ]),
     ]),
-
     // Skeleton Loaders Section
     html.section([attr.class("space-y-6")], [
       html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
@@ -3678,7 +3900,6 @@ fn view_ui_components() -> List(Element(Msg)) {
         ]),
       ]),
     ]),
-
     // Typography & Links Section
     html.section([attr.class("space-y-6")], [
       html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
@@ -3692,7 +3913,10 @@ fn view_ui_components() -> List(Element(Msg)) {
           ui.gradient_text("Gradient Text Effect"),
           html.p([attr.class("text-zinc-300")], [
             html.text("Regular text with "),
-            ui.link_primary("primary link", UserNavigatedTo(routes.to_uri(routes.UiComponents))),
+            ui.link_primary(
+              "primary link",
+              UserNavigatedTo(routes.to_uri(routes.UiComponents)),
+            ),
             html.text(" embedded."),
           ]),
         ]),
