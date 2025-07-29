@@ -339,20 +339,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               published_at: _,
               revision: _,
               tags: _,
-            ))
-            | Ok(ArticleV1(
-                id:,
-                slug: _,
-                author: _,
-                title: _,
-                leading: _,
-                subtitle: _,
-                content: NotInitialized,
-                draft: _,
-                published_at: _,
-                revision: _,
-                tags: _,
-              )) -> {
+            )) -> {
               let articles_with_pending_content =
                 list.map(articles, fn(article) {
                   case article.slug == slug {
@@ -1409,18 +1396,13 @@ fn view_login_modal(model: Model) -> Element(Msg) {
         ),
       ],
       [
-        ui.button(
-          "Cancel",
-          ui.ButtonRed,
-          ui.ButtonStateNormal,
-          LoginFormToggled,
-        ),
+        ui.button("Cancel", ui.ColorRed, ui.ButtonStateNormal, LoginFormToggled),
         ui.button(
           case model.login_loading {
             True -> "Signing In..."
             False -> "Sign In →"
           },
-          ui.ButtonTeal,
+          ui.ColorTeal,
           case model.login_username == "" || model.login_password == "" {
             True -> ui.ButtonStateDisabled
             False -> ui.ButtonStateNormal
@@ -1580,28 +1562,28 @@ fn view_header(model: Model) -> Element(Msg) {
                           session.Unauthenticated ->
                             ui.button_menu(
                               "Login",
-                              ui.ButtonTeal,
+                              ui.ColorTeal,
                               ui.ButtonStateNormal,
                               LoginFormToggled,
                             )
                           session.Pending ->
                             ui.button_menu(
                               "logging in..",
-                              ui.ButtonTeal,
+                              ui.ColorTeal,
                               ui.ButtonStatePending,
                               AuthLogoutClicked,
                             )
                           session.Authenticated(_auth_sess) ->
                             ui.button_menu(
                               "Logout",
-                              ui.ButtonOrange,
+                              ui.ColorOrange,
                               ui.ButtonStateNormal,
                               AuthLogoutClicked,
                             )
                         },
                         ui.button_menu(
                           "Check",
-                          ui.ButtonTeal,
+                          ui.ColorTeal,
                           ui.ButtonStateNormal,
                           AuthCheckClicked,
                         ),
@@ -1617,7 +1599,7 @@ fn view_header(model: Model) -> Element(Msg) {
                                   ),
                                 ]),
                               ],
-                              ui.ButtonOrange,
+                              ui.ColorOrange,
                               ui.ButtonStateNormal,
                               DebugToggleLocalStorage,
                             )
@@ -1632,7 +1614,7 @@ fn view_header(model: Model) -> Element(Msg) {
                                   ),
                                 ]),
                               ],
-                              ui.ButtonTeal,
+                              ui.ColorTeal,
                               ui.ButtonStateNormal,
                               DebugToggleLocalStorage,
                             )
@@ -1721,7 +1703,7 @@ fn view_index() -> List(Element(Msg)) {
 }
 
 fn view_loading() -> List(Element(Msg)) {
-  [ui.loading_state("Loading page...")]
+  [ui.loading_state("Loading page...", None, ui.ColorNeutral)]
 }
 
 fn view_article_listing(
@@ -1814,7 +1796,7 @@ fn view_article_listing(
       session.Authenticated(_) ->
         ui.button(
           "New Article",
-          ui.ButtonTeal,
+          ui.ColorTeal,
           ui.ButtonStateNormal,
           ArticleCreateClicked,
         )
@@ -1837,7 +1819,7 @@ fn view_article_listing(
           session.Authenticated(_) ->
             Some(ui.button(
               "Create Your First Article",
-              ui.ButtonTeal,
+              ui.ColorTeal,
               ui.ButtonStateNormal,
               ArticleCreateClicked,
             ))
@@ -1883,7 +1865,7 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
               EditViewModeEdit -> "Show Preview"
               EditViewModePreview -> "Show Editor"
             },
-            ui.ButtonTeal,
+            ui.ColorTeal,
             ui.ButtonStateNormal,
             EditViewModeToggled,
           ),
@@ -2192,7 +2174,10 @@ fn view_article(
 ) -> List(Element(Msg)) {
   let content: List(Element(Msg)) = case article.content {
     NotInitialized -> [view_error("content not initialized")]
-    Pending -> [ui.loading_indicator_bar(), ui.loading_indicator_subtle()]
+    Pending -> [
+      ui.loading_bar(ui.ColorTeal),
+      ui.loading("Loading article...", ui.ColorNeutral),
+    ]
     Loaded(content_string) | Optimistic(content_string) ->
       jot_to_lustre.to_lustre(content_string)
     Errored(error) -> [view_error(error_string.http_error(error))]
@@ -2308,7 +2293,7 @@ fn view_url_create_form(model: Model) -> Element(Msg) {
         ),
         ui.button(
           "Create Short URL",
-          ui.ButtonTeal,
+          ui.ColorTeal,
           case helpers.validate_target_url(model.short_url_form_target_url) {
             #(True, None) -> ui.ButtonStateNormal
             _ -> ui.ButtonStateDisabled
@@ -2332,7 +2317,7 @@ fn view_url_list(model: Model) -> Element(Msg) {
           html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
             html.text("URLs"),
           ]),
-          ui.loading_indicator_small(),
+          ui.loading("Loading URLs...", ui.ColorNeutral),
         ],
       )
     Pending ->
@@ -2342,7 +2327,7 @@ fn view_url_list(model: Model) -> Element(Msg) {
           html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
             html.text("URLs"),
           ]),
-          ui.loading_indicator_small(),
+          ui.loading("Loading URLs...", ui.ColorNeutral),
         ],
       )
     Loaded(short_urls) -> {
@@ -2423,7 +2408,7 @@ fn view_url_list(model: Model) -> Element(Msg) {
           html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
             html.text("URLs"),
           ]),
-          ui.loading_indicator_small(),
+          ui.loading("Loading URLs...", ui.ColorNeutral),
         ],
       )
   }
@@ -2755,13 +2740,13 @@ fn view_delete_confirmation(
       [
         ui.button(
           "Cancel",
-          ui.ButtonTeal,
+          ui.ColorTeal,
           ui.ButtonStateNormal,
           ShortUrlDeleteCancelClicked,
         ),
         ui.button(
           "Delete",
-          ui.ButtonRed,
+          ui.ColorRed,
           ui.ButtonStateNormal,
           ShortUrlDeleteConfirmClicked(delete_id),
         ),
@@ -2859,7 +2844,7 @@ fn view_url_info_page(model: Model, short_code: String) -> List(Element(Msg)) {
               html.div([attr.class("mt-6 flex gap-4")], [
                 ui.button(
                   "Back to URLs",
-                  ui.ButtonTeal,
+                  ui.ColorTeal,
                   ui.ButtonStateNormal,
                   UserMouseDownNavigation(routes.to_uri(routes.UrlShortIndex)),
                 ),
@@ -2868,7 +2853,7 @@ fn view_url_info_page(model: Model, short_code: String) -> List(Element(Msg)) {
                     True -> "Copied!"
                     False -> "Copy URL"
                   },
-                  ui.ButtonTeal,
+                  ui.ColorTeal,
                   ui.ButtonStateNormal,
                   ShortUrlCopyClicked(url.short_code),
                 ),
@@ -2878,15 +2863,15 @@ fn view_url_info_page(model: Model, short_code: String) -> List(Element(Msg)) {
                     False -> "Activate"
                   },
                   case url.is_active {
-                    True -> ui.ButtonOrange
-                    False -> ui.ButtonTeal
+                    True -> ui.ColorOrange
+                    False -> ui.ColorTeal
                   },
                   ui.ButtonStateNormal,
                   ShortUrlToggleActiveClicked(url.id, url.is_active),
                 ),
                 ui.button(
                   "Delete URL",
-                  ui.ButtonRed,
+                  ui.ColorRed,
                   ui.ButtonStateNormal,
                   ShortUrlDeleteClicked(url.id),
                 ),
@@ -3083,20 +3068,6 @@ fn view_leading(text: String, slug: String) -> Element(msg) {
   )
 }
 
-// fn view_h3(title: String) -> Element(msg) {
-//   html.h3(
-//     [attr.class("text-xl text-pink-700 font-light"), attr.class("article-h3")],
-//     [html.text(title)],
-//   )
-// }
-
-// fn view_h4(title: String) -> Element(msg) {
-//   html.h4(
-//     [attr.class("text-lg text-pink-700 font-light"), attr.class("article-h4")],
-//     [html.text(title)],
-//   )
-// }
-
 fn view_simple_paragraph(text: String) -> Element(Msg) {
   html.p([attr.class("pt-8")], [html.text(text)])
 }
@@ -3105,46 +3076,11 @@ fn view_error(error_string: String) -> Element(Msg) {
   ui.error_state(ui.ErrorGeneric, "Something went wrong", error_string, None)
 }
 
-fn view_link(url: Uri, title: String) -> Element(Msg) {
-  html.a(
-    [
-      attr.href(uri.to_string(url)),
-      attr.class("text-pink-700 hover:underline cursor-pointer"),
-      event.on_mouse_down(UserMouseDownNavigation(url)),
-    ],
-    [html.text(title)],
-  )
-}
-
-// fn view_link_external(url: Uri, title: String) -> Element(Msg) {
-//   html.a(
-//     [
-//       attr.href(uri.to_string(url)),
-//       attr.class("text-pink-700 hover:underline cursor-pointer"),
-//       attr.target("_blank"),
-//     ],
-//     [html.text(title)],
-//   )
-// }
-
-// fn view_link_missing(url: Uri, title: String) -> Element(Msg) {
-//   html.a(
-//     [
-//       event.on_mouse_down(UserMouseDownNavigation(url)),
-//       attr.href(uri.to_string(url)),
-//       attr.class("hover:underline cursor-pointer"),
-//     ],
-//     [
-//       html.span([attr.class("text-orange-500")], [html.text("broken link: ")]),
-//       html.text(title),
-//     ],
-//   )
-// }
-
-// Content editor functions removed - now using simple Djot textarea
-
 fn view_article_listing_loading() -> List(Element(Msg)) {
-  [ui.page_title("Articles"), ui.loading_state("Loading articles...")]
+  [
+    ui.page_title("Articles"),
+    ui.loading_state("Loading articles...", None, ui.ColorNeutral),
+  ]
 }
 
 fn view_internal_link(uri: Uri, content: List(Element(Msg))) -> Element(Msg) {
@@ -3157,13 +3093,6 @@ fn view_internal_link(uri: Uri, content: List(Element(Msg))) -> Element(Msg) {
     content,
   )
 }
-
-// fn view_authentication_required(action: String) -> List(Element(Msg)) {
-//   [
-//     view_title("Authentication Required", "auth-required"),
-//     view_simple_paragraph("You need to be logged in to " <> action),
-//   ]
-// }
 
 fn view_djot_demo(content: String) -> List(Element(Msg)) {
   let preview_content = case content {
@@ -3557,30 +3486,44 @@ fn view_ui_components() -> List(Element(Msg)) {
       ]),
       ui.card([
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
-          html.text("Spinners"),
+          html.text("Loading Indicators"),
         ]),
-        html.div([attr.class("flex items-center space-x-8 mb-6")], [
-          html.div([attr.class("text-center")], [
-            ui.loading_spinner(),
-            html.p([attr.class("text-sm text-zinc-400 mt-2")], [
-              html.text("Small"),
-            ]),
-          ]),
-          html.div([attr.class("text-center")], [
-            ui.loading_spinner_large(),
-            html.p([attr.class("text-sm text-zinc-400 mt-2")], [
-              html.text("Large"),
-            ]),
+        html.div([attr.class("space-y-6")], [
+          // All color variants for loading
+          html.div([attr.class("grid grid-cols-2 md:grid-cols-3 gap-4")], [
+            ui.loading("Loading...", ui.ColorNeutral),
+            ui.loading("Loading...", ui.ColorPink),
+            ui.loading("Loading...", ui.ColorTeal),
+            ui.loading("Loading...", ui.ColorOrange),
+            ui.loading("Loading...", ui.ColorRed),
+            ui.loading("Loading...", ui.ColorGreen),
           ]),
         ]),
-        html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
-          html.text("Indicators"),
+        html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4 mt-8")], [
+          html.text("Loading Bars"),
         ]),
         html.div([attr.class("space-y-4")], [
-          ui.loading_indicator_small(),
-          ui.loading_indicator_subtle(),
-          ui.loading_indicator_bar(),
-          ui.loading_state("Loading data..."),
+          ui.loading_bar(ui.ColorNeutral),
+          ui.loading_bar(ui.ColorPink),
+          ui.loading_bar(ui.ColorTeal),
+          ui.loading_bar(ui.ColorOrange),
+          ui.loading_bar(ui.ColorRed),
+          ui.loading_bar(ui.ColorGreen),
+        ]),
+        html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4 mt-8")], [
+          html.text("Full Loading States"),
+        ]),
+        html.div([attr.class("space-y-6")], [
+          ui.loading_state(
+            "Loading content...",
+            Some("Please wait while we fetch your data"),
+            ui.ColorTeal,
+          ),
+          ui.loading_state(
+            "Processing...",
+            Some("This may take a few moments"),
+            ui.ColorOrange,
+          ),
         ]),
       ]),
     ]),
@@ -3593,6 +3536,58 @@ fn view_ui_components() -> List(Element(Msg)) {
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
           html.text("Button Variants"),
         ]),
+        // Neutral Variant - All States
+        html.div([attr.class("mb-6")], [
+          html.h4([attr.class("text-md font-medium text-zinc-400 mb-3")], [
+            html.text("Neutral"),
+          ]),
+          html.div([attr.class("flex flex-wrap gap-3")], [
+            ui.button(
+              "Normal",
+              ui.ColorNeutral,
+              ui.ButtonStateNormal,
+              UserNavigatedTo(routes.to_uri(routes.UiComponents)),
+            ),
+            ui.button(
+              "Pending",
+              ui.ColorNeutral,
+              ui.ButtonStatePending,
+              UserNavigatedTo(routes.to_uri(routes.UiComponents)),
+            ),
+            ui.button(
+              "Disabled",
+              ui.ColorNeutral,
+              ui.ButtonStateDisabled,
+              UserNavigatedTo(routes.to_uri(routes.UiComponents)),
+            ),
+          ]),
+        ]),
+        // Pink Variant - All States
+        html.div([attr.class("mb-6")], [
+          html.h4([attr.class("text-md font-medium text-pink-400 mb-3")], [
+            html.text("Pink"),
+          ]),
+          html.div([attr.class("flex flex-wrap gap-3")], [
+            ui.button(
+              "Normal",
+              ui.ColorPink,
+              ui.ButtonStateNormal,
+              UserNavigatedTo(routes.to_uri(routes.UiComponents)),
+            ),
+            ui.button(
+              "Pending",
+              ui.ColorPink,
+              ui.ButtonStatePending,
+              UserNavigatedTo(routes.to_uri(routes.UiComponents)),
+            ),
+            ui.button(
+              "Disabled",
+              ui.ColorPink,
+              ui.ButtonStateDisabled,
+              UserNavigatedTo(routes.to_uri(routes.UiComponents)),
+            ),
+          ]),
+        ]),
         // Teal Variant - All States
         html.div([attr.class("mb-6")], [
           html.h4([attr.class("text-md font-medium text-teal-400 mb-3")], [
@@ -3601,19 +3596,19 @@ fn view_ui_components() -> List(Element(Msg)) {
           html.div([attr.class("flex flex-wrap gap-3")], [
             ui.button(
               "Normal",
-              ui.ButtonTeal,
+              ui.ColorTeal,
               ui.ButtonStateNormal,
               UserNavigatedTo(routes.to_uri(routes.UiComponents)),
             ),
             ui.button(
               "Pending",
-              ui.ButtonTeal,
+              ui.ColorTeal,
               ui.ButtonStatePending,
               UserNavigatedTo(routes.to_uri(routes.UiComponents)),
             ),
             ui.button(
               "Disabled",
-              ui.ButtonTeal,
+              ui.ColorTeal,
               ui.ButtonStateDisabled,
               UserNavigatedTo(routes.to_uri(routes.UiComponents)),
             ),
@@ -3627,19 +3622,19 @@ fn view_ui_components() -> List(Element(Msg)) {
           html.div([attr.class("flex flex-wrap gap-3")], [
             ui.button(
               "Normal",
-              ui.ButtonOrange,
+              ui.ColorOrange,
               ui.ButtonStateNormal,
               UserNavigatedTo(routes.to_uri(routes.UiComponents)),
             ),
             ui.button(
               "Pending",
-              ui.ButtonOrange,
+              ui.ColorOrange,
               ui.ButtonStatePending,
               UserNavigatedTo(routes.to_uri(routes.UiComponents)),
             ),
             ui.button(
               "Disabled",
-              ui.ButtonOrange,
+              ui.ColorOrange,
               ui.ButtonStateDisabled,
               UserNavigatedTo(routes.to_uri(routes.UiComponents)),
             ),
@@ -3653,19 +3648,19 @@ fn view_ui_components() -> List(Element(Msg)) {
           html.div([attr.class("flex flex-wrap gap-3")], [
             ui.button(
               "Normal",
-              ui.ButtonRed,
+              ui.ColorRed,
               ui.ButtonStateNormal,
               UserNavigatedTo(routes.to_uri(routes.UiComponents)),
             ),
             ui.button(
               "Pending",
-              ui.ButtonRed,
+              ui.ColorRed,
               ui.ButtonStatePending,
               UserNavigatedTo(routes.to_uri(routes.UiComponents)),
             ),
             ui.button(
               "Disabled",
-              ui.ButtonRed,
+              ui.ColorRed,
               ui.ButtonStateDisabled,
               UserNavigatedTo(routes.to_uri(routes.UiComponents)),
             ),
@@ -3679,19 +3674,19 @@ fn view_ui_components() -> List(Element(Msg)) {
           html.div([attr.class("flex flex-wrap gap-3")], [
             ui.button(
               "Normal",
-              ui.ButtonGreen,
+              ui.ColorGreen,
               ui.ButtonStateNormal,
               UserNavigatedTo(routes.to_uri(routes.UiComponents)),
             ),
             ui.button(
               "Pending",
-              ui.ButtonGreen,
+              ui.ColorGreen,
               ui.ButtonStatePending,
               UserNavigatedTo(routes.to_uri(routes.UiComponents)),
             ),
             ui.button(
               "Disabled",
-              ui.ButtonGreen,
+              ui.ColorGreen,
               ui.ButtonStateDisabled,
               UserNavigatedTo(routes.to_uri(routes.UiComponents)),
             ),
@@ -3704,26 +3699,40 @@ fn view_ui_components() -> List(Element(Msg)) {
           [attr.class("max-w-sm")],
           list.map(
             [
-              #(ui.ButtonTeal, ui.ButtonStateNormal, "Teal Menu (Normal)"),
-              #(ui.ButtonTeal, ui.ButtonStatePending, "Teal Menu (Pending)"),
-              #(ui.ButtonTeal, ui.ButtonStateDisabled, "Teal Menu (Disabled)"),
-              #(ui.ButtonOrange, ui.ButtonStateNormal, "Orange Menu (Normal)"),
-              #(ui.ButtonOrange, ui.ButtonStatePending, "Orange Menu (Pending)"),
+              #(ui.ColorNeutral, ui.ButtonStateNormal, "Neutral Menu (Normal)"),
               #(
-                ui.ButtonOrange,
+                ui.ColorNeutral,
+                ui.ButtonStatePending,
+                "Neutral Menu (Pending)",
+              ),
+              #(
+                ui.ColorNeutral,
+                ui.ButtonStateDisabled,
+                "Neutral Menu (Disabled)",
+              ),
+              #(ui.ColorPink, ui.ButtonStateNormal, "Pink Menu (Normal)"),
+              #(ui.ColorPink, ui.ButtonStatePending, "Pink Menu (Pending)"),
+              #(ui.ColorPink, ui.ButtonStateDisabled, "Pink Menu (Disabled)"),
+              #(ui.ColorTeal, ui.ButtonStateNormal, "Teal Menu (Normal)"),
+              #(ui.ColorTeal, ui.ButtonStatePending, "Teal Menu (Pending)"),
+              #(ui.ColorTeal, ui.ButtonStateDisabled, "Teal Menu (Disabled)"),
+              #(ui.ColorOrange, ui.ButtonStateNormal, "Orange Menu (Normal)"),
+              #(ui.ColorOrange, ui.ButtonStatePending, "Orange Menu (Pending)"),
+              #(
+                ui.ColorOrange,
                 ui.ButtonStateDisabled,
                 "Orange Menu (Disabled)",
               ),
-              #(ui.ButtonRed, ui.ButtonStateNormal, "Red Menu (Normal)"),
-              #(ui.ButtonRed, ui.ButtonStatePending, "Red Menu (Pending)"),
-              #(ui.ButtonRed, ui.ButtonStateDisabled, "Red Menu (Disabled)"),
-              #(ui.ButtonGreen, ui.ButtonStateNormal, "Green Menu (Normal)"),
-              #(ui.ButtonGreen, ui.ButtonStatePending, "Green Menu (Pending)"),
-              #(ui.ButtonGreen, ui.ButtonStateDisabled, "Green Menu (Disabled)"),
+              #(ui.ColorRed, ui.ButtonStateNormal, "Red Menu (Normal)"),
+              #(ui.ColorRed, ui.ButtonStatePending, "Red Menu (Pending)"),
+              #(ui.ColorRed, ui.ButtonStateDisabled, "Red Menu (Disabled)"),
+              #(ui.ColorGreen, ui.ButtonStateNormal, "Green Menu (Normal)"),
+              #(ui.ColorGreen, ui.ButtonStatePending, "Green Menu (Pending)"),
+              #(ui.ColorGreen, ui.ButtonStateDisabled, "Green Menu (Disabled)"),
             ],
             fn(btn_var) {
-              let #(variant, state, text) = btn_var
-              ui.button_menu(text, variant, state, NoOp)
+              let #(color, state, text) = btn_var
+              ui.button_menu(text, color, state, NoOp)
             },
           ),
         ),
@@ -3779,34 +3788,48 @@ fn view_ui_components() -> List(Element(Msg)) {
           html.text("Status Badges"),
         ]),
         html.div([attr.class("flex flex-wrap gap-4 mb-8")], [
-          ui.status_badge("Active", ui.ButtonGreen),
-          ui.status_badge("Pending", ui.ButtonOrange),
-          ui.status_badge("Error", ui.ButtonRed),
-          ui.status_badge("Info", ui.ButtonTeal),
+          ui.status_badge("Neutral", ui.ColorNeutral),
+          ui.status_badge("Active", ui.ColorGreen),
+          ui.status_badge("Pending", ui.ColorOrange),
+          ui.status_badge("Error", ui.ColorRed),
+          ui.status_badge("Info", ui.ColorTeal),
+          ui.status_badge("Primary", ui.ColorPink),
         ]),
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
           html.text("Notices"),
         ]),
         html.div([attr.class("space-y-4")], [
           ui.notice(
+            "Neutral message",
+            ui.ColorNeutral,
+            True,
+            Some(UserNavigatedTo(routes.to_uri(routes.UiComponents))),
+          ),
+          ui.notice(
             "Success message",
-            ui.ButtonGreen,
+            ui.ColorGreen,
             True,
             Some(UserNavigatedTo(routes.to_uri(routes.UiComponents))),
           ),
           ui.notice(
             "Warning message",
-            ui.ButtonOrange,
+            ui.ColorOrange,
             True,
             Some(UserNavigatedTo(routes.to_uri(routes.UiComponents))),
           ),
           ui.notice(
             "Error message",
-            ui.ButtonRed,
+            ui.ColorRed,
             True,
             Some(UserNavigatedTo(routes.to_uri(routes.UiComponents))),
           ),
-          ui.notice("Info message", ui.ButtonTeal, False, None),
+          ui.notice(
+            "Info message",
+            ui.ColorTeal,
+            True,
+            Some(UserNavigatedTo(routes.to_uri(routes.UiComponents))),
+          ),
+          ui.notice("Primary message", ui.ColorPink, False, None),
         ]),
       ]),
     ]),
@@ -3829,6 +3852,40 @@ fn view_ui_components() -> List(Element(Msg)) {
             "The requested resource was not found",
             None,
           ),
+          ui.error_state(
+            ui.ErrorPermission,
+            "Access Denied",
+            "You don't have permission to access this resource",
+            Some(UserNavigatedTo(routes.to_uri(routes.UiComponents))),
+          ),
+          ui.error_state(
+            ui.ErrorGeneric,
+            "Something Went Wrong",
+            "An unexpected error occurred",
+            Some(UserNavigatedTo(routes.to_uri(routes.UiComponents))),
+          ),
+        ]),
+      ]),
+    ]),
+    // Modal Section
+    html.section([attr.class("space-y-6")], [
+      html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
+        html.text("Modals"),
+      ]),
+      ui.card([
+        html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
+          html.text("Modal Example"),
+        ]),
+        html.div([attr.class("space-y-4")], [
+          ui.button(
+            "Open Modal",
+            ui.ColorTeal,
+            ui.ButtonStateNormal,
+            UserNavigatedTo(routes.to_uri(routes.UiComponents)),
+          ),
+          html.p([attr.class("text-zinc-400 text-sm")], [
+            html.text("Click the button above to see a modal in action."),
+          ]),
         ]),
       ]),
     ]),
@@ -3864,7 +3921,7 @@ fn view_ui_components() -> List(Element(Msg)) {
           "There are no items to display at the moment.",
           Some(ui.button(
             "Create New",
-            ui.ButtonTeal,
+            ui.ColorTeal,
             ui.ButtonStateNormal,
             UserNavigatedTo(routes.to_uri(routes.UiComponents)),
           )),
@@ -3896,6 +3953,25 @@ fn view_ui_components() -> List(Element(Msg)) {
         ]),
       ]),
     ]),
+    // Page Headers Section
+    html.section([attr.class("space-y-6")], [
+      html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
+        html.text("Page Headers"),
+      ]),
+      ui.card([
+        html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
+          html.text("Page Header with Subtitle"),
+        ]),
+        ui.page_header(
+          "Example Page Title",
+          Some("This is a subtitle that provides additional context"),
+        ),
+        html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4 mt-8")], [
+          html.text("Page Title Only"),
+        ]),
+        ui.page_title("Simple Page Title"),
+      ]),
+    ]),
     // Typography & Links Section
     html.section([attr.class("space-y-6")], [
       html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
@@ -3914,6 +3990,34 @@ fn view_ui_components() -> List(Element(Msg)) {
               UserNavigatedTo(routes.to_uri(routes.UiComponents)),
             ),
             html.text(" embedded."),
+          ]),
+        ]),
+      ]),
+    ]),
+    // Layout Helpers Section
+    html.section([attr.class("space-y-6")], [
+      html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
+        html.text("Layout Helpers"),
+      ]),
+      ui.card([
+        html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
+          html.text("Flex Between Layout"),
+        ]),
+        ui.flex_between(
+          html.span([attr.class("text-zinc-300")], [html.text("Left content")]),
+          html.span([attr.class("text-zinc-300")], [html.text("Right content")]),
+        ),
+        html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4 mt-8")], [
+          html.text("Content Container"),
+        ]),
+        ui.content_container([
+          html.p([attr.class("text-zinc-300")], [
+            html.text(
+              "This content is wrapped in a container with consistent spacing.",
+            ),
+          ]),
+          html.p([attr.class("text-zinc-300")], [
+            html.text("Multiple elements get proper spacing between them."),
           ]),
         ]),
       ]),

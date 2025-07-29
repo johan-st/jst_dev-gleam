@@ -29,18 +29,6 @@
 }
 
 @layer components {
-  /* Loading spinner with gradient effect */
-  .loading-spinner {
-    border-top-color: rgb(190 24 93);
-    background: conic-gradient(from 0deg, transparent, rgb(190 24 93));
-    animation: spin 1s linear infinite;
-  }
-  
-  /* Loading bar with gradient and shimmer */
-  .loading-bar {
-    background: linear-gradient(to right, rgb(219 39 119), rgb(236 72 153), rgb(244 114 182));
-    animation: loading-bar 1.5s ease-in-out infinite, shimmer 2s ease-in-out infinite;
-  }
   
   /* Skeleton loading with shimmer effect */
   .skeleton {
@@ -211,6 +199,89 @@
     backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.1);
   }
+  
+  /* Sheen effect for pending buttons */
+  .sheen-teal::before,
+  .sheen-orange::before,
+  .sheen-red::before,
+  .sheen-green::before,
+  .sheen-neutral::before,
+  .sheen-pink::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.1),
+      transparent
+    );
+    animation: sheen 5s cubic-bezier(0.43, 0.22, 0.24, 0.89) infinite;
+    pointer-events: none;
+  }
+  
+  .sheen-teal::before {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(20, 184, 166, 0.3),
+      rgba(20, 184, 166, 0.15),
+      transparent
+    );
+  }
+  
+  .sheen-orange::before {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(251, 146, 60, 0.3),
+      rgba(251, 146, 60, 0.15),
+      transparent
+    );
+  }
+  
+  .sheen-red::before {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(248, 113, 113, 0.3),
+      rgba(248, 113, 113, 0.15),
+      transparent
+    );
+  }
+  
+  .sheen-green::before {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(74, 222, 128, 0.3),
+      rgba(74, 222, 128, 0.15),
+      transparent
+    );
+  }
+  
+  .sheen-neutral::before {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(161, 161, 170, 0.3),
+      rgba(161, 161, 170, 0.15),
+      transparent
+    );
+  }
+  
+  .sheen-pink::before {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(236, 72, 153, 0.3),
+      rgba(236, 72, 153, 0.15),
+      transparent
+    );
+  }
 }
 
 @layer theme {
@@ -311,6 +382,16 @@
     50% { 
       opacity: 0.8;
       transform: scale(1.02);
+    }
+  }
+  
+  /* Sheen animation for glass-like effect */
+  @keyframes sheen {
+    0% {
+      left: -100%;
+    }
+    100% {
+      left: 100%;
     }
   }
 }

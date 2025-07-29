@@ -1,69 +1,95 @@
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import lustre/attribute as attr
-import lustre/element.{type Element}
+import lustre/element.{type Element, none as element_none}
 import lustre/element/html
 import lustre/event
 
-// LOADING STATES -------------------------------------------------------------
+// TYPES ---------------------------------------------------------------------
 
-pub fn loading_spinner() -> Element(msg) {
+pub type Color {
+  ColorNeutral
+  ColorPink
+  ColorTeal
+  ColorOrange
+  ColorRed
+  ColorGreen
+}
+
+pub type Style {
+  Subtle(Color)
+  Accent(Color, Color)
+}
+
+// LOADING STATES ------------------------------------------------------------
+
+pub fn loading(text: String, color: Color) -> Element(msg) {
+  let base_classes = case color {
+    ColorNeutral -> "text-zinc-400 bg-zinc-500/10 sheen-neutral"
+    ColorPink -> "text-pink-400 bg-pink-500/10 sheen-pink"
+    ColorTeal -> "text-teal-400 bg-teal-500/10 sheen-teal"
+    ColorOrange -> "text-orange-400 bg-orange-500/10 sheen-orange"
+    ColorRed -> "text-red-400 bg-red-500/10 sheen-red"
+    ColorGreen -> "text-green-400 bg-green-500/10 sheen-green"
+  }
+
   html.div(
     [
       attr.class(
-        "loading-spinner inline-block w-4 h-4 border-2 border-zinc-600 rounded-full",
+        "inline-flex items-center justify-center text-center rounded overflow-hidden relative px-4 py-2 text-sm "
+        <> base_classes,
       ),
+      attr.attribute("aria-label", text),
+      attr.attribute("role", "status"),
     ],
-    [],
+    [html.text(text)],
   )
 }
 
-pub fn loading_spinner_large() -> Element(msg) {
+/// Loading indicator bar with sheen effect like pending buttons
+pub fn loading_bar(color: Color) -> Element(msg) {
+  let bar_classes = case color {
+    ColorNeutral -> "bg-zinc-500/20 sheen-neutral"
+    ColorPink -> "bg-pink-500/20 sheen-pink"
+    ColorTeal -> "bg-teal-500/20 sheen-teal"
+    ColorOrange -> "bg-orange-500/20 sheen-orange"
+    ColorRed -> "bg-red-500/20 sheen-red"
+    ColorGreen -> "bg-green-500/20 sheen-green"
+  }
+
   html.div(
+    [attr.class("w-full bg-zinc-800 rounded-full h-2 mb-4 overflow-hidden")],
     [
-      attr.class(
-        "loading-spinner w-8 h-8 border-4 border-zinc-600 rounded-full",
-      ),
-    ],
-    [],
-  )
-}
-
-pub fn loading_indicator_small() -> Element(msg) {
-  html.div([attr.class("flex items-center justify-center py-8")], [
-    html.div([attr.class("flex items-center text-zinc-400 text-sm")], [
       html.div(
         [
           attr.class(
-            "loading-spinner inline-block w-4 h-4 border-2 border-zinc-600 rounded-full mr-3",
+            "h-full rounded-full relative overflow-hidden " <> bar_classes,
           ),
         ],
         [],
       ),
-      html.span([], [html.text("Loading content...")]),
-    ]),
-  ])
-}
-
-pub fn loading_indicator_subtle() -> Element(msg) {
-  html.div([attr.class("flex items-center justify-center py-12")], [
-    html.div([attr.class("text-zinc-500 text-sm")], [html.text("Loading...")]),
-  ])
-}
-
-pub fn loading_indicator_bar() -> Element(msg) {
-  html.div(
-    [attr.class("w-full bg-zinc-800 rounded-full h-2 mb-4 overflow-hidden")],
-    [html.div([attr.class("loading-bar h-full rounded-full")], [])],
+    ],
   )
 }
 
-pub fn loading_state(message: String) -> Element(msg) {
+/// Full loading state with text, message, and optional subtitle
+pub fn loading_state(
+  message: String,
+  subtitle: Option(String),
+  color: Color,
+) -> Element(msg) {
   html.div([attr.class("flex items-center justify-center py-12 md:py-16")], [
-    html.div([attr.class("flex flex-col items-center space-y-6")], [
-      loading_spinner_large(),
-      html.p([attr.class("text-zinc-400 text-lg")], [html.text(message)]),
-    ]),
+    html.div(
+      [attr.class("flex flex-col items-center space-y-6 text-center max-w-md")],
+      [
+        loading(message, color),
+        case subtitle {
+          Some(sub) ->
+            html.p([attr.class("text-zinc-500 text-sm")], [html.text(sub)])
+          None -> element_none()
+        },
+      ],
+    ),
   ])
 }
 
@@ -84,7 +110,7 @@ pub fn page_header(title: String, subtitle: Option(String)) -> Element(msg) {
         html.p([attr.class("text-lg text-zinc-400 font-light italic mb-8")], [
           html.text(sub),
         ])
-      None -> element.none()
+      None -> element_none()
     },
   ])
 }
@@ -131,21 +157,14 @@ pub fn error_state(
       html.p([attr.class("text-zinc-400 text-lg mb-8")], [html.text(message)]),
       case retry_action {
         Some(action) ->
-          button("Try Again", ButtonTeal, ButtonStateNormal, action)
-        None -> element.none()
+          button("Try Again", ColorTeal, ButtonStateNormal, action)
+        None -> element_none()
       },
     ]),
   ])
 }
 
 // BUTTONS --------------------------------------------------------------------
-
-pub type ButtonVariant {
-  ButtonTeal
-  ButtonOrange
-  ButtonRed
-  ButtonGreen
-}
 
 pub type ButtonState {
   ButtonStateNormal
@@ -156,37 +175,51 @@ pub type ButtonState {
 /// Menu-style button for dropdowns and navigation
 pub fn button_menu(
   text: String,
-  variant: ButtonVariant,
+  variant: Color,
   state: ButtonState,
   onclick: msg,
 ) -> Element(msg) {
   let tailwind_classes = case variant, state {
-    ButtonTeal, ButtonStateNormal ->
+    ColorNeutral, ButtonStateNormal ->
+      "text-zinc-400 border-zinc-600 hover:bg-zinc-950/50 hover:text-zinc-300 hover:border-zinc-400 cursor-pointer"
+    ColorNeutral, ButtonStatePending ->
+      "text-zinc-400 border-zinc-600 opacity-70 cursor-wait sheen-neutral overflow-hidden relative"
+    ColorNeutral, ButtonStateDisabled ->
+      "text-zinc-400 border-zinc-600 opacity-50 cursor-not-allowed"
+
+    ColorPink, ButtonStateNormal ->
+      "text-pink-400 border-pink-600 hover:bg-pink-950/50 hover:text-pink-300 hover:border-pink-400 cursor-pointer"
+    ColorPink, ButtonStatePending ->
+      "text-pink-400 border-pink-600 opacity-70 cursor-wait sheen-pink overflow-hidden relative"
+    ColorPink, ButtonStateDisabled ->
+      "text-zinc-400 border-zinc-600 opacity-50 cursor-not-allowed"
+
+    ColorTeal, ButtonStateNormal ->
       "text-teal-400 border-teal-600 hover:bg-teal-950/50 hover:text-teal-300 hover:border-teal-400 cursor-pointer"
-    ButtonTeal, ButtonStatePending ->
-      "text-teal-400 border-teal-600 opacity-70 cursor-wait"
-    ButtonTeal, ButtonStateDisabled ->
+    ColorTeal, ButtonStatePending ->
+      "text-teal-400 border-teal-600 opacity-70 cursor-wait sheen-teal overflow-hidden relative"
+    ColorTeal, ButtonStateDisabled ->
       "text-zinc-400 border-zinc-600 opacity-50 cursor-not-allowed"
 
-    ButtonOrange, ButtonStateNormal ->
+    ColorOrange, ButtonStateNormal ->
       "text-orange-400 border-orange-600 hover:bg-orange-950/50 hover:text-orange-300 hover:border-orange-400 cursor-pointer"
-    ButtonOrange, ButtonStatePending ->
-      "text-orange-400 border-orange-600  opacity-70 cursor-wait"
-    ButtonOrange, ButtonStateDisabled ->
+    ColorOrange, ButtonStatePending ->
+      "text-orange-400 border-orange-600  opacity-70 cursor-wait sheen-orange overflow-hidden relative"
+    ColorOrange, ButtonStateDisabled ->
       "text-zinc-400 border-zinc-600 opacity-50 cursor-not-allowed"
 
-    ButtonRed, ButtonStateNormal ->
+    ColorRed, ButtonStateNormal ->
       "text-red-400 border-red-600 hover:bg-red-950/50 hover:text-red-300 hover:border-red-400 cursor-pointer"
-    ButtonRed, ButtonStatePending ->
-      "text-red-400 border-red-600 opacity-70 cursor-wait"
-    ButtonRed, ButtonStateDisabled ->
+    ColorRed, ButtonStatePending ->
+      "text-red-400 border-red-600 opacity-70 cursor-wait sheen-red overflow-hidden relative"
+    ColorRed, ButtonStateDisabled ->
       "text-zinc-400 border-zinc-600 opacity-50 cursor-not-allowed"
 
-    ButtonGreen, ButtonStateNormal ->
+    ColorGreen, ButtonStateNormal ->
       "text-green-400 border-green-600 hover:bg-green-950/50 hover:text-green-300 hover:border-green-400"
-    ButtonGreen, ButtonStatePending ->
-      "text-green-400 border-green-600 opacity-70 cursor-wait"
-    ButtonGreen, ButtonStateDisabled ->
+    ColorGreen, ButtonStatePending ->
+      "text-green-400 border-green-600 opacity-70 cursor-wait sheen-green overflow-hidden relative"
+    ColorGreen, ButtonStateDisabled ->
       "text-zinc-400 border-zinc-600 opacity-50 cursor-not-allowed"
   }
 
@@ -209,37 +242,51 @@ pub fn button_menu(
 /// Menu button with custom content (e.g., icons)
 pub fn button_menu_custom(
   content: List(Element(msg)),
-  variant: ButtonVariant,
+  variant: Color,
   state: ButtonState,
   onclick: msg,
 ) -> Element(msg) {
- let tailwind_classes = case variant, state {
-    ButtonTeal, ButtonStateNormal ->
+  let tailwind_classes = case variant, state {
+    ColorNeutral, ButtonStateNormal ->
+      "text-zinc-400 border-zinc-600 hover:bg-zinc-950/50 hover:text-zinc-300 hover:border-zinc-400 cursor-pointer"
+    ColorNeutral, ButtonStatePending ->
+      "text-zinc-400 border-zinc-600 opacity-70 cursor-wait sheen-neutral overflow-hidden relative"
+    ColorNeutral, ButtonStateDisabled ->
+      "text-zinc-400 border-zinc-600 opacity-50 cursor-not-allowed"
+
+    ColorPink, ButtonStateNormal ->
+      "text-pink-400 border-pink-600 hover:bg-pink-950/50 hover:text-pink-300 hover:border-pink-400 cursor-pointer"
+    ColorPink, ButtonStatePending ->
+      "text-pink-400 border-pink-600 opacity-70 cursor-wait sheen-pink overflow-hidden relative"
+    ColorPink, ButtonStateDisabled ->
+      "text-zinc-400 border-zinc-600 opacity-50 cursor-not-allowed"
+
+    ColorTeal, ButtonStateNormal ->
       "text-teal-400 border-teal-600 hover:bg-teal-950/50 hover:text-teal-300 hover:border-teal-400 cursor-pointer"
-    ButtonTeal, ButtonStatePending ->
-      "text-teal-400 border-teal-600 opacity-70 cursor-wait"
-    ButtonTeal, ButtonStateDisabled ->
+    ColorTeal, ButtonStatePending ->
+      "text-teal-400 border-teal-600 opacity-70 cursor-wait sheen-teal overflow-hidden relative"
+    ColorTeal, ButtonStateDisabled ->
       "text-zinc-400 border-zinc-600 opacity-50 cursor-not-allowed"
 
-    ButtonOrange, ButtonStateNormal ->
+    ColorOrange, ButtonStateNormal ->
       "text-orange-400 border-orange-600 hover:bg-orange-950/50 hover:text-orange-300 hover:border-orange-400 cursor-pointer"
-    ButtonOrange, ButtonStatePending ->
-      "text-orange-400 border-orange-600  opacity-70 cursor-wait"
-    ButtonOrange, ButtonStateDisabled ->
+    ColorOrange, ButtonStatePending ->
+      "text-orange-400 border-orange-600  opacity-70 cursor-wait sheen-orange overflow-hidden relative"
+    ColorOrange, ButtonStateDisabled ->
       "text-zinc-400 border-zinc-600 opacity-50 cursor-not-allowed"
 
-    ButtonRed, ButtonStateNormal ->
+    ColorRed, ButtonStateNormal ->
       "text-red-400 border-red-600 hover:bg-red-950/50 hover:text-red-300 hover:border-red-400 cursor-pointer"
-    ButtonRed, ButtonStatePending ->
-      "text-red-400 border-red-600 opacity-70 cursor-wait"
-    ButtonRed, ButtonStateDisabled ->
+    ColorRed, ButtonStatePending ->
+      "text-red-400 border-red-600 opacity-70 cursor-wait sheen-red overflow-hidden relative"
+    ColorRed, ButtonStateDisabled ->
       "text-zinc-400 border-zinc-600 opacity-50 cursor-not-allowed"
 
-    ButtonGreen, ButtonStateNormal ->
-      "text-green-400 border-green-600 hover:bg-green-950/50 hover:text-green-300 hover:border-green-400"
-    ButtonGreen, ButtonStatePending ->
-      "text-green-400 border-green-600 opacity-70 cursor-wait"
-    ButtonGreen, ButtonStateDisabled ->
+    ColorGreen, ButtonStateNormal ->
+      "text-green-400 border-green-600 hover:bg-green-950/50 hover:text-green-300 hover:border-green-400 cursor-pointer"
+    ColorGreen, ButtonStatePending ->
+      "text-green-400 border-green-600 opacity-70 cursor-wait sheen-green overflow-hidden relative"
+    ColorGreen, ButtonStateDisabled ->
       "text-zinc-400 border-zinc-600 opacity-50 cursor-not-allowed"
   }
 
@@ -262,37 +309,51 @@ pub fn button_menu_custom(
 /// Consistent button for actions with mouse_down events
 pub fn button(
   text: String,
-  variant: ButtonVariant,
+  variant: Color,
   state: ButtonState,
   onmousedown: msg,
 ) -> Element(msg) {
   let tailwind_classes = case variant, state {
-    ButtonTeal, ButtonStateNormal ->
+    ColorNeutral, ButtonStateNormal ->
+      "text-zinc-400 border-zinc-600 bg-zinc-500/10 hover:bg-zinc-950/50 hover:text-zinc-300 hover:border-zinc-400 cursor-pointer"
+    ColorNeutral, ButtonStatePending ->
+      "text-zinc-400 border-zinc-600 bg-zinc-500/10 opacity-70 cursor-wait sheen-neutral overflow-hidden relative"
+    ColorNeutral, ButtonStateDisabled ->
+      "text-zinc-400 border-zinc-600 bg-zinc-500/10 opacity-50 cursor-not-allowed"
+
+    ColorPink, ButtonStateNormal ->
+      "text-pink-400 border-pink-600 bg-pink-500/10 hover:bg-pink-950/50 hover:text-pink-300 hover:border-pink-400 cursor-pointer"
+    ColorPink, ButtonStatePending ->
+      "text-pink-400 border-pink-600 bg-pink-500/10 opacity-70 cursor-wait sheen-pink overflow-hidden relative"
+    ColorPink, ButtonStateDisabled ->
+      "text-zinc-400 border-zinc-600 bg-zinc-500/10 opacity-50 cursor-not-allowed"
+
+    ColorTeal, ButtonStateNormal ->
       "text-teal-400 border-teal-600 bg-teal-500/10 hover:bg-teal-950/50 hover:text-teal-300 hover:border-teal-400 cursor-pointer"
-    ButtonTeal, ButtonStatePending ->
-      "text-teal-400 border-teal-600 bg-teal-500/10 opacity-70 cursor-wait"
-    ButtonTeal, ButtonStateDisabled ->
+    ColorTeal, ButtonStatePending ->
+      "text-teal-400 border-teal-600 bg-teal-500/10 opacity-70 cursor-wait sheen-teal overflow-hidden relative"
+    ColorTeal, ButtonStateDisabled ->
       "text-zinc-400 border-zinc-600 bg-zinc-500/10 opacity-50 cursor-not-allowed"
 
-    ButtonOrange, ButtonStateNormal ->
+    ColorOrange, ButtonStateNormal ->
       "text-orange-400 border-orange-600 bg-orange-500/10 hover:bg-orange-950/50 hover:text-orange-300 hover:border-orange-400 cursor-pointer"
-    ButtonOrange, ButtonStatePending ->
-      "text-orange-400 border-orange-600 bg-orange-500/10 opacity-70 cursor-wait"
-    ButtonOrange, ButtonStateDisabled ->
+    ColorOrange, ButtonStatePending ->
+      "text-orange-400 border-orange-600 bg-orange-500/10 opacity-70 cursor-wait sheen-orange overflow-hidden relative"
+    ColorOrange, ButtonStateDisabled ->
       "text-zinc-400 border-zinc-600 bg-zinc-500/10 opacity-50 cursor-not-allowed"
 
-    ButtonRed, ButtonStateNormal ->
+    ColorRed, ButtonStateNormal ->
       "text-red-400 border-red-600 bg-red-500/10 hover:bg-red-950/50 hover:text-red-300 hover:border-red-400 cursor-pointer"
-    ButtonRed, ButtonStatePending ->
-      "text-red-400 border-red-600 bg-red-500/10 opacity-70 cursor-wait"
-    ButtonRed, ButtonStateDisabled ->
+    ColorRed, ButtonStatePending ->
+      "text-red-400 border-red-600 bg-red-500/10 opacity-70 cursor-wait sheen-red overflow-hidden relative"
+    ColorRed, ButtonStateDisabled ->
       "text-zinc-400 border-zinc-600 bg-zinc-500/10 opacity-50 cursor-not-allowed"
 
-    ButtonGreen, ButtonStateNormal ->
-      "text-green-400 border-green-600 bg-green-500/10 hover:bg-green-950/50 hover:text-green-300 hover:border-green-400"
-    ButtonGreen, ButtonStatePending ->
-      "text-green-400 border-green-600 bg-green-500/10 opacity-70 cursor-wait"
-    ButtonGreen, ButtonStateDisabled ->
+    ColorGreen, ButtonStateNormal ->
+      "text-green-400 border-green-600 bg-green-500/10 hover:bg-green-950/50 hover:text-green-300 hover:border-green-400 cursor-pointer"
+    ColorGreen, ButtonStatePending ->
+      "text-green-400 border-green-600 bg-green-500/10 opacity-70 cursor-wait sheen-green overflow-hidden relative"
+    ColorGreen, ButtonStateDisabled ->
       "text-zinc-400 border-zinc-600 bg-zinc-500/10 opacity-50 cursor-not-allowed"
   }
 
@@ -328,7 +389,7 @@ pub fn form_input(
       html.text(label),
       case required {
         True -> html.span([attr.class("text-red-400 ml-1")], [html.text("*")])
-        False -> element.none()
+        False -> element_none()
       },
     ]),
     html.input([
@@ -353,7 +414,7 @@ pub fn form_input(
             html.text(error_msg),
           ],
         )
-      None -> element.none()
+      None -> element_none()
     },
   ])
 }
@@ -373,7 +434,7 @@ pub fn form_textarea(
       html.text(label),
       case required {
         True -> html.span([attr.class("text-red-400 ml-1")], [html.text("*")])
-        False -> element.none()
+        False -> element_none()
       },
     ]),
     html.textarea(
@@ -404,7 +465,7 @@ pub fn form_textarea(
             html.text(error_msg),
           ],
         )
-      None -> element.none()
+      None -> element_none()
     },
   ])
 }
@@ -465,7 +526,7 @@ pub fn modal(
           html.div([attr.class("p-6 space-y-6")], content),
           // Actions
           case actions {
-            [] -> element.none()
+            [] -> element_none()
             _ ->
               html.div(
                 [
@@ -498,7 +559,7 @@ pub fn empty_state(
       html.p([attr.class("text-zinc-400 text-lg mb-8")], [html.text(message)]),
       case action {
         Some(button) -> button
-        None -> element.none()
+        None -> element_none()
       },
     ]),
   ])
@@ -539,12 +600,14 @@ pub fn glass_panel(content: List(Element(msg))) -> Element(msg) {
 }
 
 /// Status badge component for displaying state (active/inactive, etc.)
-pub fn status_badge(text: String, variant: ButtonVariant) -> Element(msg) {
+pub fn status_badge(text: String, variant: Color) -> Element(msg) {
   let color_classes = case variant {
-    ButtonTeal -> "bg-teal-600/20 text-teal-400 ring-teal-600/30"
-    ButtonOrange -> "bg-orange-600/20 text-orange-400 ring-orange-600/30"
-    ButtonRed -> "bg-red-600/20 text-red-400 ring-red-600/30"
-    ButtonGreen -> "bg-green-600/20 text-green-400 ring-green-600/30"
+    ColorNeutral -> "bg-zinc-600/20 text-zinc-400 ring-zinc-600/30"
+    ColorPink -> "bg-pink-600/20 text-pink-400 ring-pink-600/30"
+    ColorTeal -> "bg-teal-600/20 text-teal-400 ring-teal-600/30"
+    ColorOrange -> "bg-orange-600/20 text-orange-400 ring-orange-600/30"
+    ColorRed -> "bg-red-600/20 text-red-400 ring-red-600/30"
+    ColorGreen -> "bg-green-600/20 text-green-400 ring-green-600/30"
   }
 
   html.span(
@@ -584,15 +647,17 @@ pub fn card_with_title(
 /// Notice/toast component for inline notifications
 pub fn notice(
   message: String,
-  variant: ButtonVariant,
+  variant: Color,
   dismissible: Bool,
   onclose: Option(msg),
 ) -> Element(msg) {
   let color_classes = case variant {
-    ButtonTeal -> "bg-teal-600/20 text-teal-300 border-teal-600/50"
-    ButtonOrange -> "bg-orange-600/20 text-orange-300 border-orange-600/50"
-    ButtonRed -> "bg-red-600/20 text-red-300 border-red-600/50"
-    ButtonGreen -> "bg-green-600/20 text-green-300 border-green-600/50"
+    ColorNeutral -> "bg-zinc-600/20 text-zinc-300 border-zinc-600/50"
+    ColorPink -> "bg-pink-600/20 text-pink-300 border-pink-600/50"
+    ColorTeal -> "bg-teal-600/20 text-teal-300 border-teal-600/50"
+    ColorOrange -> "bg-orange-600/20 text-orange-300 border-orange-600/50"
+    ColorRed -> "bg-red-600/20 text-red-300 border-red-600/50"
+    ColorGreen -> "bg-green-600/20 text-green-300 border-green-600/50"
   }
 
   html.div(
@@ -613,7 +678,7 @@ pub fn notice(
             ],
             [html.text("×")],
           )
-        _, _ -> element.none()
+        _, _ -> element_none()
       },
     ],
   )
