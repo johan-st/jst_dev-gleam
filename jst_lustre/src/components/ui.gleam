@@ -1,3 +1,4 @@
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import lustre/attribute as attr
 import lustre/element.{type Element}
@@ -129,7 +130,7 @@ pub fn error_state(
       ]),
       html.p([attr.class("text-zinc-400 text-lg mb-8")], [html.text(message)]),
       case retry_action {
-        Some(action) -> button_secondary("Try Again", False, action)
+        Some(action) -> button_secondary("Try Again", ButtonStateNormal, action)
         None -> element.none()
       },
     ]),
@@ -140,18 +141,20 @@ pub fn error_state(
 
 pub type ButtonVariant {
   ButtonTeal
-  // Neutral/info actions
   ButtonOrange
-  // Warning actions  
   ButtonRed
-  // Destructive actions
   ButtonGreen
-  // Positive actions
+}
+
+pub type ButtonState {
+  ButtonStateNormal
+  ButtonStatePending
+  ButtonStateDisabled
 }
 
 pub fn button_secondary(
   text: String,
-  disabled: Bool,
+  state: ButtonState,
   onclick: msg,
 ) -> Element(msg) {
   html.button(
@@ -159,8 +162,189 @@ pub fn button_secondary(
       attr.class(
         "btn-secondary px-6 py-3 text-zinc-200 rounded-lg font-medium transition-all duration-300 ease-out disabled:opacity-50 disabled:cursor-not-allowed",
       ),
-      attr.disabled(disabled),
+      attr.disabled(state == ButtonStateDisabled),
       event.on_click(onclick),
+    ],
+    [html.text(text)],
+  )
+}
+
+/// Menu-style button for dropdowns and navigation
+pub fn button_menu(
+  text: String,
+  variant: ButtonVariant,
+  state: ButtonState,
+  onclick: msg,
+) -> Element(msg) {
+  let #(text_color, border_color, hover_bg, hover_text, hover_border) = case
+    variant
+  {
+    ButtonTeal -> #(
+      "text-teal-400",
+      "border-teal-600",
+      "hover:bg-teal-500/10",
+      "hover:text-teal-300",
+      "hover:border-l-teal-400",
+    )
+    ButtonOrange -> #(
+      "text-orange-400",
+      "border-orange-600",
+      "hover:bg-orange-500/10",
+      "hover:text-orange-300",
+      "hover:border-l-orange-400",
+    )
+    ButtonRed -> #(
+      "text-red-400",
+      "border-red-600",
+      "hover:bg-red-500/10",
+      "hover:text-red-300",
+      "hover:border-l-red-400",
+    )
+    ButtonGreen -> #(
+      "text-green-400",
+      "border-green-600",
+      "hover:bg-green-500/10",
+      "hover:text-green-300",
+      "hover:border-l-green-400",
+    )
+  }
+
+  let #(final_text_color, cursor_class, opacity_class) = case state {
+    ButtonStateNormal -> #(text_color, "cursor-default", "")
+    ButtonStatePending -> #("text-zinc-500", "cursor-wait", "opacity-60")
+    ButtonStateDisabled -> #(
+      "text-zinc-500",
+      "cursor-not-allowed",
+      "opacity-50",
+    )
+  }
+
+  html.button(
+    [
+      attr.class(
+        "block w-full text-left px-4 py-2 text-sm "
+        <> final_text_color
+        <> " border-l "
+        <> border_color
+        <> " "
+        <> hover_bg
+        <> " "
+        <> hover_text
+        <> " "
+        <> hover_border
+        <> " transition-colors "
+        <> cursor_class
+        <> " "
+        <> opacity_class,
+      ),
+      attr.disabled(case state {
+        ButtonStateNormal -> False
+        _ -> True
+      }),
+      event.on_mouse_down(onclick),
+    ],
+    [html.text(text)],
+  )
+}
+
+/// Menu button with custom content (e.g., icons)
+pub fn button_menu_custom(
+  content: List(Element(msg)),
+  variant: ButtonVariant,
+  state: ButtonState,
+  onclick: msg,
+) -> Element(msg) {
+  let #(text_color, border_color, hover_bg, hover_text, hover_border) = case
+    variant
+  {
+    ButtonTeal -> #(
+      "text-teal-400",
+      "border-teal-600",
+      "hover:bg-teal-500/10",
+      "hover:text-teal-300",
+      "hover:border-l-teal-400",
+    )
+    ButtonOrange -> #(
+      "text-orange-400",
+      "border-orange-600",
+      "hover:bg-orange-500/10",
+      "hover:text-orange-300",
+      "hover:border-l-orange-400",
+    )
+    ButtonRed -> #(
+      "text-red-400",
+      "border-red-600",
+      "hover:bg-red-500/10",
+      "hover:text-red-300",
+      "hover:border-l-red-400",
+    )
+    ButtonGreen -> #(
+      "text-green-400",
+      "border-green-600",
+      "hover:bg-green-500/10",
+      "hover:text-green-300",
+      "hover:border-l-green-400",
+    )
+  }
+
+  let #(final_text_color, cursor_class, opacity_class) = case state {
+    ButtonStateNormal -> #(text_color, "cursor-default", "")
+    ButtonStatePending -> #("text-zinc-500", "cursor-wait", "opacity-60")
+    ButtonStateDisabled -> #(
+      "text-zinc-500",
+      "cursor-not-allowed",
+      "opacity-50",
+    )
+  }
+
+  html.button(
+    [
+      attr.class(
+        "block w-full text-left px-4 py-2 text-sm "
+        <> final_text_color
+        <> " border-l "
+        <> border_color
+        <> " "
+        <> hover_bg
+        <> " "
+        <> hover_text
+        <> " "
+        <> hover_border
+        <> " transition-colors "
+        <> cursor_class
+        <> " "
+        <> opacity_class,
+      ),
+      attr.disabled(case state {
+        ButtonStateNormal -> False
+        _ -> True
+      }),
+      event.on_mouse_down(onclick),
+    ],
+    content,
+  )
+}
+
+/// Primary button for forms and main actions
+pub fn button_primary(
+  text: String,
+  disabled: Bool,
+  onclick: msg,
+) -> Element(msg) {
+  html.button(
+    [
+      attr.classes([
+        #(
+          "w-full px-4 py-2 bg-gray-600 text-gray-300 rounded-md cursor-not-allowed transition-colors",
+          disabled,
+        ),
+        #(
+          "w-full px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700 transition-colors",
+          !disabled,
+        ),
+      ]),
+      attr.disabled(disabled),
+      event.on_mouse_down(onclick),
     ],
     [html.text(text)],
   )
@@ -173,27 +357,25 @@ pub fn button_action(
   disabled: Bool,
   onmousedown: msg,
 ) -> Element(msg) {
-  let tailwind_classes_active = case variant {
-    ButtonTeal ->
-      "text-teal-400 border-teal-600 bg-teal-500/10 hover:bg-teal-950/50 hover:text-teal-300 hover:border-teal-400"
-    ButtonOrange ->
-      "text-orange-400 border-orange-600 bg-orange-500/10 hover:bg-orange-950/50 hover:text-orange-300 hover:border-orange-400"
-    ButtonRed ->
-      "text-red-400 border-red-600 bg-red-500/10 hover:bg-red-950/50 hover:text-red-300 hover:border-red-400"
-    ButtonGreen ->
-      "text-green-400 border-green-600 bg-green-500/10 hover:bg-green-950/50 hover:text-green-300 hover:border-green-400"
+  let #(tailwind_classes_active, tailwind_classes_inactive) = case variant {
+    ButtonTeal -> #(
+      "text-teal-400 border-teal-600 bg-teal-500/10 hover:bg-teal-950/50 hover:text-teal-300 hover:border-teal-400",
+      "text-zinc-400 border-zinc-600 bg-zinc-500/10",
+    )
+    ButtonOrange -> #(
+      "text-orange-400 border-orange-600 bg-orange-500/10 hover:bg-orange-950/50 hover:text-orange-300 hover:border-orange-400",
+      "text-zinc-400 border-zinc-600 bg-zinc-500/10",
+    )
+    ButtonRed -> #(
+      "text-red-400 border-red-600 bg-red-500/10 hover:bg-red-950/50 hover:text-red-300 hover:border-red-400",
+      "text-zinc-400 border-zinc-600 bg-zinc-500/10",
+    )
+    ButtonGreen -> #(
+      "text-green-400 border-green-600 bg-green-500/10 hover:bg-green-950/50 hover:text-green-300 hover:border-green-400",
+      "text-zinc-400 border-zinc-600 bg-zinc-500/10",
+    )
   }
 
-  let tailwind_classes_inactive = case variant {
-    ButtonOrange ->
-      "text-orange-400 border-orange-600 bg-orange-500/10 hover:bg-orange-950/50 hover:text-orange-300 hover:border-orange-400"
-    ButtonRed ->
-      "text-red-400 border-red-600 bg-red-500/10 hover:bg-red-950/50 hover:text-red-300 hover:border-red-400"
-    ButtonGreen ->
-      "text-green-400 border-green-600 bg-green-500/10 hover:bg-green-950/50 hover:text-green-300 hover:border-green-400"
-    ButtonTeal ->
-      "text-teal-400 border-teal-600 bg-teal-500/10 hover:bg-teal-950/50 hover:text-teal-300 hover:border-teal-400"
-  }
   let tailwind_classes_common =
     "px-4 py-2 border-r border-l transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
 
@@ -243,6 +425,57 @@ pub fn form_input(
       attr.required(required),
       event.on_input(oninput),
     ]),
+    case error {
+      Some(error_msg) ->
+        html.p(
+          [attr.class("text-red-400 text-sm mt-2 flex items-center gap-1")],
+          [
+            html.span([attr.class("text-red-400")], [html.text("⚠ ")]),
+            html.text(error_msg),
+          ],
+        )
+      None -> element.none()
+    },
+  ])
+}
+
+/// Form textarea component with consistent styling
+pub fn form_textarea(
+  label: String,
+  value: String,
+  placeholder: String,
+  height_class: String,
+  required: Bool,
+  error: Option(String),
+  oninput: fn(String) -> msg,
+) -> Element(msg) {
+  html.div([attr.class("mb-6")], [
+    html.label([attr.class("block text-sm font-semibold text-zinc-300 mb-3")], [
+      html.text(label),
+      case required {
+        True -> html.span([attr.class("text-red-400 ml-1")], [html.text("*")])
+        False -> element.none()
+      },
+    ]),
+    html.textarea(
+      [
+        attr.class(case error {
+          Some(_) ->
+            "w-full "
+            <> height_class
+            <> " bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 p-3 text-zinc-100 placeholder-zinc-500 resize-none transition-all duration-300 ease-out outline-none border-l-red-500 focus:border-l-red-400 focus:bg-red-500/5"
+          None ->
+            "w-full "
+            <> height_class
+            <> " bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 p-3 text-zinc-100 placeholder-zinc-500 resize-none transition-all duration-300 ease-out outline-none border-l-teal-600 focus:border-l-teal-400 focus:bg-teal-500/5"
+        }),
+        attr.value(value),
+        attr.placeholder(placeholder),
+        attr.required(required),
+        event.on_input(oninput),
+      ],
+      value,
+    ),
     case error {
       Some(error_msg) ->
         html.p(
@@ -388,4 +621,113 @@ pub fn gradient_text(text: String) -> Element(msg) {
 
 pub fn glass_panel(content: List(Element(msg))) -> Element(msg) {
   html.div([attr.class("glass rounded-xl p-6")], content)
+}
+
+/// Status badge component for displaying state (active/inactive, etc.)
+pub fn status_badge(text: String, variant: ButtonVariant) -> Element(msg) {
+  let color_classes = case variant {
+    ButtonTeal -> "bg-teal-600/20 text-teal-400 ring-teal-600/30"
+    ButtonOrange -> "bg-orange-600/20 text-orange-400 ring-orange-600/30"
+    ButtonRed -> "bg-red-600/20 text-red-400 ring-red-600/30"
+    ButtonGreen -> "bg-green-600/20 text-green-400 ring-green-600/30"
+  }
+
+  html.span(
+    [
+      attr.class(
+        "inline-flex shrink-0 items-center rounded-full px-2 py-1 text-xs font-medium ring-1 ring-inset "
+        <> color_classes,
+      ),
+    ],
+    [html.text(text)],
+  )
+}
+
+/// Card component with consistent styling
+pub fn card(content: List(Element(msg))) -> Element(msg) {
+  html.div(
+    [attr.class("bg-zinc-800 rounded-lg border border-zinc-700 p-6")],
+    content,
+  )
+}
+
+/// Card with custom title
+pub fn card_with_title(
+  title: String,
+  content: List(Element(msg)),
+) -> Element(msg) {
+  html.div([attr.class("bg-zinc-800 rounded-lg border border-zinc-700")], [
+    html.div([attr.class("p-6 border-b border-zinc-700/50")], [
+      html.h3([attr.class("text-lg font-semibold text-zinc-100")], [
+        html.text(title),
+      ]),
+    ]),
+    html.div([attr.class("p-6")], content),
+  ])
+}
+
+/// Notice/toast component for inline notifications
+pub fn notice(
+  message: String,
+  variant: ButtonVariant,
+  dismissible: Bool,
+  onclose: Option(msg),
+) -> Element(msg) {
+  let color_classes = case variant {
+    ButtonTeal -> "bg-teal-600/20 text-teal-300 border-teal-600/50"
+    ButtonOrange -> "bg-orange-600/20 text-orange-300 border-orange-600/50"
+    ButtonRed -> "bg-red-600/20 text-red-300 border-red-600/50"
+    ButtonGreen -> "bg-green-600/20 text-green-300 border-green-600/50"
+  }
+
+  html.div(
+    [
+      attr.class(
+        "flex items-center justify-between rounded-lg border p-4 "
+        <> color_classes,
+      ),
+    ],
+    [
+      html.p([attr.class("text-sm font-medium")], [html.text(message)]),
+      case dismissible, onclose {
+        True, Some(close_msg) ->
+          html.button(
+            [
+              attr.class("text-sm hover:opacity-75 transition-opacity"),
+              event.on_click(close_msg),
+            ],
+            [html.text("×")],
+          )
+        _, _ -> element.none()
+      },
+    ],
+  )
+}
+
+/// Skeleton loader for content placeholders
+pub fn skeleton_text(lines: Int) -> Element(msg) {
+  let line_elements =
+    list.range(1, lines)
+    |> list.map(fn(_) {
+      html.div([attr.class("h-4 bg-zinc-700 rounded animate-pulse mb-2")], [])
+    })
+
+  html.div([attr.class("space-y-2")], line_elements)
+}
+
+/// Skeleton loader for article cards
+pub fn skeleton_card() -> Element(msg) {
+  html.div(
+    [
+      attr.class(
+        "bg-zinc-800 rounded-lg border border-zinc-700 p-6 animate-pulse",
+      ),
+    ],
+    [
+      html.div([attr.class("h-6 bg-zinc-700 rounded mb-4 w-3/4")], []),
+      html.div([attr.class("h-4 bg-zinc-700 rounded mb-2")], []),
+      html.div([attr.class("h-4 bg-zinc-700 rounded mb-2 w-5/6")], []),
+      html.div([attr.class("h-4 bg-zinc-700 rounded w-2/3")], []),
+    ],
+  )
 }

@@ -12,6 +12,9 @@ pub type Route {
   UrlShortIndex
   UrlShortInfo(String)
 
+  // UI COMPONENTS
+  UiComponents
+
   /// It's good practice to store whatever `Uri` we failed to match in case we
   /// want to log it or hint to the user that maybe they made a typo.
   NotFound(uri: Uri)
@@ -27,6 +30,7 @@ pub fn from_uri(uri: Uri) -> Route {
     ["djot-demo"] -> DjotDemo
     ["url"] -> UrlShortIndex
     ["url", uid] -> UrlShortInfo(uid)
+    ["ui-components"] -> UiComponents
     _ -> NotFound(uri)
   }
 }
@@ -41,6 +45,7 @@ pub fn to_string(route: Route) -> String {
     DjotDemo -> "/djot-demo/"
     UrlShortIndex -> "/url/"
     UrlShortInfo(short) -> "/url/" <> short
+    UiComponents -> "/ui-components"
     NotFound(uri) -> "/404?uri=" <> uri.to_string(uri)
   }
 }

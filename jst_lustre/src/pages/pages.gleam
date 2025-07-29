@@ -32,6 +32,9 @@ pub type Page {
     session_authenticated: session.SessionAuthenticated,
   )
 
+  // UI Components showcase
+  PageUiComponents(session_authenticated: session.SessionAuthenticated)
+
   // Error states  
   PageError(error: PageError)
 
@@ -81,6 +84,10 @@ pub fn to_uri(page: Page) -> Uri {
     }
     PageUrlShortInfo(short, _) -> {
       let assert Ok(uri) = uri.parse("/url/")
+      uri
+    }
+    PageUiComponents(_) -> {
+      let assert Ok(uri) = uri.parse("/ui-components")
       uri
     }
 
@@ -241,6 +248,16 @@ pub fn from_route(
               PageError(AuthenticationRequired("access URL shortener info"))
             session.Pending ->
               PageError(AuthenticationRequired("access URL shortener info"))
+          }
+        }
+        routes.UiComponents -> {
+          case session {
+            session.Authenticated(session_auth) ->
+              PageUiComponents(session_auth)
+            session.Unauthenticated ->
+              PageError(AuthenticationRequired("access UI components"))
+            session.Pending ->
+              PageError(AuthenticationRequired("access UI components"))
           }
         }
         routes.NotFound(uri) -> PageNotFound(uri)

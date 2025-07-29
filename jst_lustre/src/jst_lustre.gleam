@@ -1164,6 +1164,7 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
     }
     routes.UrlShortInfo(short_code) -> #(Model(..model, route:), effect.none())
     routes.DjotDemo -> #(Model(..model, route:), effect.none())
+    routes.UiComponents -> #(Model(..model, route:), effect.none())
     routes.NotFound(_uri) -> #(Model(..model, route:), effect.none())
   }
 }
@@ -1199,6 +1200,7 @@ fn view(model: Model) -> Element(Msg) {
     pages.PageUrlShortIndex(_) -> view_url_index(model)
     pages.PageUrlShortInfo(short, _) -> view_url_info_page(model, short)
     pages.PageDjotDemo(content) -> view_djot_demo(content)
+    pages.PageUiComponents(_) -> view_ui_components()
     pages.PageNotFound(uri) -> view_not_found(uri)
   }
   let layout = case page {
@@ -1340,6 +1342,14 @@ fn page_from_model(model: Model) -> pages.Page {
     }
     routes.DjotDemo -> pages.PageDjotDemo(model.djot_demo_content)
     routes.About -> pages.PageAbout
+    routes.UiComponents -> {
+      case model.session {
+        session.Authenticated(session_auth) ->
+          pages.PageUiComponents(session_auth)
+        _ ->
+          pages.PageError(pages.AuthenticationRequired("access UI components"))
+      }
+    }
     routes.NotFound(uri) -> pages.PageNotFound(uri)
   }
 }
@@ -1459,6 +1469,12 @@ fn view_header(model: Model) -> Element(Msg) {
                       label: "Short Urls",
                       attributes: [],
                     ),
+                    view_header_link(
+                      target: routes.UiComponents,
+                      current: model.route,
+                      label: "UI Components",
+                      attributes: [],
+                    ),
                   ]
                   _ -> []
                 },
@@ -1528,6 +1544,12 @@ fn view_header(model: Model) -> Element(Msg) {
                                   label: "Short urls",
                                   attributes: top_nav_attributes_small,
                                 ),
+                                view_header_link(
+                                  target: routes.UiComponents,
+                                  current: model.route,
+                                  label: "UI Components",
+                                  attributes: top_nav_attributes_small,
+                                ),
                               ]
                               _ -> []
                             },
@@ -1542,58 +1564,17 @@ fn view_header(model: Model) -> Element(Msg) {
                           ])
                         ),
                         case model.session {
-                          session.Unauthenticated -> {
-                            html.button(
-                              [
-                                attr.class(
-                                  "block w-full text-left px-4 py-2 text-sm text-teal-400 border-l border-teal-600 hover:text-teal-300 hover:bg-teal-500/10 hover:border-l-teal-400 transition-colors cursor-pointer",
-                                ),
-                                event.on_mouse_down(LoginFormToggled),
-                              ],
-                              [html.text("Login")],
-                            )
-                          }
-                          session.Pending -> {
-                            html.button(
-                              [
-                                attr.class(
-                                  "block w-full text-left px-4 py-2 text-sm bg-zinc-700 text-zinc-500 transition-colors cursor-not-allowed opacity-60",
-                                ),
-                                event.on_mouse_down(AuthLogoutClicked),
-                              ],
-                              [html.text("logging in..")],
-                            )
-                          }
-                          session.Authenticated(_auth_sess) -> {
-                            html.button(
-                              [
-                                attr.class(
-                                  "block w-full text-left px-4 py-2 text-sm text-orange-400 border-l border-orange-600 hover:text-orange-300 hover:bg-orange-500/10 hover:border-l-orange-400 transition-colors cursor-pointer",
-                                ),
-                                event.on_mouse_down(AuthLogoutClicked),
-                              ],
-                              [html.text("Logout")],
-                            )
-                          }
+                          session.Unauthenticated -> 
+                            ui.button_menu("Login", ui.ButtonTeal, ui.ButtonStateNormal, LoginFormToggled)
+                          session.Pending -> 
+                            ui.button_menu("logging in..", ui.ButtonTeal, ui.ButtonStatePending, AuthLogoutClicked)
+                          session.Authenticated(_auth_sess) -> 
+                            ui.button_menu("Logout", ui.ButtonOrange, ui.ButtonStateNormal, AuthLogoutClicked)
                         },
-                        html.button(
-                          [
-                            attr.class(
-                              "block w-full text-left px-4 py-2 text-sm text-zinc-400 hover:text-teal-300 hover:bg-teal-800/20 transition-colors cursor-pointer",
-                            ),
-                            event.on_mouse_down(AuthCheckClicked),
-                          ],
-                          [html.text("Check")],
-                        ),
+                        ui.button_menu("Check", ui.ButtonTeal, ui.ButtonStateNormal, AuthCheckClicked),
                         case model.debug_use_local_storage {
                           True ->
-                            html.button(
-                              [
-                                attr.class(
-                                  "block w-full text-left px-4 py-2 text-sm text-zinc-400 hover:text-orange-300 hover:bg-orange-800/20 transition-colors cursor-pointer",
-                                ),
-                                event.on_mouse_down(DebugToggleLocalStorage),
-                              ],
+                            ui.button_menu_custom(
                               [
                                 html.div([attr.class("flex justify-between")], [
                                   html.text("LocalStorage"),
@@ -1603,15 +1584,12 @@ fn view_header(model: Model) -> Element(Msg) {
                                   ),
                                 ]),
                               ],
+                              ui.ButtonOrange,
+                              ui.ButtonStateNormal,
+                              DebugToggleLocalStorage,
                             )
                           False ->
-                            html.button(
-                              [
-                                attr.class(
-                                  "block w-full text-left px-4 py-2 text-sm text-zinc-400 hover:text-teal-300 hover:bg-teal-800/20 transition-colors cursor-pointer",
-                                ),
-                                event.on_mouse_down(DebugToggleLocalStorage),
-                              ],
+                            ui.button_menu_custom(
                               [
                                 html.div([attr.class("flex justify-between ")], [
                                   html.text("LocalStorage"),
@@ -1621,6 +1599,9 @@ fn view_header(model: Model) -> Element(Msg) {
                                   ),
                                 ]),
                               ],
+                              ui.ButtonTeal,
+                              ui.ButtonStateNormal,
+                              DebugToggleLocalStorage,
                             )
                         },
                       ]),
@@ -1846,14 +1827,14 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
       [
         // Toggle button for mobile
         html.div([attr.class("lg:hidden mb-4 flex justify-center")], [
-          ui.button_secondary(
-            case model.edit_view_mode {
-              EditViewModeEdit -> "Show Preview"
-              EditViewModePreview -> "Show Editor"
-            },
-            False,
-            EditViewModeToggled,
-          ),
+                  ui.button_secondary(
+          case model.edit_view_mode {
+            EditViewModeEdit -> "Show Preview"
+            EditViewModePreview -> "Show Editor"
+          },
+          ui.ButtonStateNormal,
+          EditViewModeToggled,
+        ),
         ]),
         // Main content area
         html.div(
@@ -2252,84 +2233,37 @@ fn view_url_create_form(model: Model) -> Element(Msg) {
         html.text("Create Short URL"),
       ]),
       html.div([attr.class("space-y-4")], [
-        html.div([], [
-          html.label(
-            [attr.class("block text-sm font-medium text-zinc-300 mb-2")],
-            [html.text("Target URL")],
-          ),
-          html.input([
-            attr.class(
-              case helpers.validate_target_url(model.short_url_form_target_url) {
-                #(_, Some(_)) ->
-                  "w-full px-3 py-2 bg-zinc-700 border border-red-500 rounded-md text-zinc-100 focus:outline-none focus:border-red-400"
-                #(_, None) ->
-                  "w-full px-3 py-2 bg-zinc-700 border border-zinc-600 rounded-md text-zinc-100 focus:outline-none focus:border-pink-500"
-              },
-            ),
-            attr.placeholder("https://example.com"),
-            attr.type_("url"),
-            attr.value(model.short_url_form_target_url),
-            event.on_input(ShortUrlFormTargetUrlUpdated),
-          ]),
+        ui.form_input(
+          "Target URL",
+          model.short_url_form_target_url,
+          "https://example.com",
+          "url",
+          True,
           case helpers.validate_target_url(model.short_url_form_target_url) {
-            #(_, Some(error_msg)) ->
-              html.p([attr.class("text-xs text-red-400 mt-1")], [
-                html.text(error_msg),
-              ])
-            #(True, None) ->
-              html.p([attr.class("text-xs text-green-400 mt-1")], [
-                html.text("✓ Valid URL"),
-              ])
-            #(False, None) -> element.none()
+            #(_, Some(error_msg)) -> Some(error_msg)
+            _ -> None
           },
-        ]),
-        html.div([], [
-          html.label(
-            [attr.class("block text-sm font-medium text-zinc-300 mb-2")],
-            [
-              html.text("Short Code"),
-              html.span([attr.class("text-xs text-zinc-500 font-normal ml-2")], [
-                html.text("(optional)"),
-              ]),
-            ],
+          ShortUrlFormTargetUrlUpdated,
+        ),
+        ui.form_input(
+          "Short Code (optional)",
+          model.short_url_form_short_code,
+          "Leave empty for random code",
+          "text",
+          False,
+          None,
+          ShortUrlFormShortCodeUpdated,
+        ),
+        ui.button_primary(
+          "Create Short URL",
+          case helpers.validate_target_url(model.short_url_form_target_url) {
+            #(True, None) -> False
+            _ -> True
+          },
+          ShortUrlCreateClicked(
+            model.short_url_form_short_code,
+            model.short_url_form_target_url,
           ),
-          html.input([
-            attr.class(
-              "w-full px-3 py-2 bg-zinc-700 border border-zinc-600 rounded-md text-zinc-100 focus:outline-none focus:border-pink-500",
-            ),
-            attr.placeholder("Leave empty for random code"),
-            attr.type_("text"),
-            attr.value(model.short_url_form_short_code),
-            event.on_input(ShortUrlFormShortCodeUpdated),
-          ]),
-          html.p([attr.class("text-xs text-zinc-500 mt-1")], [
-            html.text(
-              "Only fill this if you want a specific short code. Otherwise, a random one will be generated.",
-            ),
-          ]),
-        ]),
-        html.button(
-          [
-            attr.class(
-              case helpers.validate_target_url(model.short_url_form_target_url) {
-                #(True, None) ->
-                  "w-full px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700 transition-colors"
-                _ ->
-                  "w-full px-4 py-2 bg-gray-600 text-gray-300 rounded-md cursor-not-allowed"
-              },
-            ),
-            attr.disabled(
-              case helpers.validate_target_url(model.short_url_form_target_url) {
-                #(True, None) -> False
-                _ -> True
-              },
-            ),
-            event.on_mouse_down(ShortUrlCreateClicked(
-              model.short_url_form_short_code,
-              model.short_url_form_target_url,
-            )),
-          ],
-          [html.text("Create Short URL")],
         ),
       ]),
     ],
@@ -2371,14 +2305,11 @@ fn view_url_list(model: Model) -> Element(Msg) {
               html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
                 html.text("URLs"),
               ]),
-              html.div([attr.class("text-center py-12")], [
-                html.div([attr.class("text-zinc-400 text-lg mb-2")], [
-                  html.text("No short URLs created yet."),
-                ]),
-                html.div([attr.class("text-zinc-500 text-sm")], [
-                  html.text("Create your first short URL using the form above."),
-                ]),
-              ]),
+              ui.empty_state(
+                "No short URLs created yet",
+                "Create your first short URL using the form above.",
+                None,
+              ),
             ],
           )
         _ -> {
@@ -2755,54 +2686,26 @@ fn view_delete_confirmation(
     Error(_) -> "unknown"
   }
 
-  html.div(
-    [
-      attr.class(
-        "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50",
-      ),
-    ],
-    [
-      html.div(
-        [
-          attr.class(
-            "bg-zinc-800 rounded-lg p-6 max-w-md w-full mx-4 border border-zinc-700",
-          ),
-        ],
-        [
-          html.h3([attr.class("text-lg font-medium text-white mb-4")], [
-            html.text("Delete Short URL"),
+  html.div([], [
+    ui.modal_backdrop(ShortUrlDeleteCancelClicked),
+    ui.modal(
+      "Delete Short URL",
+      [
+        html.p([attr.class("text-zinc-300")], [
+          html.text("Are you sure you want to delete the short URL "),
+          html.span([attr.class("font-mono text-pink-400")], [
+            html.text("u.jst.dev/" <> url_to_delete),
           ]),
-          html.p([attr.class("text-zinc-300 mb-6")], [
-            html.text("Are you sure you want to delete the short URL "),
-            html.span([attr.class("font-mono text-pink-400")], [
-              html.text("u.jst.dev/" <> url_to_delete),
-            ]),
-            html.text("? This action cannot be undone."),
-          ]),
-          html.div([attr.class("flex gap-3 justify-end")], [
-            html.button(
-              [
-                attr.class(
-                  "px-4 py-2 bg-zinc-600 text-white rounded hover:bg-zinc-700 transition-colors",
-                ),
-                event.on_mouse_down(ShortUrlDeleteCancelClicked),
-              ],
-              [html.text("Cancel")],
-            ),
-            html.button(
-              [
-                attr.class(
-                  "px-4 py-2 text-zinc-400 border border-zinc-600 rounded hover:text-red-300 hover:border-red-400 transition-colors",
-                ),
-                event.on_mouse_down(ShortUrlDeleteConfirmClicked(delete_id)),
-              ],
-              [html.text("Delete")],
-            ),
-          ]),
-        ],
-      ),
-    ],
-  )
+          html.text("? This action cannot be undone."),
+        ]),
+      ],
+      [
+        ui.button_secondary("Cancel", ui.ButtonStateNormal, ShortUrlDeleteCancelClicked),
+        ui.button_action("Delete", ui.ButtonRed, False, ShortUrlDeleteConfirmClicked(delete_id)),
+      ],
+      ShortUrlDeleteCancelClicked,
+    ),
+  ])
 }
 
 fn view_url_info_page(model: Model, short_code: String) -> List(Element(Msg)) {
@@ -3577,3 +3480,223 @@ you can do in djot but not Markdown. See the [syntax
 description](https://htmlpreview.github.io/?https://github.com/jgm/djot/blob/master/doc/syntax.html)
 to find about the new constructions that are available.
 "
+
+// UI COMPONENTS SHOWCASE -----------------------------------------------------
+
+fn view_ui_components() -> List(Element(Msg)) {
+  [
+    ui.page_header("UI Components", Some("Showcase of all available UI components")),
+    
+    // Loading States Section
+    html.section([attr.class("space-y-6")], [
+      html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
+        html.text("Loading States"),
+      ]),
+      ui.card([
+        html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
+          html.text("Spinners"),
+        ]),
+        html.div([attr.class("flex items-center space-x-8 mb-6")], [
+          html.div([attr.class("text-center")], [
+            ui.loading_spinner(),
+            html.p([attr.class("text-sm text-zinc-400 mt-2")], [
+              html.text("Small"),
+            ]),
+          ]),
+          html.div([attr.class("text-center")], [
+            ui.loading_spinner_large(),
+            html.p([attr.class("text-sm text-zinc-400 mt-2")], [
+              html.text("Large"),
+            ]),
+          ]),
+        ]),
+        html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
+          html.text("Indicators"),
+        ]),
+        html.div([attr.class("space-y-4")], [
+          ui.loading_indicator_small(),
+          ui.loading_indicator_subtle(),
+          ui.loading_indicator_bar(),
+          ui.loading_state("Loading data..."),
+        ]),
+      ]),
+    ]),
+
+    // Buttons Section
+    html.section([attr.class("space-y-6")], [
+      html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
+        html.text("Buttons"),
+      ]),
+      ui.card([
+        html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
+          html.text("Button States"),
+        ]),
+        html.div([attr.class("space-y-4")], [
+          html.div([attr.class("flex flex-wrap gap-4")], [
+            ui.button_secondary("Normal", ui.ButtonStateNormal, UserNavigatedTo(routes.to_uri(routes.UiComponents))),
+            ui.button_secondary("Pending", ui.ButtonStatePending, UserNavigatedTo(routes.to_uri(routes.UiComponents))),
+            ui.button_secondary("Disabled", ui.ButtonStateDisabled, UserNavigatedTo(routes.to_uri(routes.UiComponents))),
+          ]),
+        ]),
+        html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4 mt-8")], [
+          html.text("Button Variants"),
+        ]),
+        html.div([attr.class("space-y-4")], [
+          html.div([attr.class("flex flex-wrap gap-4")], [
+            ui.button_action("Teal", ui.ButtonTeal, False, UserNavigatedTo(routes.to_uri(routes.UiComponents))),
+            ui.button_action("Orange", ui.ButtonOrange, False, UserNavigatedTo(routes.to_uri(routes.UiComponents))),
+            ui.button_action("Red", ui.ButtonRed, False, UserNavigatedTo(routes.to_uri(routes.UiComponents))),
+            ui.button_action("Green", ui.ButtonGreen, False, UserNavigatedTo(routes.to_uri(routes.UiComponents))),
+          ]),
+        ]),
+        html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4 mt-8")], [
+          html.text("Menu Buttons"),
+        ]),
+        html.div([attr.class("max-w-sm")], [
+          ui.button_menu("Teal Menu", ui.ButtonTeal, ui.ButtonStateNormal, UserNavigatedTo(routes.to_uri(routes.UiComponents))),
+          ui.button_menu("Orange Menu", ui.ButtonOrange, ui.ButtonStateNormal, UserNavigatedTo(routes.to_uri(routes.UiComponents))),
+          ui.button_menu("Red Menu", ui.ButtonRed, ui.ButtonStateNormal, UserNavigatedTo(routes.to_uri(routes.UiComponents))),
+          ui.button_menu("Green Menu", ui.ButtonGreen, ui.ButtonStateNormal, UserNavigatedTo(routes.to_uri(routes.UiComponents))),
+        ]),
+      ]),
+    ]),
+
+    // Form Components Section
+    html.section([attr.class("space-y-6")], [
+      html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
+        html.text("Form Components"),
+      ]),
+      ui.card([
+        html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
+          html.text("Input Fields"),
+        ]),
+        html.div([attr.class("max-w-md space-y-6")], [
+          ui.form_input("Email", "user@example.com", "Enter your email", "email", True, None, fn(_) { UserNavigatedTo(routes.to_uri(routes.UiComponents)) }),
+          ui.form_input("Error State", "", "This field has an error", "text", True, Some("This field is required"), fn(_) { UserNavigatedTo(routes.to_uri(routes.UiComponents)) }),
+          ui.form_textarea("Description", "Sample content", "Enter description", "h-32", False, None, fn(_) { UserNavigatedTo(routes.to_uri(routes.UiComponents)) }),
+        ]),
+      ]),
+    ]),
+
+    // Status & Feedback Section
+    html.section([attr.class("space-y-6")], [
+      html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
+        html.text("Status & Feedback"),
+      ]),
+      ui.card([
+        html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
+          html.text("Status Badges"),
+        ]),
+        html.div([attr.class("flex flex-wrap gap-4 mb-8")], [
+          ui.status_badge("Active", ui.ButtonGreen),
+          ui.status_badge("Pending", ui.ButtonOrange),
+          ui.status_badge("Error", ui.ButtonRed),
+          ui.status_badge("Info", ui.ButtonTeal),
+        ]),
+        html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
+          html.text("Notices"),
+        ]),
+        html.div([attr.class("space-y-4")], [
+          ui.notice("Success message", ui.ButtonGreen, True, Some(UserNavigatedTo(routes.to_uri(routes.UiComponents)))),
+          ui.notice("Warning message", ui.ButtonOrange, True, Some(UserNavigatedTo(routes.to_uri(routes.UiComponents)))),
+          ui.notice("Error message", ui.ButtonRed, True, Some(UserNavigatedTo(routes.to_uri(routes.UiComponents)))),
+          ui.notice("Info message", ui.ButtonTeal, False, None),
+        ]),
+      ]),
+    ]),
+
+    // Error States Section
+    html.section([attr.class("space-y-6")], [
+      html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
+        html.text("Error States"),
+      ]),
+      ui.card([
+        html.div([attr.class("space-y-8")], [
+          ui.error_state(ui.ErrorNetwork, "Network Error", "Failed to connect to server", Some(UserNavigatedTo(routes.to_uri(routes.UiComponents)))),
+          ui.error_state(ui.ErrorNotFound, "Not Found", "The requested resource was not found", None),
+        ]),
+      ]),
+    ]),
+
+    // Layout Components Section  
+    html.section([attr.class("space-y-6")], [
+      html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
+        html.text("Layout Components"),
+      ]),
+      ui.card([
+        html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
+          html.text("Cards"),
+        ]),
+        html.div([attr.class("space-y-6")], [
+          ui.card_with_title("Card with Title", [
+            html.p([attr.class("text-zinc-300")], [
+              html.text("This is a card with a title section."),
+            ]),
+          ]),
+          ui.glass_panel([
+            html.h4([attr.class("text-lg font-medium text-zinc-100 mb-2")], [
+              html.text("Glass Panel"),
+            ]),
+            html.p([attr.class("text-zinc-300")], [
+              html.text("This panel has a glass-like effect."),
+            ]),
+          ]),
+        ]),
+        html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4 mt-8")], [
+          html.text("Empty States"),
+        ]),
+        ui.empty_state(
+          "No Items Found",
+          "There are no items to display at the moment.",
+          Some(ui.button_primary("Create New", False, UserNavigatedTo(routes.to_uri(routes.UiComponents))))
+        ),
+      ]),
+    ]),
+
+    // Skeleton Loaders Section
+    html.section([attr.class("space-y-6")], [
+      html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
+        html.text("Skeleton Loaders"),
+      ]),
+      ui.card([
+        html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
+          html.text("Loading Placeholders"),
+        ]),
+        html.div([attr.class("space-y-6")], [
+          html.div([], [
+            html.h4([attr.class("text-md font-medium text-zinc-200 mb-4")], [
+              html.text("Text Skeleton"),
+            ]),
+            ui.skeleton_text(3),
+          ]),
+          html.div([], [
+            html.h4([attr.class("text-md font-medium text-zinc-200 mb-4")], [
+              html.text("Card Skeleton"),
+            ]),
+            ui.skeleton_card(),
+          ]),
+        ]),
+      ]),
+    ]),
+
+    // Typography & Links Section
+    html.section([attr.class("space-y-6")], [
+      html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
+        html.text("Typography & Links"),
+      ]),
+      ui.card([
+        html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
+          html.text("Text Styles"),
+        ]),
+        html.div([attr.class("space-y-4")], [
+          ui.gradient_text("Gradient Text Effect"),
+          html.p([attr.class("text-zinc-300")], [
+            html.text("Regular text with "),
+            ui.link_primary("primary link", UserNavigatedTo(routes.to_uri(routes.UiComponents))),
+            html.text(" embedded."),
+          ]),
+        ]),
+      ]),
+    ]),
+  ]
+}
