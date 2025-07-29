@@ -141,6 +141,7 @@ pub type Msg {
   UserNavigatedTo(uri: Uri)
   UserMouseDownNavigation(uri: Uri)
   ProfileMenuToggled
+  ProfileMenuAction(msg: Msg)
   NoticeCleared
   PersistGotModel(opt: Option(PersistentModel))
   ArticleHovered(article: Article)
@@ -304,6 +305,11 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         effect.none(),
       )
     }
+    ProfileMenuAction(msg) -> {
+      let model = Model(..model, profile_menu_open: False)
+      update(model, msg)
+    }
+
     // Messages
     NoticeCleared -> {
       #(Model(..model, notice: ""), effect.none())
@@ -1399,13 +1405,17 @@ fn view_login_modal(model: Model) -> Element(Msg) {
         ui.button("Cancel", ui.ColorRed, ui.ButtonStateNormal, LoginFormToggled),
         ui.button(
           case model.login_loading {
-            True -> "Signing In..."
-            False -> "Sign In →"
+            True -> "Sign In..."
+            False -> "Sign In"
           },
           ui.ColorTeal,
-          case model.login_username == "" || model.login_password == "" {
-            True -> ui.ButtonStateDisabled
-            False -> ui.ButtonStateNormal
+          case
+            model.login_loading,
+            model.login_username == "" || model.login_password == ""
+          {
+            True, _ -> ui.ButtonStatePending
+            False, True -> ui.ButtonStateDisabled
+            _, _ -> ui.ButtonStateNormal
           },
           LoginFormSubmitted,
         ),
@@ -1564,29 +1574,23 @@ fn view_header(model: Model) -> Element(Msg) {
                               "Login",
                               ui.ColorTeal,
                               ui.ButtonStateNormal,
-                              LoginFormToggled,
+                              ProfileMenuAction(LoginFormToggled),
                             )
                           session.Pending ->
                             ui.button_menu(
-                              "logging in..",
+                              "Login",
                               ui.ColorTeal,
                               ui.ButtonStatePending,
-                              AuthLogoutClicked,
+                              ProfileMenuAction(AuthLogoutClicked),
                             )
                           session.Authenticated(_auth_sess) ->
                             ui.button_menu(
                               "Logout",
                               ui.ColorOrange,
                               ui.ButtonStateNormal,
-                              AuthLogoutClicked,
+                              ProfileMenuAction(AuthLogoutClicked),
                             )
                         },
-                        ui.button_menu(
-                          "Check",
-                          ui.ColorTeal,
-                          ui.ButtonStateNormal,
-                          AuthCheckClicked,
-                        ),
                         case model.debug_use_local_storage {
                           True ->
                             ui.button_menu_custom(

@@ -360,7 +360,7 @@ pub fn button(
   html.button(
     [
       attr.class(
-        "px-4 py-2 border-r border-l transition-colors duration-200 "
+        "px-4 py-2 border-r border-l transition-colors duration-200 min-w-24 "
         <> tailwind_classes,
       ),
       attr.disabled(case state {
