@@ -173,20 +173,37 @@ pub fn button_action(
   disabled: Bool,
   onmousedown: msg,
 ) -> Element(msg) {
-  let hover_classes = case variant {
-    ButtonTeal -> "hover:text-teal-300 hover:border-teal-400"
-    ButtonOrange -> "hover:text-orange-300 hover:border-orange-400"
-    ButtonRed -> "hover:text-red-300 hover:border-red-400"
-    ButtonGreen -> "hover:text-green-300 hover:border-green-400"
+  let tailwind_classes_active = case variant {
+    ButtonTeal ->
+      "text-teal-400 border-teal-600 bg-teal-500/10 hover:bg-teal-950/50 hover:text-teal-300 hover:border-teal-400"
+    ButtonOrange ->
+      "text-orange-400 border-orange-600 bg-orange-500/10 hover:bg-orange-950/50 hover:text-orange-300 hover:border-orange-400"
+    ButtonRed ->
+      "text-red-400 border-red-600 bg-red-500/10 hover:bg-red-950/50 hover:text-red-300 hover:border-red-400"
+    ButtonGreen ->
+      "text-green-400 border-green-600 bg-green-500/10 hover:bg-green-950/50 hover:text-green-300 hover:border-green-400"
   }
+
+  let tailwind_classes_inactive = case variant {
+    ButtonOrange ->
+      "text-orange-400 border-orange-600 bg-orange-500/10 hover:bg-orange-950/50 hover:text-orange-300 hover:border-orange-400"
+    ButtonRed ->
+      "text-red-400 border-red-600 bg-red-500/10 hover:bg-red-950/50 hover:text-red-300 hover:border-red-400"
+    ButtonGreen ->
+      "text-green-400 border-green-600 bg-green-500/10 hover:bg-green-950/50 hover:text-green-300 hover:border-green-400"
+    ButtonTeal ->
+      "text-teal-400 border-teal-600 bg-teal-500/10 hover:bg-teal-950/50 hover:text-teal-300 hover:border-teal-400"
+  }
+  let tailwind_classes_common =
+    "px-4 py-2 border-r border-l transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
 
   html.button(
     [
-      attr.class(
-        "px-4 py-2 text-zinc-400 border-r border-l border-zinc-600 "
-        <> hover_classes
-        <> " transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed",
-      ),
+      attr.classes([
+        #(tailwind_classes_common, True),
+        #(tailwind_classes_active, !disabled),
+        #(tailwind_classes_inactive, disabled),
+      ]),
       attr.disabled(disabled),
       event.on_mouse_down(onmousedown),
     ],
@@ -216,9 +233,9 @@ pub fn form_input(
     html.input([
       attr.class(case error {
         Some(_) ->
-          "form-input w-full bg-zinc-800 border border-red-500 rounded-lg p-4 text-zinc-100 placeholder-zinc-500 transition-all duration-300 ease-out outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/20"
+          "form-input w-full bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 pl-4 pr-4 py-3 text-zinc-100 placeholder-zinc-500 transition-all duration-300 ease-out outline-none border-l-red-500 focus:border-l-red-400 focus:bg-red-500/5"
         None ->
-          "form-input w-full bg-zinc-800 border border-zinc-600 rounded-lg p-4 text-zinc-100 placeholder-zinc-500 transition-all duration-300 ease-out outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-500/20"
+          "form-input w-full bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 pl-4 pr-4 py-3 text-zinc-100 placeholder-zinc-500 transition-all duration-300 ease-out outline-none border-l-teal-600 focus:border-l-teal-400 focus:bg-teal-500/5"
       }),
       attr.type_(input_type),
       attr.value(value),
@@ -263,7 +280,11 @@ pub fn modal(
     ],
     [
       html.div(
-        [attr.class("glass rounded-2xl max-w-md w-full mx-4 overflow-hidden")],
+        [
+          attr.class(
+            "glass border-l-2 border-teal-600 border-r border-r-zinc-700 border-t border-t-zinc-700 border-b border-b-zinc-700 max-w-md w-full mx-4 overflow-hidden",
+          ),
+        ],
         [
           // Header
           html.div(

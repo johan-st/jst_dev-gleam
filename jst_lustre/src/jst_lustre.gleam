@@ -764,12 +764,10 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           // TODO: get from session
           tags: [],
           published_at: None,
-          title: "New Article",
-          subtitle: "A new article subtitle",
-          leading: "This is a new article. Start editing to customize it.",
-          content: Loaded(
-            "# New Article\n\nStart writing your article content here...",
-          ),
+          title: "",
+          subtitle: "",
+          leading: "",
+          content: Loaded(""),
           draft: None,
         )
       #(
@@ -1397,11 +1395,11 @@ fn view_login_modal(model: Model) -> Element(Msg) {
         ),
       ],
       [
-        ui.button_secondary("Cancel", False, LoginFormToggled),
+        ui.button_action("Cancel", ui.ButtonRed, False, LoginFormToggled),
         ui.button_action(
           case model.login_loading {
             True -> "Signing In..."
-            False -> "Sign In"
+            False -> "Sign In →"
           },
           ui.ButtonTeal,
           model.login_username == "" || model.login_password == "",
@@ -1479,7 +1477,7 @@ fn view_header(model: Model) -> Element(Msg) {
               html.button(
                 [
                   attr.class(
-                    "p-2 rounded-md bg-zinc-700 hover:bg-zinc-600 transition-colors",
+                    "px-4 py-2 border-l-2 border-teal-600 border-r border-r-zinc-700 border-t border-t-zinc-700 border-b border-b-zinc-700 bg-zinc-800 hover:bg-teal-500/10 hover:border-l-teal-400 transition-colors duration-200",
                   ),
                   event.on_mouse_down(ProfileMenuToggled),
                 ],
@@ -1496,7 +1494,7 @@ fn view_header(model: Model) -> Element(Msg) {
                   html.div(
                     [
                       attr.class(
-                        "absolute right-0 mt-2 w-48 rounded-md shadow-lg bg-zinc-700 ring-1 ring-black ring-opacity-5 z-50",
+                        "absolute right-0 mt-2 w-48 shadow-lg bg-zinc-800 border-l-2 border-teal-600 border-r border-r-zinc-700 border-t border-t-zinc-700 border-b border-b-zinc-700 z-50",
                       ),
                     ],
                     [
@@ -1548,7 +1546,7 @@ fn view_header(model: Model) -> Element(Msg) {
                             html.button(
                               [
                                 attr.class(
-                                  "block w-full text-left px-4 py-2 text-sm text-zinc-400 hover:text-teal-300 hover:bg-teal-800/20 transition-colors cursor-pointer",
+                                  "block w-full text-left px-4 py-2 text-sm text-teal-400 border-l border-teal-600 hover:text-teal-300 hover:bg-teal-500/10 hover:border-l-teal-400 transition-colors cursor-pointer",
                                 ),
                                 event.on_mouse_down(LoginFormToggled),
                               ],
@@ -1570,7 +1568,7 @@ fn view_header(model: Model) -> Element(Msg) {
                             html.button(
                               [
                                 attr.class(
-                                  "block w-full text-left px-4 py-2 text-sm text-zinc-400 hover:text-orange-300 hover:bg-orange-800/20 transition-colors cursor-pointer",
+                                  "block w-full text-left px-4 py-2 text-sm text-orange-400 border-l border-orange-600 hover:text-orange-300 hover:bg-orange-500/10 hover:border-l-orange-400 transition-colors cursor-pointer",
                                 ),
                                 event.on_mouse_down(AuthLogoutClicked),
                               ],
