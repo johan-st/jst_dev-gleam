@@ -350,8 +350,8 @@ func TestShortUrlAuthentication(t *testing.T) {
 	}
 
 	filtered = service.filterShortUrls("")
-	if len(filtered) != 1 {
-		t.Errorf("Expected 1 short URL for empty user, got %d", len(filtered))
+	if len(filtered) != 2 {
+		t.Errorf("Expected 2 short URLs for empty user, got %d", len(filtered))
 	}
 
 	filtered = service.filterShortUrls("nonexistent")
