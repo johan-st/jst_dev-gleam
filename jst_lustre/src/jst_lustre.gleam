@@ -17,11 +17,11 @@ import lustre/attribute.{type Attribute} as attr
 import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
-import lustre/element/svg
 import lustre/event
 import modem
 import pages/pages
-import routes/routes.{type Route}
+import routes.{type Route}
+import session.{type Session}
 import utils/error_string
 import utils/http.{type HttpError}
 import utils/icon
@@ -30,11 +30,7 @@ import utils/persist.{type PersistentModel, PersistentModelV0, PersistentModelV1
 import utils/remote_data.{
   type RemoteData, Errored, Loaded, NotInitialized, Optimistic, Pending,
 }
-import utils/session
-import utils/short_url.{
-  type ShortUrl, type ShortUrlCreateRequest, type ShortUrlListResponse,
-  type ShortUrlUpdateRequest,
-}
+import utils/short_url.{type ShortUrl, type ShortUrlListResponse}
 
 @external(javascript, "./app.ffi.mjs", "clipboard_copy")
 fn clipboard_copy(text: String) -> Nil
@@ -50,37 +46,6 @@ pub fn main() {
   let assert Ok(_) = lustre.start(app, "#app", Nil)
 
   Nil
-}
-
-// MODEL -----------------------------------------------------------------------
-
-pub type Model {
-  Model(
-    base_uri: Uri,
-    route: Route,
-    session: session.Session,
-    articles: RemoteData(List(Article), HttpError),
-    short_urls: RemoteData(List(ShortUrl), HttpError),
-    short_url_form_short_code: String,
-    short_url_form_target_url: String,
-    djot_demo_content: String,
-    edit_view_mode: EditViewMode,
-    profile_menu_open: Bool,
-    notice: String,
-    debug_use_local_storage: Bool,
-    delete_confirmation: option.Option(String),
-    copy_feedback: option.Option(String),
-    expanded_urls: Set(String),
-    login_form_open: Bool,
-    login_username: String,
-    login_password: String,
-    login_loading: Bool,
-  )
-}
-
-pub type EditViewMode {
-  EditViewModeEdit
-  EditViewModePreview
 }
 
 fn init(_) -> #(Model, Effect(Msg)) {
@@ -138,6 +103,37 @@ fn init(_) -> #(Model, Effect(Msg)) {
 //   let url = "http://127.0.0.1:1234/priv/static/flags.json"
 //   http.get(url, http.expect_json(article_decoder(), msg))
 // }
+
+// MODEL -----------------------------------------------------------------------
+
+type Model {
+  Model(
+    base_uri: Uri,
+    route: Route,
+    session: Session,
+    articles: RemoteData(List(Article), HttpError),
+    short_urls: RemoteData(List(ShortUrl), HttpError),
+    short_url_form_short_code: String,
+    short_url_form_target_url: String,
+    djot_demo_content: String,
+    edit_view_mode: EditViewMode,
+    profile_menu_open: Bool,
+    notice: String,
+    debug_use_local_storage: Bool,
+    delete_confirmation: Option(String),
+    copy_feedback: Option(String),
+    expanded_urls: Set(String),
+    login_form_open: Bool,
+    login_username: String,
+    login_password: String,
+    login_loading: Bool,
+  )
+}
+
+pub type EditViewMode {
+  EditViewModeEdit
+  EditViewModePreview
+}
 
 // UPDATE ----------------------------------------------------------------------
 

@@ -1,6 +1,6 @@
 import gleam/uri
 import gleeunit/should
-import routes/routes
+import routes
 
 pub fn route_url_test() {
   let article_id = "test-id"

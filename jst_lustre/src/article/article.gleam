@@ -10,7 +10,7 @@ import gleam/uri.{type Uri}
 import lustre/effect.{type Effect}
 import utils/http.{type HttpError}
 import utils/remote_data.{type RemoteData, Loaded, NotInitialized}
-import utils/session.{type Session, Authenticated, Unauthenticated}
+import session.{type Session, Authenticated, Unauthenticated}
 
 pub type Article {
   ArticleV1(
