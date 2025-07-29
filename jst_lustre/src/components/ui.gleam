@@ -226,7 +226,7 @@ pub fn button_menu(
   html.button(
     [
       attr.class(
-        "block w-full text-left px-4 py-2 text-sm transition-colors duration-200 border-l-2 -left-[1px] relative "
+        "block w-full text-left px-4 py-3 sm:py-2 text-sm transition-colors duration-200 border-l-2 -left-[1px] relative min-h-[44px] "
         <> tailwind_classes,
       ),
       attr.disabled(case state {
@@ -293,7 +293,7 @@ pub fn button_menu_custom(
   html.button(
     [
       attr.class(
-        "block w-full text-left px-4 py-2 text-sm transition-colors duration-200 border-l-2 -left-[1px] relative "
+        "block w-full text-left px-4 py-3 sm:py-2 text-sm transition-colors duration-200 border-l-2 -left-[1px] relative min-h-[44px] "
         <> tailwind_classes,
       ),
       attr.disabled(case state {
@@ -360,7 +360,7 @@ pub fn button(
   html.button(
     [
       attr.class(
-        "px-4 py-2 border-r border-l transition-colors duration-200 min-w-24 "
+        "px-4 py-3 sm:py-2 border-r border-l transition-colors duration-200 min-w-24 min-h-[44px] "
         <> tailwind_classes,
       ),
       attr.disabled(case state {
@@ -395,9 +395,9 @@ pub fn form_input(
     html.input([
       attr.class(case error {
         Some(_) ->
-          "form-input w-full bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 pl-4 pr-4 py-3 text-zinc-100 placeholder-zinc-500 transition-all duration-300 ease-out outline-none border-l-red-500 focus:border-l-red-400 focus:bg-red-500/5"
+          "form-input w-full bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 pl-4 pr-4 py-4 sm:py-3 text-zinc-100 placeholder-zinc-500 transition-all duration-300 ease-out outline-none border-l-red-500 focus:border-l-red-400 focus:bg-red-500/5"
         None ->
-          "form-input w-full bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 pl-4 pr-4 py-3 text-zinc-100 placeholder-zinc-500 transition-all duration-300 ease-out outline-none border-l-teal-600 focus:border-l-teal-400 focus:bg-teal-500/5"
+          "form-input w-full bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 pl-4 pr-4 py-4 sm:py-3 text-zinc-100 placeholder-zinc-500 transition-all duration-300 ease-out outline-none border-l-teal-600 focus:border-l-teal-400 focus:bg-teal-500/5"
       }),
       attr.type_(input_type),
       attr.value(value),
@@ -443,11 +443,11 @@ pub fn form_textarea(
           Some(_) ->
             "w-full "
             <> height_class
-            <> " bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 p-3 text-zinc-100 placeholder-zinc-500 resize-none transition-all duration-300 ease-out outline-none border-l-red-500 focus:border-l-red-400 focus:bg-red-500/5"
+            <> " bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 p-4 sm:p-3 text-zinc-100 placeholder-zinc-500 resize-none transition-all duration-300 ease-out outline-none border-l-red-500 focus:border-l-red-400 focus:bg-red-500/5"
           None ->
             "w-full "
             <> height_class
-            <> " bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 p-3 text-zinc-100 placeholder-zinc-500 resize-none transition-all duration-300 ease-out outline-none border-l-teal-600 focus:border-l-teal-400 focus:bg-teal-500/5"
+            <> " bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 p-4 sm:p-3 text-zinc-100 placeholder-zinc-500 resize-none transition-all duration-300 ease-out outline-none border-l-teal-600 focus:border-l-teal-400 focus:bg-teal-500/5"
         }),
         attr.value(value),
         attr.placeholder(placeholder),

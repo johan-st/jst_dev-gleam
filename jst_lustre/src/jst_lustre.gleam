@@ -1206,7 +1206,7 @@ fn view(model: Model) -> Element(Msg) {
           [
             view_notice(model.notice),
             view_header(model),
-            html.main([attr.class("mx-auto px-10 py-10")], content),
+            html.main([attr.class("mx-auto px-4 sm:px-6 md:px-10 py-6 sm:py-8 md:py-10")], content),
             view_modals(model),
           ],
         )
@@ -1224,7 +1224,7 @@ fn view(model: Model) -> Element(Msg) {
             view_notice(model.notice),
             view_header(model),
             html.main(
-              [attr.class("max-w-screen-md mx-auto px-10 py-10")],
+              [attr.class("max-w-screen-md mx-auto px-4 sm:px-6 md:px-10 py-6 sm:py-8 md:py-10")],
               content,
             ),
             view_modals(model),
@@ -1450,7 +1450,7 @@ fn view_header(model: Model) -> Element(Msg) {
           html.div([attr.class("flex items-center space-x-8")], [
             // Desktop navigation
             html.ul(
-              [attr.class("hidden sm:flex space-x-8 pr-2")],
+              [attr.class("hidden md:flex space-x-8 pr-2")],
               list.flatten([
                 [
                   view_header_link(
@@ -1523,7 +1523,7 @@ fn view_header(model: Model) -> Element(Msg) {
                         html.ul(
                           [
                             attr.class(
-                              "sm:hidden flex flex-col border-b border-zinc-400",
+                              "flex md:hidden flex-col border-b border-zinc-400",
                             ),
                           ],
                           list.flatten([
@@ -1878,8 +1878,8 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
         html.div(
           [
             attr.classes([
-              #("grid gap-8 h-screen", True),
-              #("grid-cols-2 lg:grid-cols-2", True),
+              #("grid gap-4 lg:gap-8 h-screen", True),
+              #("grid-cols-1 lg:grid-cols-2", True),
             ]),
           ],
           [
@@ -1931,7 +1931,7 @@ fn view_edit_actions(draft: draft.Draft, article: Article) -> List(Element(Msg))
       ]),
       html.input([
         attr.class(
-          "w-full bg-zinc-800 border border-zinc-600 rounded-md p-2 font-light text-zinc-100 focus:border-pink-700 focus:ring-1 focus:ring-pink-700 focus:outline-none transition-colors duration-200",
+          "w-full bg-zinc-800 border border-zinc-600 rounded-md p-3 sm:p-2 font-light text-zinc-100 focus:border-pink-700 focus:ring-1 focus:ring-pink-700 focus:outline-none transition-colors duration-200",
         ),
         attr.value(draft.slug(draft)),
         attr.id("edit-" <> article.slug <> "-" <> "Slug"),
@@ -1960,7 +1960,7 @@ fn view_edit_actions(draft: draft.Draft, article: Article) -> List(Element(Msg))
       html.textarea(
         [
           attr.class(
-            "w-full h-24 bg-zinc-800 border border-zinc-600 rounded-md p-2 font-bold text-zinc-100 resize-none focus:border-pink-700 focus:ring-1 focus:ring-pink-700 focus:outline-none transition-colors duration-200",
+            "w-full h-20 sm:h-24 bg-zinc-800 border border-zinc-600 rounded-md p-3 sm:p-2 font-bold text-zinc-100 resize-none focus:border-pink-700 focus:ring-1 focus:ring-pink-700 focus:outline-none transition-colors duration-200",
           ),
           attr.value(draft.leading(draft)),
           attr.id("edit-" <> article.slug <> "-" <> "Leading"),
@@ -1978,7 +1978,7 @@ fn view_edit_actions(draft: draft.Draft, article: Article) -> List(Element(Msg))
       html.textarea(
         [
           attr.class(
-            "w-full h-96 bg-zinc-800 border border-zinc-600 rounded-md p-4 font-mono text-sm text-zinc-100 resize-none focus:border-pink-700 focus:ring-1 focus:ring-pink-700 focus:outline-none transition-colors duration-200",
+            "w-full h-64 sm:h-80 lg:h-96 bg-zinc-800 border border-zinc-600 rounded-md p-4 font-mono text-sm text-zinc-100 resize-none focus:border-pink-700 focus:ring-1 focus:ring-pink-700 focus:outline-none transition-colors duration-200",
           ),
           attr.value(draft.content(draft)),
           event.on_input(ArticleDraftUpdatedContent(article, _)),
