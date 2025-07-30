@@ -11,5 +11,10 @@ pub fn setup(window_unfocused: msg) -> effect.Effect(msg) {
         other -> todo as other
       }
     })
+    
+    // Also handle window blur to clear active keys
+    window.add_event_listener("blur", fn(_event) {
+      dispatch(window_unfocused)
+    })
   })
 }

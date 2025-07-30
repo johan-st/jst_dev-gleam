@@ -333,7 +333,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       case key {
         keyboard.Captured(shortcut) -> {
           case shortcut {
-            keyboard.Shift -> {
+            keyboard.Alt -> {
               #(model, effect.none())
             }
             keyboard.Ctrl -> {
@@ -377,11 +377,38 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                 effect.none(),
               )
             }
-            keyboard.Shift1 -> {
-              todo as "Navigate to Articles"
+            keyboard.Alt1 -> {
+              #(model, modem.push(routes.to_string(routes.Index), None, None))
             }
-            keyboard.Shift2 -> {
-              todo as "Navigate to Drafts"
+            keyboard.Alt2 -> {
+              #(
+                model,
+                modem.push(routes.to_string(routes.Articles), None, None),
+              )
+            }
+            keyboard.Alt3 -> {
+              #(model, modem.push(routes.to_string(routes.About), None, None))
+            }
+            keyboard.Alt4 -> {
+              #(
+                model,
+                modem.push(routes.to_string(routes.DjotDemo), None, None),
+              )
+            }
+            keyboard.Alt5 -> {
+              #(
+                model,
+                modem.push(routes.to_string(routes.UrlShortIndex), None, None),
+              )
+            }
+            keyboard.Alt6 -> {
+              #(
+                model,
+                modem.push(routes.to_string(routes.UiComponents), None, None),
+              )
+            }
+            keyboard.AltL -> {
+              #(Model(..model, login_form_open: True), effect.none())
             }
           }
         }
@@ -398,7 +425,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       case key {
         keyboard.Captured(shortcut) -> {
           case shortcut {
-            keyboard.Shift -> {
+            keyboard.Alt -> {
               #(model, effect.none())
             }
             keyboard.Ctrl -> {
@@ -441,12 +468,12 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           case list.find(articles, fn(article) { article.slug == slug }) {
             Ok(ArticleV1(
               id:,
-              slug: _,
+              slug: slug,
               author: _,
               title: _,
               leading: _,
               subtitle: _,
-              content: NotInitialized,
+              content: _,
               draft: _,
               published_at: _,
               revision: _,
@@ -1301,9 +1328,9 @@ fn view(model: Model) -> Element(Msg) {
     pages.PageNotFound(uri) -> view_not_found(uri)
   }
   let nav_hints_overlay = case
-    set.contains(model.key_shortcuts_active, keyboard.Captured(keyboard.Shift))
+    set.contains(model.key_shortcuts_active, keyboard.Captured(keyboard.Alt))
   {
-    True -> view_nav_hints()
+    True -> view_nav_hints(model.session)
     False -> element.none()
   }
   let layout = case page {
@@ -1363,35 +1390,95 @@ fn view(model: Model) -> Element(Msg) {
   ])
 }
 
-fn view_nav_hints() -> Element(Msg) {
-  html.div(
-    [
-      attr.class(
-        "fixed inset-0 z-50 flex items-start justify-center pointer-events-none",
-      ),
-    ],
-    [
-      html.div(
-        [
-          attr.class(
-            "bg-black bg-opacity-80 text-white rounded px-6 py-4 mt-16 shadow-lg text-lg font-mono",
-          ),
-        ],
-        [html.text("Quick Nav: Shift+1 = Articles, Shift+2 = About")],
-      ),
-    ],
-  )
+fn view_nav_hints(session: session.Session) -> Element(Msg) {
+  // Determine which navigation items to show based on authentication
+  let nav_items = case session {
+    session.Authenticated(_) -> [
+      // All users can access these
+      #("Home", "Alt+1"),
+      #("Articles", "Alt+2"),
+      #("About", "Alt+3"),
+      // Only authenticated users can access these
+      #("Djot Demo", "Alt+4"),
+      #("URL Shortener", "Alt+5"),
+      #("UI Components", "Alt+6"),
+    ]
+    session.Unauthenticated -> [
+      // Unauthenticated users can only access these
+      #("Home", "Alt+1"),
+      #("Articles", "Alt+2"),
+      #("About", "Alt+3"),
+      #("Login", "Alt+L"),
+    ]
+    session.Pending -> [
+      // Show minimal navigation while session is loading
+      #("Home", "Alt+1"),
+      #("Articles", "Alt+2"),
+      #("About", "Alt+3"),
+    ]
+  }
+  
+  html.div([attr.class("fixed inset-0 z-50 flex items-center justify-center")], [
+    // Dark overlay background
+    html.div(
+      [attr.class("absolute inset-0 bg-black bg-opacity-50 backdrop-blur-sm")],
+      [],
+    ),
+    // Quick nav content
+    html.div(
+      [
+        attr.class(
+          "relative bg-zinc-900 bg-opacity-95 text-white rounded-xl px-12 py-8 shadow-2xl border border-zinc-700 backdrop-blur-sm max-w-md",
+        ),
+      ],
+      [
+        html.div(
+          [
+            attr.class(
+              "text-2xl font-semibold text-pink-400 mb-6 text-center font-mono",
+            ),
+          ],
+          [html.text("Quick Navigation")],
+        ),
+        html.div([attr.class("text-base text-zinc-400 mb-6 text-center")], [
+          html.text(case session {
+            session.Authenticated(_) -> "Use Alt+1 through Alt+6 for navigation"
+            session.Unauthenticated -> "Use Alt+1 through Alt+3 and Alt+L for login"
+            session.Pending -> "Use Alt+1 through Alt+3 for navigation"
+          }),
+        ]),
+        html.ul([attr.class("space-y-4")], 
+          list.map(nav_items, fn(item) {
+            case item {
+              #(name, shortcut) -> html.li(
+                [
+                  attr.class(
+                    "flex items-center justify-between bg-zinc-800 rounded-lg px-6 py-4 border border-zinc-700 hover:border-pink-600 transition-colors",
+                  ),
+                ],
+                [
+                  html.span([attr.class("text-zinc-300 font-medium text-lg")], [
+                    html.text(name),
+                  ]),
+                  html.span(
+                    [
+                      attr.class(
+                        "bg-zinc-700 text-zinc-200 px-3 py-2 rounded text-sm font-mono border border-zinc-600",
+                      ),
+                    ],
+                    [html.text(shortcut)],
+                  ),
+                ],
+              )
+            }
+          })
+        ),
+      ],
+    ),
+  ])
 }
 
 fn view_status_bar(keys: Set(keyboard.Key)) -> Element(Msg) {
-  let text_shift = case set.contains(keys, keyboard.Captured(keyboard.Shift)) {
-    True -> "SHIFT"
-    False -> "shift"
-  }
-  let text_ctrl = case set.contains(keys, keyboard.Captured(keyboard.Ctrl)) {
-    True -> "CTRL"
-    False -> "ctrl"
-  }
   let key_list = set.to_list(keys)
   html.div(
     [
@@ -1403,19 +1490,7 @@ fn view_status_bar(keys: Set(keyboard.Key)) -> Element(Msg) {
       html.div([attr.class("flex justify-between items-center")], [
         html.div([attr.class("flex items-center space-x-4")], [
           html.span([attr.class("flex items-center space-x-2")], [
-            html.span([], [html.text(text_shift)]),
-            html.div(
-              [
-                attr.class(
-                  case set.contains(keys, keyboard.Captured(keyboard.Shift)) {
-                    True -> "w-3 h-3 bg-green-500 rounded-full"
-                    False -> "w-3 h-3 bg-gray-500 rounded-full"
-                  },
-                ),
-              ],
-              [],
-            ),
-            html.span([], [html.text(text_ctrl)]),
+            html.span([], [html.text("Ctrl")]),
             html.div(
               [
                 attr.class(
@@ -1428,17 +1503,34 @@ fn view_status_bar(keys: Set(keyboard.Key)) -> Element(Msg) {
               [],
             ),
           ]),
+          html.span([], [html.text("Alt")]),
+          html.div(
+            [
+              attr.class(
+                case set.contains(keys, keyboard.Captured(keyboard.Alt)) {
+                  True -> "w-3 h-3 bg-green-500 rounded-full"
+                  False -> "w-3 h-3 bg-gray-500 rounded-full"
+                },
+              ),
+            ],
+            [],
+          ),
           ..list.map(key_list, fn(key) {
             let text = case key {
-              keyboard.Captured(keyboard.Shift) -> "SHIFT"
-              keyboard.Captured(keyboard.Ctrl) -> "CTRL"
-              keyboard.Captured(keyboard.Escape) -> "ESC"
+              keyboard.Captured(keyboard.Alt) -> ""
+              keyboard.Captured(keyboard.Alt1) -> "Alt+1"
+              keyboard.Captured(keyboard.Alt2) -> "Alt+2"
+              keyboard.Captured(keyboard.Alt3) -> "Alt+3"
+              keyboard.Captured(keyboard.Alt4) -> "Alt+4"
+              keyboard.Captured(keyboard.Alt5) -> "Alt+5"
+              keyboard.Captured(keyboard.Alt6) -> "Alt+6"
+              keyboard.Captured(keyboard.AltL) -> "Alt+L"
+              keyboard.Captured(keyboard.Ctrl) -> ""
+              keyboard.Captured(keyboard.Escape) -> "Esc"
               keyboard.Captured(keyboard.CtrlS) -> "Ctrl+S"
               keyboard.Captured(keyboard.CtrlE) -> "Ctrl+E"
               keyboard.Captured(keyboard.CtrlN) -> "Ctrl+N"
               keyboard.Captured(keyboard.CtrlSpace) -> "Ctrl+Space"
-              keyboard.Captured(keyboard.Shift1) -> "Shift+1"
-              keyboard.Captured(keyboard.Shift2) -> "Shift+2"
               keyboard.Unhandled(code, key) -> "(" <> code <> ": " <> key <> ")"
             }
             html.span([], [html.text(text)])

@@ -16,29 +16,39 @@ pub type CapturedKey {
   CtrlN
   CtrlSpace
 
-  Shift
-  Shift1
-  Shift2
+  Alt
+  Alt1
+  Alt2
+  Alt3
+  Alt4
+  Alt5
+  Alt6
+  AltL
 }
 
-pub fn parse_key(code: String, key: String, ctrl: Bool, shift: Bool) -> Key {
-  case code, key, ctrl, shift {
-    // Escape key (no modifiers)
+pub fn parse_key(code: String, key: String, ctrl: Bool, alt: Bool) -> Key {
+  case code, key, ctrl, alt {
     "Escape", _, False, False -> Captured(Escape)
 
-    // Ctrl
     _, "Control", _, _ -> Captured(Ctrl)
+    _, "Alt", _, _ -> Captured(Alt)
+
     _, "s", True, False -> Captured(CtrlS)
     _, "e", True, False -> Captured(CtrlE)
     _, "n", True, False -> Captured(CtrlN)
-    _, "Space", True, False -> Captured(CtrlSpace)
+    _, " ", True, False -> Captured(CtrlSpace)
 
-    // Shift
-    _, "Shift", _, _ -> Captured(Shift)
-    "Digit1", _, False, True -> Captured(Shift1)
-    "Digit2", _, False, True -> Captured(Shift2)
+    // Alt + number combinations
+    "Digit1", _, False, True -> Captured(Alt1)
+    "Digit2", _, False, True -> Captured(Alt2)
+    "Digit3", _, False, True -> Captured(Alt3)
+    "Digit4", _, False, True -> Captured(Alt4)
+    "Digit5", _, False, True -> Captured(Alt5)
+    "Digit6", _, False, True -> Captured(Alt6)
+    
+    // Alt + letter combinations
+    "KeyL", _, False, True -> Captured(AltL)
 
-    // Not in our whitelist
     _, _, _, _ -> Unhandled(code, key)
   }
 }
@@ -50,9 +60,9 @@ pub fn setup(down: fn(Key) -> msg, up: fn(Key) -> msg) -> Effect(msg) {
         let code = event.code(event)
         let key = event.key(event)
         let ctrl = event.ctrl_key(event)
-        let shift = event.shift_key(event)
+        let alt = event.alt_key(event)
 
-        case parse_key(code, key, ctrl, shift) {
+        case parse_key(code, key, ctrl, alt) {
           Captured(shortcut) -> {
             event.prevent_default(event)
             dispatch(down(Captured(shortcut)))
@@ -70,7 +80,42 @@ pub fn setup(down: fn(Key) -> msg, up: fn(Key) -> msg) -> Effect(msg) {
         let key = event.key(event)
         let ctrl = event.ctrl_key(event)
         let shift = event.shift_key(event)
-        case parse_key(code, key, ctrl, shift) {
+
+        // For keyup events, we need to be more flexible with key matching
+        // to handle cases where the key property might differ between down/up
+        let parsed_key = case code, key, ctrl, shift {
+          // Escape key (no modifiers)
+          "Escape", _, False, False -> Captured(Escape)
+
+          // Modifier keys - use the key property for these
+          _, "Control", _, _ -> Captured(Ctrl)
+          _, "Alt", _, _ -> Captured(Alt)
+
+          // Ctrl combinations - handle both upper and lower case
+          _, "s", True, False -> Captured(CtrlS)
+          _, "S", True, False -> Captured(CtrlS)
+          _, "e", True, False -> Captured(CtrlE)
+          _, "E", True, False -> Captured(CtrlE)
+          _, "n", True, False -> Captured(CtrlN)
+          _, "N", True, False -> Captured(CtrlN)
+          _, " ", True, False -> Captured(CtrlSpace)
+
+          // Alt + number combinations
+          "Digit1", _, False, True -> Captured(Alt1)
+          "Digit2", _, False, True -> Captured(Alt2)
+          "Digit3", _, False, True -> Captured(Alt3)
+          "Digit4", _, False, True -> Captured(Alt4)
+          "Digit5", _, False, True -> Captured(Alt5)
+          "Digit6", _, False, True -> Captured(Alt6)
+
+          // Alt + letter combinations
+          "KeyL", _, False, True -> Captured(AltL)
+
+          // Not in our whitelist - use code for consistency
+          _, _, _, _ -> Unhandled(code, key)
+        }
+
+        case parsed_key {
           Captured(shortcut) -> {
             event.prevent_default(event)
             dispatch(up(Captured(shortcut)))
