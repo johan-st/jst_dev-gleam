@@ -1603,7 +1603,7 @@ fn view_header(model: Model) -> Element(Msg) {
                                   ),
                                 ]),
                               ],
-                              ui.ColorOrange,
+                              ui.ColorNeutral,
                               ui.ButtonStateNormal,
                               DebugToggleLocalStorage,
                             )
@@ -1618,7 +1618,7 @@ fn view_header(model: Model) -> Element(Msg) {
                                   ),
                                 ]),
                               ],
-                              ui.ColorTeal,
+                              ui.ColorNeutral,
                               ui.ButtonStateNormal,
                               DebugToggleLocalStorage,
                             )
