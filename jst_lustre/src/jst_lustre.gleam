@@ -11,7 +11,9 @@ import gleam/order
 import gleam/set.{type Set}
 import gleam/string
 import gleam/uri.{type Uri}
+
 import helpers
+import keyboard
 import lustre
 import lustre/attribute.{type Attribute} as attr
 import lustre/effect.{type Effect}
@@ -31,6 +33,7 @@ import utils/remote_data.{
   type RemoteData, Errored, Loaded, NotInitialized, Optimistic, Pending,
 }
 import utils/short_url.{type ShortUrl, type ShortUrlListResponse}
+import utils/window_events
 
 @external(javascript, "./app.ffi.mjs", "clipboard_copy")
 fn clipboard_copy(text: String) -> Nil
@@ -80,6 +83,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
       login_username: "",
       login_password: "",
       login_loading: False,
+      key_shortcuts_active: set.new(),
     )
   let effect_modem =
     modem.init(fn(uri) {
@@ -88,6 +92,9 @@ fn init(_) -> #(Model, Effect(Msg)) {
     })
 
   // let #(model_nav, effect_nav) = update_navigation(model, uri)
+
+  // Set up global keyboard listener
+
   #(
     model,
     effect.batch([
@@ -95,6 +102,8 @@ fn init(_) -> #(Model, Effect(Msg)) {
       local_storage_effect,
       // effect_nav,
       session.auth_check(AuthCheckResponse, model.base_uri),
+      keyboard.setup(KeyboardDown, KeyboardUp),
+      window_events.setup(WindowUnfocused),
     ]),
   )
 }
@@ -127,6 +136,7 @@ type Model {
     login_username: String,
     login_password: String,
     login_loading: Bool,
+    key_shortcuts_active: Set(keyboard.Key),
   )
 }
 
@@ -190,6 +200,13 @@ pub type Msg {
   LoginPasswordUpdated(String)
   LoginFormSubmitted
 
+  // Keyboard events
+  KeyboardDown(keyboard.Key)
+  KeyboardUp(keyboard.Key)
+
+  // Other events
+  WindowUnfocused
+
   // UI Components
   NoOp
 }
@@ -232,8 +249,6 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case msg {
     // LOCAL MODEL
     GotLocalModelResult(res) -> {
-      echo "GotLocalModelResult called"
-      echo res
       let uri = routes.to_uri(model.route)
       case res {
         Some(persistent_model) -> {
@@ -294,8 +309,6 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       update_navigation(model, uri)
     }
     UserMouseDownNavigation(uri) -> {
-      echo "user mouse down navigation"
-      echo uri
       #(model, modem.push(uri.to_string(uri), None, None))
     }
     // MENU
@@ -308,6 +321,99 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ProfileMenuAction(msg) -> {
       let model = Model(..model, profile_menu_open: False)
       update(model, msg)
+    }
+
+    // Keyboard events
+    KeyboardDown(key) -> {
+      let model =
+        Model(
+          ..model,
+          key_shortcuts_active: set.insert(model.key_shortcuts_active, key),
+        )
+      case key {
+        keyboard.Captured(shortcut) -> {
+          case shortcut {
+            keyboard.Shift -> {
+              #(model, effect.none())
+            }
+            keyboard.Ctrl -> {
+              #(model, effect.none())
+            }
+            keyboard.CtrlS -> {
+              case model.route {
+                routes.ArticleEdit(id) -> {
+                  todo as "Save article"
+                }
+                _ -> #(model, effect.none())
+              }
+            }
+            keyboard.CtrlE -> {
+              case model.route {
+                routes.ArticleEdit(id) -> {
+                  todo as "Edit article"
+                }
+                _ -> #(model, effect.none())
+              }
+            }
+            keyboard.CtrlN -> {
+              case model.session {
+                session.Authenticated(_) -> {
+                  todo as "New article"
+                }
+                _ -> #(model, effect.none())
+              }
+            }
+            keyboard.CtrlSpace -> {
+              case model.route {
+                routes.ArticleEdit(_) -> {
+                  todo as "Toggle edit view mode"
+                }
+                _ -> #(model, effect.none())
+              }
+            }
+            keyboard.Escape -> {
+              #(
+                Model(..model, profile_menu_open: False, login_form_open: False),
+                effect.none(),
+              )
+            }
+            keyboard.Shift1 -> {
+              todo as "Navigate to Articles"
+            }
+            keyboard.Shift2 -> {
+              todo as "Navigate to Drafts"
+            }
+          }
+        }
+        keyboard.Unhandled(_, _) -> #(model, effect.none())
+      }
+    }
+
+    KeyboardUp(key) -> {
+      let model =
+        Model(
+          ..model,
+          key_shortcuts_active: set.delete(model.key_shortcuts_active, key),
+        )
+      case key {
+        keyboard.Captured(shortcut) -> {
+          case shortcut {
+            keyboard.Shift -> {
+              #(model, effect.none())
+            }
+            keyboard.Ctrl -> {
+              #(model, effect.none())
+            }
+            _ -> #(model, effect.none())
+          }
+        }
+        keyboard.Unhandled(_, _) -> #(model, effect.none())
+      }
+    }
+
+    // Other events
+    WindowUnfocused -> {
+      #(Model(..model, key_shortcuts_active: set.new()), effect.none())
     }
 
     // Messages
@@ -1194,6 +1300,12 @@ fn view(model: Model) -> Element(Msg) {
     pages.PageUiComponents(_) -> view_ui_components()
     pages.PageNotFound(uri) -> view_not_found(uri)
   }
+  let nav_hints_overlay = case
+    set.contains(model.key_shortcuts_active, keyboard.Captured(keyboard.Shift))
+  {
+    True -> view_nav_hints()
+    False -> element.none()
+  }
   let layout = case page {
     pages.PageDjotDemo(_) | pages.PageArticleEdit(_, _) -> {
       fn(content) {
@@ -1206,7 +1318,14 @@ fn view(model: Model) -> Element(Msg) {
           [
             view_notice(model.notice),
             view_header(model),
-            html.main([attr.class("max-w-screen-md mx-auto px-4 sm:px-6 md:px-10 py-6 sm:py-8 md:py-10")], content),
+            html.main(
+              [
+                attr.class(
+                  "max-w-screen-md mx-auto px-4 sm:px-6 md:px-10 py-6 sm:py-8 md:py-10",
+                ),
+              ],
+              content,
+            ),
             view_modals(model),
           ],
         )
@@ -1224,7 +1343,11 @@ fn view(model: Model) -> Element(Msg) {
             view_notice(model.notice),
             view_header(model),
             html.main(
-              [attr.class("max-w-screen-md mx-auto px-4 sm:px-6 md:px-10 py-6 sm:py-8 md:py-10")],
+              [
+                attr.class(
+                  "max-w-screen-md mx-auto px-4 sm:px-6 md:px-10 py-6 sm:py-8 md:py-10",
+                ),
+              ],
               content,
             ),
             view_modals(model),
@@ -1233,7 +1356,98 @@ fn view(model: Model) -> Element(Msg) {
       }
     }
   }
-  layout(content)
+  html.div([], [
+    nav_hints_overlay,
+    layout(content),
+    view_status_bar(model.key_shortcuts_active),
+  ])
+}
+
+fn view_nav_hints() -> Element(Msg) {
+  html.div(
+    [
+      attr.class(
+        "fixed inset-0 z-50 flex items-start justify-center pointer-events-none",
+      ),
+    ],
+    [
+      html.div(
+        [
+          attr.class(
+            "bg-black bg-opacity-80 text-white rounded px-6 py-4 mt-16 shadow-lg text-lg font-mono",
+          ),
+        ],
+        [html.text("Quick Nav: Shift+1 = Articles, Shift+2 = About")],
+      ),
+    ],
+  )
+}
+
+fn view_status_bar(keys: Set(keyboard.Key)) -> Element(Msg) {
+  let text_shift = case set.contains(keys, keyboard.Captured(keyboard.Shift)) {
+    True -> "SHIFT"
+    False -> "shift"
+  }
+  let text_ctrl = case set.contains(keys, keyboard.Captured(keyboard.Ctrl)) {
+    True -> "CTRL"
+    False -> "ctrl"
+  }
+  let key_list = set.to_list(keys)
+  html.div(
+    [
+      attr.class(
+        "fixed bottom-0 left-0 right-0 bg-gray-800 text-white px-4 py-2 text-sm font-mono border-t border-gray-700",
+      ),
+    ],
+    [
+      html.div([attr.class("flex justify-between items-center")], [
+        html.div([attr.class("flex items-center space-x-4")], [
+          html.span([attr.class("flex items-center space-x-2")], [
+            html.span([], [html.text(text_shift)]),
+            html.div(
+              [
+                attr.class(
+                  case set.contains(keys, keyboard.Captured(keyboard.Shift)) {
+                    True -> "w-3 h-3 bg-green-500 rounded-full"
+                    False -> "w-3 h-3 bg-gray-500 rounded-full"
+                  },
+                ),
+              ],
+              [],
+            ),
+            html.span([], [html.text(text_ctrl)]),
+            html.div(
+              [
+                attr.class(
+                  case set.contains(keys, keyboard.Captured(keyboard.Ctrl)) {
+                    True -> "w-3 h-3 bg-green-500 rounded-full"
+                    False -> "w-3 h-3 bg-gray-500 rounded-full"
+                  },
+                ),
+              ],
+              [],
+            ),
+          ]),
+          ..list.map(key_list, fn(key) {
+            let text = case key {
+              keyboard.Captured(keyboard.Shift) -> "SHIFT"
+              keyboard.Captured(keyboard.Ctrl) -> "CTRL"
+              keyboard.Captured(keyboard.Escape) -> "ESC"
+              keyboard.Captured(keyboard.CtrlS) -> "Ctrl+S"
+              keyboard.Captured(keyboard.CtrlE) -> "Ctrl+E"
+              keyboard.Captured(keyboard.CtrlN) -> "Ctrl+N"
+              keyboard.Captured(keyboard.CtrlSpace) -> "Ctrl+Space"
+              keyboard.Captured(keyboard.Shift1) -> "Shift+1"
+              keyboard.Captured(keyboard.Shift2) -> "Shift+2"
+              keyboard.Unhandled(code, key) -> "(" <> code <> ": " <> key <> ")"
+            }
+            html.span([], [html.text(text)])
+          })
+        ]),
+        html.div([attr.class("text-gray-400")], [html.text("JST Lustre")]),
+      ]),
+    ],
+  )
 }
 
 fn page_from_model(model: Model) -> pages.Page {
@@ -1351,8 +1565,8 @@ fn page_from_model(model: Model) -> pages.Page {
   }
 }
 
-fn view_notice(notice: String) -> Element(Msg) {
-  echo notice
+fn view_notice(_notice: String) -> Element(Msg) {
+  // echo notice
   element.none()
   // case notice {
   //   "" -> element.none()
@@ -2634,7 +2848,9 @@ fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
             ]),
           ]),
           html.div([attr.class("flex justify-between items-center")], [
-            html.span([attr.class("text-zinc-500 shrink-0")], [html.text("Created:")]),
+            html.span([attr.class("text-zinc-500 shrink-0")], [
+              html.text("Created:"),
+            ]),
             html.span([attr.class("text-zinc-300")], [
               html.text(
                 birl.from_unix_milli(url.created_at * 1000)
@@ -2643,7 +2859,9 @@ fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
             ]),
           ]),
           html.div([attr.class("flex justify-between items-center")], [
-            html.span([attr.class("text-zinc-500 shrink-0")], [html.text("Updated:")]),
+            html.span([attr.class("text-zinc-500 shrink-0")], [
+              html.text("Updated:"),
+            ]),
             html.span([attr.class("text-zinc-300")], [
               html.text(
                 birl.from_unix_milli(url.updated_at * 1000)
@@ -2661,10 +2879,12 @@ fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
               ),
               event.on_mouse_down(ShortUrlCopyClicked(url.short_code)),
             ],
-            [html.text(case model.copy_feedback == Some(url.short_code) {
-              True -> "Copied!"
-              False -> "Copy URL"
-            })],
+            [
+              html.text(case model.copy_feedback == Some(url.short_code) {
+                True -> "Copied!"
+                False -> "Copy URL"
+              }),
+            ],
           ),
           html.button(
             [
@@ -2674,12 +2894,17 @@ fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
                 False ->
                   "w-full px-4 py-3 text-sm font-medium text-teal-400 border border-teal-600 bg-teal-500/10 hover:bg-teal-950/50 hover:text-teal-300 hover:border-teal-400 cursor-pointer transition-colors duration-200 rounded"
               }),
-              event.on_mouse_down(ShortUrlToggleActiveClicked(url.id, url.is_active)),
+              event.on_mouse_down(ShortUrlToggleActiveClicked(
+                url.id,
+                url.is_active,
+              )),
             ],
-            [html.text(case url.is_active {
-              True -> "Deactivate"
-              False -> "Activate"
-            })],
+            [
+              html.text(case url.is_active {
+                True -> "Deactivate"
+                False -> "Activate"
+              }),
+            ],
           ),
           html.button(
             [
@@ -3025,7 +3250,7 @@ fn view_title(title: String, slug: String) -> Element(msg) {
     [
       attr.id("article-title-" <> slug),
       attr.class(
-        "page-title text-2xl sm:text-3xl md:text-4xl text-pink-600 font-light article-title leading-tight",
+        "page-title text-2xl sm:text-3xl sm:h-10 md:text-4xl md:h-12 text-pink-600 font-bold",
       ),
     ],
     [html.text(title)],
@@ -3043,7 +3268,7 @@ fn view_leading(text: String, slug: String) -> Element(msg) {
     [
       attr.id("article-lead-" <> slug),
       attr.class(
-        "font-medium text-zinc-300 pt-6 md:pt-8 border-b border-zinc-800 pb-4",
+        "font-medium text-zinc-300 pt-6 md:pt-8 border-b border-zinc-700 pb-4",
       ),
       attr.class("article-leading"),
     ],
