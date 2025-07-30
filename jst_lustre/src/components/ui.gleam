@@ -384,6 +384,19 @@ pub fn form_input(
   error: Option(String),
   oninput: fn(String) -> msg,
 ) -> Element(msg) {
+  form_input_with_focus(label, value, placeholder, input_type, required, error, oninput, None)
+}
+
+pub fn form_input_with_focus(
+  label: String,
+  value: String,
+  placeholder: String,
+  input_type: String,
+  required: Bool,
+  error: Option(String),
+  oninput: fn(String) -> msg,
+  focus_id: Option(String),
+) -> Element(msg) {
   html.div([attr.class("mb-6")], [
     html.label([attr.class("block text-sm font-semibold text-zinc-300 mb-3")], [
       html.text(label),
@@ -392,19 +405,24 @@ pub fn form_input(
         False -> element_none()
       },
     ]),
-    html.input([
-      attr.class(case error {
-        Some(_) ->
-          "form-input w-full bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 pl-4 pr-4 py-4 sm:py-3 text-zinc-100 placeholder-zinc-500 transition-all duration-300 ease-out outline-none border-l-red-500 focus:border-l-red-400 focus:bg-red-500/5"
-        None ->
-          "form-input w-full bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 pl-4 pr-4 py-4 sm:py-3 text-zinc-100 placeholder-zinc-500 transition-all duration-300 ease-out outline-none border-l-teal-600 focus:border-l-teal-400 focus:bg-teal-500/5"
+    html.input(
+      list.append([
+        attr.class(case error {
+          Some(_) ->
+            "form-input w-full bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 pl-4 pr-4 py-4 sm:py-3 text-zinc-100 placeholder-zinc-500 transition-all duration-300 ease-out outline-none border-l-red-500 focus:border-l-red-400 focus:bg-red-500/5"
+          None ->
+            "form-input w-full bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 pl-4 pr-4 py-4 sm:py-3 text-zinc-100 placeholder-zinc-500 transition-all duration-300 ease-out outline-none border-l-teal-600 focus:border-l-teal-400 focus:bg-teal-500/5"
+        }),
+        attr.type_(input_type),
+        attr.value(value),
+        attr.placeholder(placeholder),
+        attr.required(required),
+        event.on_input(oninput),
+      ], case focus_id {
+        Some(id) -> [attr.id(id)]
+        None -> []
       }),
-      attr.type_(input_type),
-      attr.value(value),
-      attr.placeholder(placeholder),
-      attr.required(required),
-      event.on_input(oninput),
-    ]),
+    ),
     case error {
       Some(error_msg) ->
         html.p(

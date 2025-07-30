@@ -9,6 +9,7 @@ pub type Key {
 
 pub type CapturedKey {
   Escape
+  Enter
 
   Ctrl
   CtrlS
@@ -29,6 +30,7 @@ pub type CapturedKey {
 pub fn parse_key(code: String, key: String, ctrl: Bool, alt: Bool) -> Key {
   case code, key, ctrl, alt {
     "Escape", _, False, False -> Captured(Escape)
+    "Enter", _, False, False -> Captured(Enter)
 
     _, "Control", _, _ -> Captured(Ctrl)
     _, "Alt", _, _ -> Captured(Alt)
@@ -86,6 +88,7 @@ pub fn setup(down: fn(Key) -> msg, up: fn(Key) -> msg) -> Effect(msg) {
         let parsed_key = case code, key, ctrl, shift {
           // Escape key (no modifiers)
           "Escape", _, False, False -> Captured(Escape)
+          "Enter", _, False, False -> Captured(Enter)
 
           // Modifier keys - use the key property for these
           _, "Control", _, _ -> Captured(Ctrl)

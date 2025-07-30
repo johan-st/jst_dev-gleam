@@ -61,3 +61,18 @@ export function clipboard_copy(text) {
 export function set_timeout(callback, delay) {
     setTimeout(callback, delay);
 }
+
+/**
+ * Focuses and selects an HTML element by its ID.
+ *
+ * @param {string} elementId - The ID of the element to focus and select.
+ */
+export function focus_and_select_element(elementId) {
+    setTimeout(() => {
+        const element = document.getElementById(elementId);
+        if (element) {
+            element.focus();
+            element.select();
+        }
+    }, 0);
+}

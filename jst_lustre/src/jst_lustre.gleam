@@ -25,6 +25,7 @@ import pages/pages
 import routes.{type Route}
 import session.{type Session}
 import utils/error_string
+import utils/dom_utils
 import utils/http.{type HttpError}
 import utils/icon
 import utils/jot_to_lustre
@@ -275,14 +276,19 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     // LOGIN FORM HANDLERS
     LoginFormToggled -> {
+      let new_login_form_open = !model.login_form_open
+      let focus_effect = case new_login_form_open {
+        True -> dom_utils.focus_and_select_element("login-username-input")
+        False -> effect.none()
+      }
       #(
         Model(
           ..model,
-          login_form_open: !model.login_form_open,
+          login_form_open: new_login_form_open,
           login_username: "",
           login_password: "",
         ),
-        effect.none(),
+        focus_effect,
       )
     }
     LoginUsernameUpdated(username) -> {
@@ -377,6 +383,23 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                 effect.none(),
               )
             }
+            keyboard.Enter -> {
+              case model.login_form_open {
+                True -> {
+                  case model.login_username, model.login_password {
+                    "", _ | _, "" -> #(model, effect.none())
+                    // Don't submit with empty fields
+                    username, password -> {
+                      #(
+                        Model(..model, login_loading: True, session: session.Pending),
+                        session.login(AuthLoginResponse, username, password, model.base_uri),
+                      )
+                    }
+                  }
+                }
+                False -> #(model, effect.none())
+              }
+            }
             keyboard.Alt1 -> {
               #(model, modem.push(routes.to_string(routes.Index), None, None))
             }
@@ -408,7 +431,16 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               )
             }
             keyboard.AltL -> {
-              #(Model(..model, login_form_open: True), effect.none())
+              case model.session {
+                session.Authenticated(_) -> #(model, effect.none())
+                session.Unauthenticated -> {
+                  #(
+                    Model(..model, login_form_open: True),
+                    dom_utils.focus_and_select_element("login-username-input"),
+                  )
+                }
+                session.Pending -> #(model, effect.none())
+              }
             }
           }
         }
@@ -422,20 +454,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           ..model,
           key_shortcuts_active: set.delete(model.key_shortcuts_active, key),
         )
-      case key {
-        keyboard.Captured(shortcut) -> {
-          case shortcut {
-            keyboard.Alt -> {
-              #(model, effect.none())
-            }
-            keyboard.Ctrl -> {
-              #(model, effect.none())
-            }
-            _ -> #(model, effect.none())
-          }
-        }
-        keyboard.Unhandled(_, _) -> #(model, effect.none())
-      }
+      #(model, effect.none())
     }
 
     // Other events
@@ -1417,7 +1436,7 @@ fn view_nav_hints(session: session.Session) -> Element(Msg) {
       #("About", "Alt+3"),
     ]
   }
-  
+
   html.div([attr.class("fixed inset-0 z-50 flex items-center justify-center")], [
     // Dark overlay background
     html.div(
@@ -1443,35 +1462,39 @@ fn view_nav_hints(session: session.Session) -> Element(Msg) {
         html.div([attr.class("text-base text-zinc-400 mb-6 text-center")], [
           html.text(case session {
             session.Authenticated(_) -> "Use Alt+1 through Alt+6 for navigation"
-            session.Unauthenticated -> "Use Alt+1 through Alt+3 and Alt+L for login"
+            session.Unauthenticated ->
+              "Use Alt+1 through Alt+3 and Alt+L for login"
             session.Pending -> "Use Alt+1 through Alt+3 for navigation"
           }),
         ]),
-        html.ul([attr.class("space-y-4")], 
+        html.ul(
+          [attr.class("space-y-4")],
           list.map(nav_items, fn(item) {
             case item {
-              #(name, shortcut) -> html.li(
-                [
-                  attr.class(
-                    "flex items-center justify-between bg-zinc-800 rounded-lg px-6 py-4 border border-zinc-700 hover:border-pink-600 transition-colors",
-                  ),
-                ],
-                [
-                  html.span([attr.class("text-zinc-300 font-medium text-lg")], [
-                    html.text(name),
-                  ]),
-                  html.span(
-                    [
-                      attr.class(
-                        "bg-zinc-700 text-zinc-200 px-3 py-2 rounded text-sm font-mono border border-zinc-600",
-                      ),
-                    ],
-                    [html.text(shortcut)],
-                  ),
-                ],
-              )
+              #(name, shortcut) ->
+                html.li(
+                  [
+                    attr.class(
+                      "flex items-center justify-between bg-zinc-800 rounded-lg px-6 py-4 border border-zinc-700 hover:border-pink-600 transition-colors",
+                    ),
+                  ],
+                  [
+                    html.span(
+                      [attr.class("text-zinc-300 font-medium text-lg")],
+                      [html.text(name)],
+                    ),
+                    html.span(
+                      [
+                        attr.class(
+                          "bg-zinc-700 text-zinc-200 px-3 py-2 rounded text-sm font-mono border border-zinc-600",
+                        ),
+                      ],
+                      [html.text(shortcut)],
+                    ),
+                  ],
+                )
             }
-          })
+          }),
         ),
       ],
     ),
@@ -1527,6 +1550,7 @@ fn view_status_bar(keys: Set(keyboard.Key)) -> Element(Msg) {
               keyboard.Captured(keyboard.AltL) -> "Alt+L"
               keyboard.Captured(keyboard.Ctrl) -> ""
               keyboard.Captured(keyboard.Escape) -> "Esc"
+              keyboard.Captured(keyboard.Enter) -> "Enter"
               keyboard.Captured(keyboard.CtrlS) -> "Ctrl+S"
               keyboard.Captured(keyboard.CtrlE) -> "Ctrl+E"
               keyboard.Captured(keyboard.CtrlN) -> "Ctrl+N"
@@ -1688,7 +1712,7 @@ fn view_login_modal(model: Model) -> Element(Msg) {
     ui.modal(
       "Sign In",
       [
-        ui.form_input(
+        ui.form_input_with_focus(
           "Username",
           model.login_username,
           "Enter your username",
@@ -1696,6 +1720,7 @@ fn view_login_modal(model: Model) -> Element(Msg) {
           True,
           None,
           LoginUsernameUpdated,
+          Some("login-username-input"),
         ),
         ui.form_input(
           "Password",
