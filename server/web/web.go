@@ -23,6 +23,7 @@ type httpServer struct {
 	mux         *http.ServeMux // For defining routes
 	handler     http.Handler   // Final wrapped handler for serving requests
 	embedFs     fs.FS
+	syncService *SyncService   // Data sync service
 }
 
 //go:embed static
@@ -46,8 +47,14 @@ func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger
 		mux:         http.NewServeMux(),
 	}
 
+	// Initialize sync service
+	s.syncService = NewSyncService(nc, l.WithBreadcrumb("sync"), ctx)
+
 	// Set up routes on the mux
 	routes(s.mux, l.WithBreadcrumb("route"), s.articleRepo, nc, s.embedFs, jwtSecret, dev)
+	
+	// Set up sync routes
+	SetupSyncRoutes(s.mux, s.syncService, l.WithBreadcrumb("sync-routes"))
 
 	// Apply global middleware to create the final handler
 	// note: last added is first called
@@ -59,6 +66,16 @@ func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger
 	s.handler = handler // Store the wrapped handler
 
 	return s
+}
+
+// GetMux returns the underlying mux for adding additional routes
+func (s *httpServer) GetMux() *http.ServeMux {
+	return s.mux
+}
+
+// GetSyncService returns the sync service for external access
+func (s *httpServer) GetSyncService() *SyncService {
+	return s.syncService
 }
 
 func (s *httpServer) Run(cleanShutdown *sync.WaitGroup, port string) {

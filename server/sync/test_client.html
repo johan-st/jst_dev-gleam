@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Sync Server Test Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        .messages {
+            height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            background-color: #f8f9fa;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .message {
+            margin: 5px 0;
+            padding: 5px;
+            border-left: 3px solid #007bff;
+            background-color: white;
+        }
+        .error { border-left-color: #dc3545; }
+        .success { border-left-color: #28a745; }
+        .input-group {
+            margin: 10px 0;
+        }
+        input, button {
+            padding: 8px 12px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Data Sync Server Test Client</h1>
+        
+        <div id="status" class="status disconnected">Disconnected</div>
+        
+        <div class="controls">
+            <div class="input-group">
+                <input type="text" id="userId" placeholder="User ID" value="test-user-123">
+                <button onclick="connect()" id="connectBtn">Connect</button>
+                <button onclick="disconnect()" id="disconnectBtn" disabled>Disconnect</button>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <div class="input-group">
+                <input type="text" id="topic" placeholder="Topic" value="test.topic">
+                <button onclick="subscribe()" id="subscribeBtn" disabled>Subscribe</button>
+                <button onclick="unsubscribe()" id="unsubscribeBtn" disabled>Unsubscribe</button>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <div class="input-group">
+                <input type="text" id="syncTopic" placeholder="Sync Topic" value="test.sync">
+                <input type="text" id="syncData" placeholder="Sync Data" value="Hello from client!">
+                <button onclick="syncData()" id="syncBtn" disabled>Sync Data</button>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <div class="input-group">
+                <button onclick="clearMessages()">Clear Messages</button>
+                <button onclick="testPublish()" id="publishBtn" disabled>Test Publish</button>
+                <button onclick="testBroadcast()" id="broadcastBtn" disabled>Test Broadcast</button>
+            </div>
+        </div>
+        
+        <h3>Messages:</h3>
+        <div id="messages" class="messages"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let connected = false;
+        
+        function updateStatus() {
+            const statusEl = document.getElementById('status');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+            const subscribeBtn = document.getElementById('subscribeBtn');
+            const unsubscribeBtn = document.getElementById('unsubscribeBtn');
+            const syncBtn = document.getElementById('syncBtn');
+            const publishBtn = document.getElementById('publishBtn');
+            const broadcastBtn = document.getElementById('broadcastBtn');
+            
+            if (connected) {
+                statusEl.textContent = 'Connected';
+                statusEl.className = 'status connected';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                subscribeBtn.disabled = false;
+                unsubscribeBtn.disabled = false;
+                syncBtn.disabled = false;
+                publishBtn.disabled = false;
+                broadcastBtn.disabled = false;
+            } else {
+                statusEl.textContent = 'Disconnected';
+                statusEl.className = 'status disconnected';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                subscribeBtn.disabled = true;
+                unsubscribeBtn.disabled = true;
+                syncBtn.disabled = true;
+                publishBtn.disabled = true;
+                broadcastBtn.disabled = true;
+            }
+        }
+        
+        function addMessage(message, type = 'info') {
+            const messagesEl = document.getElementById('messages');
+            const messageEl = document.createElement('div');
+            messageEl.className = `message ${type}`;
+            messageEl.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            messagesEl.appendChild(messageEl);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+        
+        function connect() {
+            const userId = document.getElementById('userId').value;
+            const wsUrl = `ws://localhost:8080/ws/sync?user_id=${encodeURIComponent(userId)}`;
+            
+            try {
+                ws = new WebSocket(wsUrl);
+                
+                ws.onopen = function() {
+                    connected = true;
+                    updateStatus();
+                    addMessage('WebSocket connection established', 'success');
+                };
+                
+                ws.onmessage = function(event) {
+                    try {
+                        const message = JSON.parse(event.data);
+                        addMessage(`Received: ${JSON.stringify(message, null, 2)}`, 'info');
+                    } catch (e) {
+                        addMessage(`Raw message: ${event.data}`, 'info');
+                    }
+                };
+                
+                ws.onclose = function() {
+                    connected = false;
+                    updateStatus();
+                    addMessage('WebSocket connection closed', 'error');
+                };
+                
+                ws.onerror = function(error) {
+                    addMessage(`WebSocket error: ${error}`, 'error');
+                };
+                
+            } catch (error) {
+                addMessage(`Connection error: ${error}`, 'error');
+            }
+        }
+        
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+        
+        function subscribe() {
+            if (!ws || !connected) return;
+            
+            const topic = document.getElementById('topic').value;
+            const message = {
+                type: 'subscribe',
+                topic: topic
+            };
+            
+            ws.send(JSON.stringify(message));
+            addMessage(`Subscribing to topic: ${topic}`, 'info');
+        }
+        
+        function unsubscribe() {
+            if (!ws || !connected) return;
+            
+            const topic = document.getElementById('topic').value;
+            const message = {
+                type: 'unsubscribe',
+                topic: topic
+            };
+            
+            ws.send(JSON.stringify(message));
+            addMessage(`Unsubscribing from topic: ${topic}`, 'info');
+        }
+        
+        function syncData() {
+            if (!ws || !connected) return;
+            
+            const topic = document.getElementById('syncTopic').value;
+            const data = document.getElementById('syncData').value;
+            const message = {
+                type: 'sync',
+                topic: topic,
+                data: data
+            };
+            
+            ws.send(JSON.stringify(message));
+            addMessage(`Syncing data to topic: ${topic}`, 'info');
+        }
+        
+        function clearMessages() {
+            document.getElementById('messages').innerHTML = '';
+        }
+        
+        async function testPublish() {
+            const topic = document.getElementById('topic').value;
+            const data = { message: 'Test publish from REST API', timestamp: Date.now() };
+            
+            try {
+                const response = await fetch('/api/sync/publish', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ topic, data })
+                });
+                
+                const result = await response.json();
+                addMessage(`Publish result: ${JSON.stringify(result)}`, 'success');
+            } catch (error) {
+                addMessage(`Publish error: ${error}`, 'error');
+            }
+        }
+        
+        async function testBroadcast() {
+            const data = { message: 'Test broadcast from REST API', timestamp: Date.now() };
+            
+            try {
+                const response = await fetch('/api/sync/broadcast', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ data })
+                });
+                
+                const result = await response.json();
+                addMessage(`Broadcast result: ${JSON.stringify(result)}`, 'success');
+            } catch (error) {
+                addMessage(`Broadcast error: ${error}`, 'error');
+            }
+        }
+        
+        // Initialize
+        updateStatus();
+        addMessage('Test client loaded. Click Connect to start.', 'info');
+    </script>
+</body>
+</html> 
