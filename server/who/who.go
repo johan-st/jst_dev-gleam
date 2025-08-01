@@ -186,7 +186,7 @@ func (w *Who) userWatcher() error {
 			select {
 			case kv = <-watcher.Updates():
 				if kv == nil {
-					w.l.Debug("up to date. %d users loaded", len(w.users))
+					w.l.Info("up to date. %d users loaded", len(w.users))
 					continue
 				}
 				switch kv.Operation() {

@@ -132,7 +132,7 @@ func (s *ShortUrlService) shortUrlWatcher() error {
 			select {
 			case kv = <-watcher.Updates():
 				if kv == nil {
-					s.l.Debug("up to date. %d short urls loaded", len(s.shortUrls))
+					s.l.Info("up to date. %d short urls loaded", len(s.shortUrls))
 					continue
 				}
 				switch kv.Operation() {

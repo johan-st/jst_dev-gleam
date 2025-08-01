@@ -1405,7 +1405,7 @@ fn view(model: Model) -> Element(Msg) {
   html.div([], [
     nav_hints_overlay,
     layout(content),
-    view_status_bar(model.key_shortcuts_active),
+    view_status_bar(model.key_shortcuts_active, model.session),
   ])
 }
 
@@ -1501,69 +1501,74 @@ fn view_nav_hints(session: session.Session) -> Element(Msg) {
   ])
 }
 
-fn view_status_bar(keys: Set(keyboard.Key)) -> Element(Msg) {
-  let key_list = set.to_list(keys)
-  html.div(
-    [
-      attr.class(
-        "fixed bottom-0 left-0 right-0 bg-gray-800 text-white px-4 py-2 text-sm font-mono border-t border-gray-700",
-      ),
-    ],
-    [
-      html.div([attr.class("flex justify-between items-center")], [
-        html.div([attr.class("flex items-center space-x-4")], [
-          html.span([attr.class("flex items-center space-x-2")], [
-            html.span([], [html.text("Ctrl")]),
-            html.div(
-              [
-                attr.class(
-                  case set.contains(keys, keyboard.Captured(keyboard.Ctrl)) {
-                    True -> "w-3 h-3 bg-green-500 rounded-full"
-                    False -> "w-3 h-3 bg-gray-500 rounded-full"
-                  },
-                ),
-              ],
-              [],
-            ),
-          ]),
-          html.span([], [html.text("Alt")]),
-          html.div(
-            [
-              attr.class(
-                case set.contains(keys, keyboard.Captured(keyboard.Alt)) {
-                  True -> "w-3 h-3 bg-green-500 rounded-full"
-                  False -> "w-3 h-3 bg-gray-500 rounded-full"
-                },
-              ),
-            ],
-            [],
+fn view_status_bar(keys: Set(keyboard.Key), session: session.Session) -> Element(Msg) {
+  case session {
+    session.Authenticated(_) -> {
+      let key_list = set.to_list(keys)
+      html.div(
+        [
+          attr.class(
+            "fixed bottom-0 left-0 right-0 bg-gray-800 text-white px-4 py-2 text-sm font-mono border-t border-gray-700",
           ),
-          ..list.map(key_list, fn(key) {
-            let text = case key {
-              keyboard.Captured(keyboard.Alt) -> ""
-              keyboard.Captured(keyboard.Alt1) -> "Alt+1"
-              keyboard.Captured(keyboard.Alt2) -> "Alt+2"
-              keyboard.Captured(keyboard.Alt3) -> "Alt+3"
-              keyboard.Captured(keyboard.Alt4) -> "Alt+4"
-              keyboard.Captured(keyboard.Alt5) -> "Alt+5"
-              keyboard.Captured(keyboard.Alt6) -> "Alt+6"
-              keyboard.Captured(keyboard.AltL) -> "Alt+L"
-              keyboard.Captured(keyboard.Ctrl) -> ""
-              keyboard.Captured(keyboard.Escape) -> "Esc"
-              keyboard.Captured(keyboard.Enter) -> "Enter"
-              keyboard.Captured(keyboard.CtrlS) -> "Ctrl+S"
-              keyboard.Captured(keyboard.CtrlE) -> "Ctrl+E"
-              keyboard.Captured(keyboard.CtrlN) -> "Ctrl+N"
-              keyboard.Captured(keyboard.CtrlSpace) -> "Ctrl+Space"
-              keyboard.Unhandled(code, key) -> "(" <> code <> ": " <> key <> ")"
-            }
-            html.span([], [html.text(text)])
-          })
-        ]),
-        html.div([attr.class("text-gray-400")], [html.text("JST Lustre")]),
-      ]),
-    ],
-  )
+        ],
+        [
+          html.div([attr.class("flex justify-between items-center")], [
+            html.div([attr.class("flex items-center space-x-4")], [
+              html.span([attr.class("flex items-center space-x-2")], [
+                html.span([], [html.text("Ctrl")]),
+                html.div(
+                  [
+                    attr.class(
+                      case set.contains(keys, keyboard.Captured(keyboard.Ctrl)) {
+                        True -> "w-3 h-3 bg-green-500 rounded-full"
+                        False -> "w-3 h-3 bg-gray-500 rounded-full"
+                      },
+                    ),
+                  ],
+                  [],
+                ),
+              ]),
+              html.span([], [html.text("Alt")]),
+              html.div(
+                [
+                  attr.class(
+                    case set.contains(keys, keyboard.Captured(keyboard.Alt)) {
+                      True -> "w-3 h-3 bg-green-500 rounded-full"
+                      False -> "w-3 h-3 bg-gray-500 rounded-full"
+                    },
+                  ),
+                ],
+                [],
+              ),
+              ..list.map(key_list, fn(key) {
+                let text = case key {
+                  keyboard.Captured(keyboard.Alt) -> ""
+                  keyboard.Captured(keyboard.Alt1) -> "Alt+1"
+                  keyboard.Captured(keyboard.Alt2) -> "Alt+2"
+                  keyboard.Captured(keyboard.Alt3) -> "Alt+3"
+                  keyboard.Captured(keyboard.Alt4) -> "Alt+4"
+                  keyboard.Captured(keyboard.Alt5) -> "Alt+5"
+                  keyboard.Captured(keyboard.Alt6) -> "Alt+6"
+                  keyboard.Captured(keyboard.AltL) -> "Alt+L"
+                  keyboard.Captured(keyboard.Ctrl) -> ""
+                  keyboard.Captured(keyboard.Escape) -> "Esc"
+                  keyboard.Captured(keyboard.Enter) -> "Enter"
+                  keyboard.Captured(keyboard.CtrlS) -> "Ctrl+S"
+                  keyboard.Captured(keyboard.CtrlE) -> "Ctrl+E"
+                  keyboard.Captured(keyboard.CtrlN) -> "Ctrl+N"
+                  keyboard.Captured(keyboard.CtrlSpace) -> "Ctrl+Space"
+                  keyboard.Unhandled(code, key) -> "(" <> code <> ": " <> key <> ")"
+                }
+                html.span([], [html.text(text)])
+              })
+            ]),
+            html.div([attr.class("text-gray-400")], [html.text("JST Lustre")]),
+          ]),
+        ],
+      )
+    }
+    session.Unauthenticated | session.Pending -> element.none()
+  }
 }
 
 fn page_from_model(model: Model) -> pages.Page {
@@ -2076,10 +2081,10 @@ fn view_article_listing(
         ArticleV1(
           id: _,
           slug:,
-          author: _,
-          title:,
-          leading:,
-          subtitle:,
+                      author: _,
+            title: _,
+            leading: _,
+            subtitle: _,
           content: _,
           draft: _,
           published_at: _,
@@ -2106,16 +2111,16 @@ fn view_article_listing(
                         attr.class("article-title"),
                         attr.class("text-xl text-pink-700 font-light"),
                       ],
-                      [html.text(title)],
+                      [html.text(article.title)],
                     ),
-                    view_subtitle(subtitle, slug),
+                    view_subtitle(article.subtitle, slug),
                   ]),
                   html.div([attr.class("flex flex-col items-end")], [
                     view_publication_status(article),
                     view_author(article.author),
                   ]),
                 ]),
-                view_simple_paragraph(leading),
+                view_simple_paragraph(article.leading),
                 html.div([attr.class("flex justify-end mt-2")], [
                   view_article_tags(tags),
                 ]),
