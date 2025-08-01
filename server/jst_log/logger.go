@@ -163,9 +163,9 @@ func (l *Logger) log(level Level, msg string, args ...any) {
 	}
 }
 
-// levelFromString parses a string and returns the corresponding Level constant.
+// LevelFromString parses a string and returns the corresponding Level constant.
 // Returns an error if the input does not match a known log level.
-func levelFromString(level string) (Level, error) {
+func LevelFromString(level string) (Level, error) {
 	switch strings.ToLower(level) {
 	case "debug":
 		return Debug, nil

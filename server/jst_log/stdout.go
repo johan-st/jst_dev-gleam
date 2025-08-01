@@ -2,6 +2,7 @@ package jst_log
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -61,4 +62,23 @@ func StdOut(nc *nats.Conn, base string, conf LoggerSubjects, level LogLevel) *St
 }
 func (s *StdOutService) SetLevel(level LogLevel) {
 	s.level = level
+}
+
+// LogLevelFromString parses a string and returns the corresponding LogLevel constant.
+// Returns an error if the input does not match a known log level.
+func LogLevelFromString(level string) (LogLevel, error) {
+	switch strings.ToLower(level) {
+	case "debug":
+		return LogLevelDebug, nil
+	case "info":
+		return LogLevelInfo, nil
+	case "warn":
+		return LogLevelWarn, nil
+	case "error":
+		return LogLevelError, nil
+	case "fatal":
+		return LogLevelFatal, nil
+	default:
+		return LogLevelInfo, fmt.Errorf("invalid log level: %s", level)
+	}
 }

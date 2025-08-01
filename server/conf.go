@@ -24,15 +24,18 @@ type GlobalConfig struct {
 type Flags struct {
 	NatsEmbedded  bool
 	ProxyFrontend bool
+	LogLevel      string
 }
 
 // loadConf returns a GlobalConfig instance with default settings for the talk component.
 func loadConf() (*GlobalConfig, error) {
 	var (
 		natsEmbedded, proxyFrontend bool
+		logLevel                    string
 	)
 	flag.BoolVar(&natsEmbedded, "local", false, "run an embedded nats server")
 	flag.BoolVar(&proxyFrontend, "proxy", false, "proxy frontend to dev server")
+	flag.StringVar(&logLevel, "log", "info", "set log level (debug, info, warn, error, fatal)")
 	flag.Parse()
 
 	_ = godotenv.Load()
@@ -77,6 +80,7 @@ func loadConf() (*GlobalConfig, error) {
 		Flags: Flags{
 			NatsEmbedded:  natsEmbedded,
 			ProxyFrontend: proxyFrontend,
+			LogLevel:      logLevel,
 		},
 	}
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"sync"
@@ -99,7 +100,14 @@ func run(
 
 	// - logger (connect)
 	lRoot.Connect(nc)
-	jst_log.StdOut(nc, "log."+conf.AppName, jst_log.DefaultSubjects(), jst_log.LogLevelDebug)
+	
+	// Parse log level from configuration
+	logLevel, err := jst_log.LogLevelFromString(conf.Flags.LogLevel)
+	if err != nil {
+		log.Fatalf("Failed to parse log level: %v\n", err)
+	}
+	
+	jst_log.StdOut(nc, "log."+conf.AppName, jst_log.DefaultSubjects(), logLevel)
 	time.Sleep(1 * time.Millisecond)
 
 	// - blog
