@@ -36,7 +36,7 @@ pub fn loading(text: String, color: Color) -> Element(msg) {
   html.div(
     [
       attr.class(
-        "inline-flex items-center justify-center text-center rounded overflow-hidden relative px-4 py-2 text-sm "
+        "inline-flex items-center justify-center text-center  overflow-hidden relative px-4 py-2 text-sm "
         <> base_classes,
       ),
       attr.attribute("aria-label", text),
@@ -58,12 +58,12 @@ pub fn loading_bar(color: Color) -> Element(msg) {
   }
 
   html.div(
-    [attr.class("w-full bg-zinc-800 rounded-full h-2 mb-4 overflow-hidden")],
+    [attr.class("w-full bg-zinc-800 h-2 mb-4 overflow-hidden")],
     [
       html.div(
         [
           attr.class(
-            "h-full rounded-full relative overflow-hidden " <> bar_classes,
+            "h-full relative overflow-hidden " <> bar_classes,
           ),
         ],
         [],
@@ -614,7 +614,7 @@ pub fn gradient_text(text: String) -> Element(msg) {
 }
 
 pub fn glass_panel(content: List(Element(msg))) -> Element(msg) {
-  html.div([attr.class("glass rounded-xl p-6")], content)
+  html.div([attr.class("glass p-6")], content)
 }
 
 /// Status badge component for displaying state (active/inactive, etc.)
@@ -631,7 +631,7 @@ pub fn status_badge(text: String, variant: Color) -> Element(msg) {
   html.span(
     [
       attr.class(
-        "inline-flex shrink-0 items-center rounded-full px-2 py-1 text-xs font-medium ring-1 ring-inset "
+        "inline-flex shrink-0 items-center  px-2 py-1 text-xs font-medium ring-1 ring-inset "
         <> color_classes,
       ),
     ],
@@ -642,7 +642,7 @@ pub fn status_badge(text: String, variant: Color) -> Element(msg) {
 /// Card component with consistent styling
 pub fn card(content: List(Element(msg))) -> Element(msg) {
   html.div(
-    [attr.class("bg-zinc-800 rounded-lg border border-zinc-700 p-6")],
+    [attr.class("bg-zinc-800 border border-zinc-700 p-4")],
     content,
   )
 }
@@ -652,7 +652,7 @@ pub fn card_with_title(
   title: String,
   content: List(Element(msg)),
 ) -> Element(msg) {
-  html.div([attr.class("bg-zinc-800 rounded-lg border border-zinc-700")], [
+  html.div([attr.class("bg-zinc-800 border border-zinc-700")], [
     html.div([attr.class("p-6 border-b border-zinc-700/50")], [
       html.h3([attr.class("text-lg font-semibold text-zinc-100")], [
         html.text(title),
@@ -681,7 +681,7 @@ pub fn notice(
   html.div(
     [
       attr.class(
-        "flex items-center justify-between rounded-lg border p-4 "
+        "flex items-center justify-between  border p-4 "
         <> color_classes,
       ),
     ],
@@ -707,7 +707,7 @@ pub fn skeleton_text(lines: Int) -> Element(msg) {
   let line_elements =
     list.range(1, lines)
     |> list.map(fn(_) {
-      html.div([attr.class("h-4 bg-zinc-700 rounded animate-pulse mb-2")], [])
+      html.div([attr.class("h-4 bg-zinc-700  animate-pulse mb-2")], [])
     })
 
   html.div([attr.class("space-y-2")], line_elements)
@@ -718,14 +718,14 @@ pub fn skeleton_card() -> Element(msg) {
   html.div(
     [
       attr.class(
-        "bg-zinc-800 rounded-lg border border-zinc-700 p-6 animate-pulse",
+        "bg-zinc-800  border border-zinc-700 p-6 animate-pulse",
       ),
     ],
     [
-      html.div([attr.class("h-6 bg-zinc-700 rounded mb-4 w-3/4")], []),
-      html.div([attr.class("h-4 bg-zinc-700 rounded mb-2")], []),
-      html.div([attr.class("h-4 bg-zinc-700 rounded mb-2 w-5/6")], []),
-      html.div([attr.class("h-4 bg-zinc-700 rounded w-2/3")], []),
+      html.div([attr.class("h-6 bg-zinc-700  mb-4 w-3/4")], []),
+      html.div([attr.class("h-4 bg-zinc-700  mb-2")], []),
+      html.div([attr.class("h-4 bg-zinc-700  mb-2 w-5/6")], []),
+      html.div([attr.class("h-4 bg-zinc-700  w-2/3")], []),
     ],
   )
 }

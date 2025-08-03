@@ -52,9 +52,6 @@ func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger
 
 	// Set up routes on the mux
 	routes(s.mux, l.WithBreadcrumb("route"), s.articleRepo, nc, s.embedFs, jwtSecret, dev)
-	
-	// Set up sync routes
-	SetupSyncRoutes(s.mux, s.syncService, l.WithBreadcrumb("sync-routes"))
 
 	// Apply global middleware to create the final handler
 	// note: last added is first called
