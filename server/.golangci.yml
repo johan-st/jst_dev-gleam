@@ -12,6 +12,14 @@ linters:
     - goimports
     - misspell
     - whitespace
+    - gosec
+    - errcheck
+    - staticcheck
+    - govet
+    - ineffassign
+    - deadcode
+    - unused
+    - varcheck
 
 linters-settings:
   gofmt:

@@ -7,6 +7,7 @@
   - Run single test: `go test ./server/path/to/package -run TestName`
   - Benchmark: `go test -bench=. ./server/path/to/package`
   - Lint: `cd server && golangci-lint run`
+  - Check: ``
 
 - **Gleam Frontend**:
   - Build: `gleam build`
