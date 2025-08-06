@@ -3,7 +3,7 @@ package api
 // the NATS subject used by this package
 var Subj = struct {
 	// short urls
-	ShortUrlGroup string
+	ShortUrlGroup  string
 	ShortUrlCreate string
 	ShortUrlGet    string
 	ShortUrlUpdate string
@@ -27,8 +27,8 @@ type ShortUrl struct {
 	ShortCode   string `json:"shortCode"`
 	TargetURL   string `json:"targetUrl"`
 	CreatedBy   string `json:"createdBy"`
-	CreatedAt   int64  `json:"createdAt"`   // Unix seconds
-	UpdatedAt   int64  `json:"updatedAt"`   // Unix seconds
+	CreatedAt   int64  `json:"createdAt"` // Unix seconds
+	UpdatedAt   int64  `json:"updatedAt"` // Unix seconds
 	AccessCount int64  `json:"accessCount"`
 	IsActive    bool   `json:"isActive"`
 }
@@ -79,4 +79,4 @@ type ShortUrlAccessRequest struct {
 type ShortUrlAccessResponse struct {
 	TargetURL string `json:"targetUrl"`
 	Redirect  bool   `json:"redirect"`
-} 
+}

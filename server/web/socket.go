@@ -16,35 +16,35 @@ import (
 
 // Message types for WebSocket communication
 const (
-	MsgTypeConnect    = "connect"
-	MsgTypeDisconnect = "disconnect"
-	MsgTypeSubscribe  = "subscribe"
+	MsgTypeConnect     = "connect"
+	MsgTypeDisconnect  = "disconnect"
+	MsgTypeSubscribe   = "subscribe"
 	MsgTypeUnsubscribe = "unsubscribe"
-	MsgTypeData       = "data"
-	MsgTypeError      = "error"
-	MsgTypeAuth       = "auth"
-	MsgTypeSync       = "sync"
+	MsgTypeData        = "data"
+	MsgTypeError       = "error"
+	MsgTypeAuth        = "auth"
+	MsgTypeSync        = "sync"
 )
 
 // WebSocketMessage represents the structure of messages sent over WebSocket
 type WebSocketMessage struct {
-	Type    string      `json:"type"`
-	Topic   string      `json:"topic,omitempty"`
-	Data    interface{} `json:"data,omitempty"`
-	Error   string      `json:"error,omitempty"`
-	UserID  string      `json:"user_id,omitempty"`
-	Timestamp int64     `json:"timestamp,omitempty"`
+	Type      string      `json:"type"`
+	Topic     string      `json:"topic,omitempty"`
+	Data      interface{} `json:"data,omitempty"`
+	Error     string      `json:"error,omitempty"`
+	UserID    string      `json:"user_id,omitempty"`
+	Timestamp int64       `json:"timestamp,omitempty"`
 }
 
 // Client represents a connected WebSocket client
 type Client struct {
-	ID       string
-	Conn     *websocket.Conn
-	UserID   string
-	Topics   map[string]bool
-	Send     chan []byte
-	Hub      *Hub
-	mu       sync.RWMutex
+	ID     string
+	Conn   *websocket.Conn
+	UserID string
+	Topics map[string]bool
+	Send   chan []byte
+	Hub    *Hub
+	mu     sync.RWMutex
 }
 
 // Hub manages all WebSocket connections and NATS subscriptions
@@ -130,7 +130,7 @@ func (h *Hub) SendToUser(userID string, msg *WebSocketMessage) {
 
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	
+
 	for client := range h.clients {
 		if client.UserID == userID {
 			select {
@@ -205,9 +205,13 @@ func (c *Client) readPump() {
 	}()
 
 	c.Conn.SetReadLimit(512)
-	c.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+	if err := c.Conn.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
+		c.Hub.logger.Error("Failed to set read deadline: %v", err)
+	}
 	c.Conn.SetPongHandler(func(string) error {
-		c.Conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		if err := c.Conn.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
+			c.Hub.logger.Error("Failed to set read deadline: %v", err)
+		}
 		return nil
 	})
 
@@ -234,24 +238,39 @@ func (c *Client) writePump() {
 	for {
 		select {
 		case message, ok := <-c.Send:
-			c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+				c.Hub.logger.Error("Failed to set write deadline: %v", err)
+				return
+			}
 			if !ok {
-				c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+				if err := c.Conn.WriteMessage(websocket.CloseMessage, []byte{}); err != nil {
+					c.Hub.logger.Error("Failed to write close message: %v", err)
+					return
+				}
 				return
 			}
 
 			w, err := c.Conn.NextWriter(websocket.TextMessage)
 			if err != nil {
+				c.Hub.logger.Error("Failed to get next writer: %v", err)
 				return
 			}
-			w.Write(message)
+			if _, err := w.Write(message); err != nil {
+				c.Hub.logger.Error("Failed to write message: %v", err)
+				return
+			}
 
 			if err := w.Close(); err != nil {
+				c.Hub.logger.Error("Failed to close writer: %v", err)
 				return
 			}
 		case <-ticker.C:
-			c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+				c.Hub.logger.Error("Failed to set write deadline: %v", err)
+				return
+			}
 			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				c.Hub.logger.Error("Failed to write ping message: %v", err)
 				return
 			}
 		}
@@ -358,7 +377,9 @@ func (c *Client) handleSync(msg WebSocketMessage) {
 	if msg.Topic != "" {
 		// Publish to NATS for other subscribers
 		data, _ := json.Marshal(msg.Data)
-		c.Hub.nc.Publish(msg.Topic, data)
+		if err := c.Hub.nc.Publish(msg.Topic, data); err != nil {
+			c.Hub.logger.Error("Failed to publish to NATS: %v", err)
+		}
 	}
 
 	response := &WebSocketMessage{
@@ -443,4 +464,3 @@ func (s *SyncService) PublishToUser(userID string, data interface{}) error {
 func (s *SyncService) GetHub() *Hub {
 	return s.hub
 }
-

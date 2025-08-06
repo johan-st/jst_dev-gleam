@@ -8,9 +8,9 @@ import gleam/option.{type Option, None, Some}
 import gleam/order
 import gleam/uri.{type Uri}
 import lustre/effect.{type Effect}
+import session.{type Session, Authenticated, Unauthenticated}
 import utils/http.{type HttpError}
 import utils/remote_data.{type RemoteData, Loaded, NotInitialized}
-import session.{type Session, Authenticated, Unauthenticated}
 
 pub type Article {
   ArticleV1(

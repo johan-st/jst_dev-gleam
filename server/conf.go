@@ -2,9 +2,10 @@ package main
 
 import (
 	"flag"
-	"jst_dev/server/talk"
 	"log"
 	"os"
+
+	"jst_dev/server/talk"
 
 	"github.com/joho/godotenv"
 )

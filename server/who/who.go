@@ -20,7 +20,10 @@ import (
 	"jst_dev/server/who/api"
 )
 
-const UserKey = "who_user"
+type userKeyType struct{}
+
+var UserKey = userKeyType{}
+
 const jwtExpiresAfterTime = time.Hour * 12
 
 var PermissionsAll = []api.Permission{
@@ -110,7 +113,9 @@ func (w *Who) Start(ctx context.Context) error {
 		return fmt.Errorf("create users kv store %s:%w", confKv.Bucket, err)
 	}
 	w.usersKv = kv
-	w.userWatcher()
+	if err := w.userWatcher(); err != nil {
+		return fmt.Errorf("failed to start user watcher: %w", err)
+	}
 
 	svcMetadata := map[string]string{}
 	svcMetadata["location"] = "unknown"
@@ -247,41 +252,55 @@ func (w *Who) handleUserCreate() micro.HandlerFunc {
 		err = json.Unmarshal(req.Data(), &reqData)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to unmarshal user create request: %s", err.Error()))
-			req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error()))
+			if err := req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to user create request: %v", err)
+			}
 			return
 		}
 		if reqData.Username == "" {
 			l.Warn("username is empty")
-			req.Error("INVALID_REQUEST", "username is empty", []byte("username is empty"))
+			if err := req.Error("INVALID_REQUEST", "username is empty", []byte("username is empty")); err != nil {
+				l.Error("failed to respond to user create request: %v", err)
+			}
 			return
 		}
 		if reqData.Email == "" {
 			l.Warn("email is empty")
-			req.Error("INVALID_REQUEST", "email is empty", []byte("email is empty"))
+			if err := req.Error("INVALID_REQUEST", "email is empty", []byte("email is empty")); err != nil {
+				l.Error("failed to respond to user create request: %v", err)
+			}
 			return
 		}
 		if reqData.Password == "" {
 			l.Warn("password is empty")
-			req.Error("INVALID_REQUEST", "password is empty", []byte("password is empty"))
+			if err := req.Error("INVALID_REQUEST", "password is empty", []byte("password is empty")); err != nil {
+				l.Error("failed to respond to user create request: %v", err)
+			}
 			return
 		}
 		user = w.userByEmail(reqData.Email)
 		if user != nil {
 			l.Warn("user already exists")
-			req.Error("EMAIL_TAKEN", "a user with this email already exists", []byte(reqData.Email))
+			if err := req.Error("EMAIL_TAKEN", "a user with this email already exists", []byte(reqData.Email)); err != nil {
+				l.Error("failed to respond to user create request: %v", err)
+			}
 			return
 		}
 		user = w.userByUsername(reqData.Username)
 		if user != nil {
 			l.Warn("user already exists")
-			req.Error("USERNAME_TAKEN", "a user with this username already exists", []byte(reqData.Username))
+			if err := req.Error("USERNAME_TAKEN", "a user with this username already exists", []byte(reqData.Username)); err != nil {
+				l.Error("failed to respond to user create request: %v", err)
+			}
 			return
 		}
 
 		user, err = w.userCreate(reqData.Username, reqData.Email, reqData.Password)
 		if err != nil {
 			l.Error(fmt.Sprintf("failed to create user: %s", err.Error()))
-			req.Error("SERVER_ERROR", "server error", []byte(err.Error()))
+			if err := req.Error("SERVER_ERROR", "server error", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to user create request: %v", err)
+			}
 			return
 		}
 
@@ -292,7 +311,9 @@ func (w *Who) handleUserCreate() micro.HandlerFunc {
 			Email:       user.Email,
 			Permissions: user.Permissions,
 		}
-		req.RespondJSON(respData)
+		if err := req.RespondJSON(respData); err != nil {
+			l.Error("failed to respond to user create request: %v", err)
+		}
 	}
 }
 
@@ -310,40 +331,52 @@ func (w *Who) handleUserGet() micro.HandlerFunc {
 		err = json.Unmarshal(req.Data(), &reqData)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to unmarshal user get request: %s", err.Error()))
-			req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error()))
+			if err := req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to user get request: %v", err)
+			}
 			return
 		}
 		if reqData.ID == "" && reqData.Username == "" && reqData.Email == "" {
 			l.Warn("no id, username, or email provided")
-			req.Error("INVALID_REQUEST", "no id, username, or email provided", []byte("no id, username, or email provided"))
+			if err := req.Error("INVALID_REQUEST", "no id, username, or email provided", []byte("no id, username, or email provided")); err != nil {
+				l.Error("failed to respond to user get request: %v", err)
+			}
 			return
 		}
 		if reqData.ID != "" {
 			user = w.userGet(reqData.ID)
 			if user == nil {
 				l.Warn(fmt.Sprintf("error getting user: %s", err.Error()))
-				req.Error("SERVER_ERROR", "server error while getting user", []byte(err.Error()))
+				if err := req.Error("SERVER_ERROR", "server error while getting user", []byte(err.Error())); err != nil {
+					l.Error("failed to respond to user get request: %v", err)
+				}
 				return
 			}
 		} else if reqData.Email != "" {
 			user = w.userByEmail(reqData.Email)
 			if user == nil {
 				l.Warn(fmt.Sprintf("user not found: %s", reqData.Email))
-				req.Error("USER_NOT_FOUND", "user not found", []byte(reqData.Email))
+				if err := req.Error("USER_NOT_FOUND", "user not found", []byte(reqData.Email)); err != nil {
+					l.Error("failed to respond to user get request: %v", err)
+				}
 				return
 			}
 		} else if reqData.Username != "" {
 			user = w.userByUsername(reqData.Username)
 			if user == nil {
 				l.Warn(fmt.Sprintf("user not found: %s", reqData.Username))
-				req.Error("USER_NOT_FOUND", "user not found", []byte(reqData.Username))
+				if err := req.Error("USER_NOT_FOUND", "user not found", []byte(reqData.Username)); err != nil {
+					l.Error("failed to respond to user get request: %v", err)
+				}
 				return
 			}
 		}
 
 		if err != nil {
 			l.Warn(fmt.Sprintf("user not found: %s", reqData.ID))
-			req.Error("USER_NOT_FOUND", "user not found", []byte(reqData.ID))
+			if err := req.Error("USER_NOT_FOUND", "user not found", []byte(reqData.ID)); err != nil {
+				l.Error("failed to respond to user get request: %v", err)
+			}
 			return
 		}
 		respData = api.UserFullResponse{
@@ -352,7 +385,9 @@ func (w *Who) handleUserGet() micro.HandlerFunc {
 			Email:       user.Email,
 			Permissions: user.Permissions,
 		}
-		req.RespondJSON(respData)
+		if err := req.RespondJSON(respData); err != nil {
+			l.Error("failed to respond to user get request: %v", err)
+		}
 	}
 }
 
@@ -374,13 +409,17 @@ func (w *Who) handleUserUpdate() micro.HandlerFunc {
 		err = json.Unmarshal(req.Data(), &reqData)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to unmarshal user update request: %s", err.Error()))
-			req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error()))
+			if err := req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to user update request: %v", err)
+			}
 			return
 		}
 		user = w.userGet(reqData.ID)
 		if user == nil {
 			l.Warn(fmt.Sprintf("user not found: %s", reqData.ID))
-			req.Error("NOT_FOUND", "user not found", []byte(reqData.ID))
+			if err := req.Error("NOT_FOUND", "user not found", []byte(reqData.ID)); err != nil {
+				l.Error("failed to respond to user update request: %v", err)
+			}
 			return
 		}
 
@@ -400,13 +439,17 @@ func (w *Who) handleUserUpdate() micro.HandlerFunc {
 		userBytes, err = json.Marshal(user)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to marshal user: %s", err.Error()))
-			req.Error("SERVER_ERROR", "server error while updating user", []byte(err.Error()))
+			if err := req.Error("SERVER_ERROR", "server error while updating user", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to user update request: %v", err)
+			}
 			return
 		}
 		rev, err = w.usersKv.Put(w.ctx, user.ID, userBytes)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to update user: %s", err.Error()))
-			req.Error("SERVER_ERROR", "server error while updating user", []byte(err.Error()))
+			if err := req.Error("SERVER_ERROR", "server error while updating user", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to user update request: %v", err)
+			}
 			return
 		}
 		user.revision = rev
@@ -416,7 +459,9 @@ func (w *Who) handleUserUpdate() micro.HandlerFunc {
 			Email:           user.Email,
 			PasswordChanged: passwordChanged,
 		}
-		req.RespondJSON(respData)
+		if err := req.RespondJSON(respData); err != nil {
+			l.Error("failed to respond to user update request: %v", err)
+		}
 	}
 }
 
@@ -433,25 +478,33 @@ func (w *Who) handleUserDelete() micro.HandlerFunc {
 		err = json.Unmarshal(req.Data(), &reqData)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to unmarshal user delete request: %s", err.Error()))
-			req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error()))
+			if err := req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to user delete request: %v", err)
+			}
 			return
 		}
 		user = w.userGet(reqData.ID)
 		if user == nil {
 			l.Warn(fmt.Sprintf("user not found: %s", reqData.ID))
-			req.Error("NOT_FOUND", "user not found and could thus not be deleted", []byte(reqData.ID))
+			if err := req.Error("NOT_FOUND", "user not found and could thus not be deleted", []byte(reqData.ID)); err != nil {
+				l.Error("failed to respond to user delete request: %v", err)
+			}
 			return
 		}
 		err = w.usersKv.Delete(w.ctx, user.ID)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to delete user: %s", err.Error()))
-			req.Error("SERVER_ERROR", "server error while deleting user", []byte(err.Error()))
+			if err := req.Error("SERVER_ERROR", "server error while deleting user", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to user delete request: %v", err)
+			}
 			return
 		}
 		respData = api.UserDeleteResponse{
 			IdDeleted: user.ID,
 		}
-		req.RespondJSON(respData)
+		if err := req.RespondJSON(respData); err != nil {
+			l.Error("failed to respond to user delete request: %v", err)
+		}
 	}
 }
 
@@ -470,7 +523,9 @@ func (w *Who) handlePermissionsList() micro.HandlerFunc {
 		respData = api.PermissionsListResponse{
 			Permissions: permissions,
 		}
-		req.RespondJSON(respData)
+		if err := req.RespondJSON(respData); err != nil {
+			l.Error("failed to respond to permissions list request: %v", err)
+		}
 	}
 }
 
@@ -489,20 +544,26 @@ func (w *Who) handlePermissionsGrant() micro.HandlerFunc {
 		err = json.Unmarshal(req.Data(), &reqData)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to unmarshal permissions grant request: %s", err.Error()))
-			req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error()))
+			if err := req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to permissions grant request: %v", err)
+			}
 			return
 		}
 		user = w.userGet(reqData.ID)
 		if user == nil {
 			l.Warn(fmt.Sprintf("user not found: %s", reqData.ID))
-			req.Error("NOT_FOUND", "user not found and could thus not be granted permission", []byte(reqData.ID))
+			if err := req.Error("NOT_FOUND", "user not found and could thus not be granted permission", []byte(reqData.ID)); err != nil {
+				l.Error("failed to respond to permissions grant request: %v", err)
+			}
 			return
 		}
 		for _, perm := range reqData.Permissions {
 			updated, err := w.userAddPermission(user, perm)
 			if err != nil {
 				l.Warn(fmt.Sprintf("failed to add permission: %s", err.Error()))
-				req.Error("OPERATION_FAILED", "the operation failed to complete", []byte(err.Error()))
+				if err := req.Error("OPERATION_FAILED", "the operation failed to complete", []byte(err.Error())); err != nil {
+					l.Error("failed to respond to permissions grant request: %v", err)
+				}
 				return
 			}
 			if updated {
@@ -516,7 +577,9 @@ func (w *Who) handlePermissionsGrant() micro.HandlerFunc {
 			Added:   permAdded,
 			Existed: permExisted,
 		}
-		req.RespondJSON(respData)
+		if err := req.RespondJSON(respData); err != nil {
+			l.Error("failed to respond to permissions grant request: %v", err)
+		}
 	}
 }
 
@@ -535,20 +598,26 @@ func (w *Who) handlePermissionsRevoke() micro.HandlerFunc {
 		err = json.Unmarshal(req.Data(), &reqData)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to unmarshal permissions revoke request: %s", err.Error()))
-			req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error()))
+			if err := req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to permissions revoke request: %v", err)
+			}
 			return
 		}
 		user = w.userGet(reqData.ID)
 		if user == nil {
 			l.Warn(fmt.Sprintf("user not found: %s", reqData.ID))
-			req.Error("NOT_FOUND", "user not found and could thus not be revoked permission", []byte(reqData.ID))
+			if err := req.Error("NOT_FOUND", "user not found and could thus not be revoked permission", []byte(reqData.ID)); err != nil {
+				l.Error("failed to respond to permissions revoke request: %v", err)
+			}
 			return
 		}
 		for _, perm := range reqData.Permissions {
 			removed, err := w.userRemovePermission(user, perm)
 			if err != nil {
 				l.Warn(fmt.Sprintf("failed to remove permission: %s", err.Error()))
-				req.Error("OPERATION_FAILED", "the operation failed to complete", []byte(err.Error()))
+				if err := req.Error("OPERATION_FAILED", "the operation failed to complete", []byte(err.Error())); err != nil {
+					l.Error("failed to respond to permissions revoke request: %v", err)
+				}
 				return
 			}
 			if removed {
@@ -562,7 +631,9 @@ func (w *Who) handlePermissionsRevoke() micro.HandlerFunc {
 			Removed: permRemoved,
 			Missing: permMissing,
 		}
-		req.RespondJSON(respData)
+		if err := req.RespondJSON(respData); err != nil {
+			l.Error("failed to respond to permissions revoke request: %v", err)
+		}
 	}
 }
 
@@ -582,13 +653,17 @@ func (w *Who) handlePermissionsCheck() micro.HandlerFunc {
 		err = json.Unmarshal(req.Data(), &reqData)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to unmarshal permissions check request: %s", err.Error()))
-			req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error()))
+			if err := req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to permissions check request: %v", err)
+			}
 			return
 		}
 		user = w.userGet(reqData.ID)
 		if user == nil {
 			l.Warn(fmt.Sprintf("user not found: %s", reqData.ID))
-			req.Error("NOT_FOUND", "user not found", []byte(reqData.ID))
+			if err := req.Error("NOT_FOUND", "user not found", []byte(reqData.ID)); err != nil {
+				l.Error("failed to respond to permissions check request: %v", err)
+			}
 			return
 		}
 		for _, perm := range reqData.Permissions {
@@ -605,7 +680,9 @@ func (w *Who) handlePermissionsCheck() micro.HandlerFunc {
 			Granted:     permGranted,
 			Missing:     permMissing,
 		}
-		req.RespondJSON(respData)
+		if err := req.RespondJSON(respData); err != nil {
+			l.Error("failed to respond to permissions check request: %v", err)
+		}
 	}
 }
 
@@ -626,12 +703,16 @@ func (w *Who) handleAuth() micro.HandlerFunc {
 		err = json.Unmarshal(req.Data(), &reqData)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to unmarshal auth request: %s", err.Error()))
-			req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error()))
+			if err := req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to auth request: %v", err)
+			}
 			return
 		}
 		if reqData.Username == "" && reqData.Email == "" {
 			l.Warn("username and email are empty")
-			req.Error("INVALID_REQUEST", "username and email are empty", []byte("username and email are empty"))
+			if err := req.Error("INVALID_REQUEST", "username and email are empty", []byte("username and email are empty")); err != nil {
+				l.Error("failed to respond to auth request: %v", err)
+			}
 			return
 		}
 
@@ -643,14 +724,18 @@ func (w *Who) handleAuth() micro.HandlerFunc {
 		}
 		if user == nil {
 			l.Warn(fmt.Sprintf("user not found: %s", reqData.Username))
-			req.Error("NOT_FOUND", "user not found", []byte(reqData.Username))
+			if err := req.Error("NOT_FOUND", "user not found", []byte(reqData.Username)); err != nil {
+				l.Error("failed to respond to auth request: %v", err)
+			}
 			return
 		}
 
 		token, err = w.userJwt(user)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to create token: %s", err.Error()))
-			req.Error("OPERATION_FAILED", "the operation failed to complete", []byte(err.Error()))
+			if err := req.Error("OPERATION_FAILED", "the operation failed to complete", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to auth request: %v", err)
+			}
 			return
 		}
 		l.Debug("got token %s", token)
@@ -658,7 +743,9 @@ func (w *Who) handleAuth() micro.HandlerFunc {
 			Token:     token,
 			ExpiresAt: time.Now().Add(jwtExpiresAfterTime).Unix(),
 		}
-		req.RespondJSON(respData)
+		if err := req.RespondJSON(respData); err != nil {
+			l.Error("failed to respond to auth request: %v", err)
+		}
 	}
 }
 

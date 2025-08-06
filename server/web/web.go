@@ -23,7 +23,7 @@ type httpServer struct {
 	mux         *http.ServeMux // For defining routes
 	handler     http.Handler   // Final wrapped handler for serving requests
 	embedFs     fs.FS
-	syncService *SyncService   // Data sync service
+	syncService *SyncService // Data sync service
 }
 
 //go:embed static
@@ -79,8 +79,9 @@ func (s *httpServer) Run(cleanShutdown *sync.WaitGroup, port string) {
 	cleanShutdown.Add(1)
 
 	httpServer := &http.Server{
-		Addr:    net.JoinHostPort("0.0.0.0", "8080"),
-		Handler: s.handler, // Use the wrapped handler instead of s.mux
+		Addr:              net.JoinHostPort("0.0.0.0", "8080"),
+		Handler:           s.handler, // Use the wrapped handler instead of s.mux
+		ReadHeaderTimeout: 20 * time.Second,
 	}
 	go func() {
 		s.l.Info("listening on %s", httpServer.Addr)

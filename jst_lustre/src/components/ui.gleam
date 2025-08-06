@@ -57,19 +57,12 @@ pub fn loading_bar(color: Color) -> Element(msg) {
     ColorGreen -> "bg-green-500/20 sheen-green"
   }
 
-  html.div(
-    [attr.class("w-full bg-zinc-800 h-2 mb-4 overflow-hidden")],
-    [
-      html.div(
-        [
-          attr.class(
-            "h-full relative overflow-hidden " <> bar_classes,
-          ),
-        ],
-        [],
-      ),
-    ],
-  )
+  html.div([attr.class("w-full bg-zinc-800 h-2 mb-4 overflow-hidden")], [
+    html.div(
+      [attr.class("h-full relative overflow-hidden " <> bar_classes)],
+      [],
+    ),
+  ])
 }
 
 /// Full loading state with text, message, and optional subtitle
@@ -384,7 +377,16 @@ pub fn form_input(
   error: Option(String),
   oninput: fn(String) -> msg,
 ) -> Element(msg) {
-  form_input_with_focus(label, value, placeholder, input_type, required, error, oninput, None)
+  form_input_with_focus(
+    label,
+    value,
+    placeholder,
+    input_type,
+    required,
+    error,
+    oninput,
+    None,
+  )
 }
 
 pub fn form_input_with_focus(
@@ -406,22 +408,25 @@ pub fn form_input_with_focus(
       },
     ]),
     html.input(
-      list.append([
-        attr.class(case error {
-          Some(_) ->
-            "form-input w-full bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 pl-4 pr-4 py-4 sm:py-3 text-zinc-100 placeholder-zinc-500 transition-all duration-300 ease-out outline-none border-l-red-500 focus:border-l-red-400 focus:bg-red-500/5"
-          None ->
-            "form-input w-full bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 pl-4 pr-4 py-4 sm:py-3 text-zinc-100 placeholder-zinc-500 transition-all duration-300 ease-out outline-none border-l-teal-600 focus:border-l-teal-400 focus:bg-teal-500/5"
-        }),
-        attr.type_(input_type),
-        attr.value(value),
-        attr.placeholder(placeholder),
-        attr.required(required),
-        event.on_input(oninput),
-      ], case focus_id {
-        Some(id) -> [attr.id(id)]
-        None -> []
-      }),
+      list.append(
+        [
+          attr.class(case error {
+            Some(_) ->
+              "form-input w-full bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 pl-4 pr-4 py-4 sm:py-3 text-zinc-100 placeholder-zinc-500 transition-all duration-300 ease-out outline-none border-l-red-500 focus:border-l-red-400 focus:bg-red-500/5"
+            None ->
+              "form-input w-full bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 pl-4 pr-4 py-4 sm:py-3 text-zinc-100 placeholder-zinc-500 transition-all duration-300 ease-out outline-none border-l-teal-600 focus:border-l-teal-400 focus:bg-teal-500/5"
+          }),
+          attr.type_(input_type),
+          attr.value(value),
+          attr.placeholder(placeholder),
+          attr.required(required),
+          event.on_input(oninput),
+        ],
+        case focus_id {
+          Some(id) -> [attr.id(id)]
+          None -> []
+        },
+      ),
     ),
     case error {
       Some(error_msg) ->
@@ -641,10 +646,7 @@ pub fn status_badge(text: String, variant: Color) -> Element(msg) {
 
 /// Card component with consistent styling
 pub fn card(content: List(Element(msg))) -> Element(msg) {
-  html.div(
-    [attr.class("bg-zinc-800 border border-zinc-700 p-4")],
-    content,
-  )
+  html.div([attr.class("bg-zinc-800 border border-zinc-700 p-4")], content)
 }
 
 /// Card with custom title
@@ -681,8 +683,7 @@ pub fn notice(
   html.div(
     [
       attr.class(
-        "flex items-center justify-between  border p-4 "
-        <> color_classes,
+        "flex items-center justify-between  border p-4 " <> color_classes,
       ),
     ],
     [
@@ -716,11 +717,7 @@ pub fn skeleton_text(lines: Int) -> Element(msg) {
 /// Skeleton loader for article cards
 pub fn skeleton_card() -> Element(msg) {
   html.div(
-    [
-      attr.class(
-        "bg-zinc-800  border border-zinc-700 p-6 animate-pulse",
-      ),
-    ],
+    [attr.class("bg-zinc-800  border border-zinc-700 p-6 animate-pulse")],
     [
       html.div([attr.class("h-6 bg-zinc-700  mb-4 w-3/4")], []),
       html.div([attr.class("h-4 bg-zinc-700  mb-2")], []),

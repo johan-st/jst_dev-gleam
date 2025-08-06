@@ -1,21 +1,15 @@
-// Ment to be imported and called from anywhere we have a nats.Conn to the cluster where the blog is stored.
 package articles
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
 	"jst_dev/server/jst_log"
-)
-
-const (
-	kv_name = "articles"
 )
 
 type ArticleRepo interface {
@@ -40,12 +34,6 @@ type ArticleRepoWithWatchAll interface {
 type articleRepo struct {
 	ctx context.Context
 	kv  jetstream.KeyValue
-}
-
-type articleRepoInMem struct {
-	repo     ArticleRepo
-	lock     sync.RWMutex
-	articles map[string]*Article
 }
 
 type Article struct {
@@ -131,7 +119,6 @@ func (r *articleRepo) AllNoContent() ([]Article, error) {
 		keyLister jetstream.KeyLister
 		entry     jetstream.KeyValueEntry
 		arts      []Article
-		keys      []string
 	)
 	keyLister, err = r.kv.ListKeys(r.ctx)
 	if err != nil {
@@ -139,7 +126,6 @@ func (r *articleRepo) AllNoContent() ([]Article, error) {
 	}
 	for key := range keyLister.Keys() {
 		art = Article{}
-		keys = append(keys, key)
 		entry, err = r.kv.Get(r.ctx, key)
 		if err != nil {
 			return nil, fmt.Errorf("get article: %w", err)

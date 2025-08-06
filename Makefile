@@ -1,9 +1,10 @@
-.PHONY: help check-tools srv-lint srv-test front-test srv-build front-build front-dev srv-dev build dev check
+.PHONY: help check-tools srv-lint srv-test front-test srv-build front-build front-dev srv-dev build dev check srv-fmt front-fmt fmt
 
 # Configurable tool paths
 GOLANGCI_LINT ?= $(HOME)/go/bin/golangci-lint
 GOSEC ?= $(HOME)/go/bin/gosec
 STATICCHECK ?= $(HOME)/go/bin/staticcheck
+GOIMPORTS ?= $(HOME)/go/bin/goimports
 AIR ?= $(HOME)/go/bin/air
 
 help: ## Show this help message
@@ -12,28 +13,30 @@ help: ## Show this help message
 	@echo 'Targets:'
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-check-tools: ## Validate required tools are installed
-	@command -v go >/dev/null 2>&1 || { echo "go is required but not installed"; exit 1; }
-	@command -v gleam >/dev/null 2>&1 || { echo "gleam is required but not installed"; exit 1; }
-	@command -v $(AIR) >/dev/null 2>&1 || { echo "air is required but not installed"; exit 1; }
-	@command -v $(GOLANGCI_LINT) >/dev/null 2>&1 || { echo "golangci-lint is required but not installed"; exit 1; }
-	@command -v $(GOSEC) >/dev/null 2>&1 || { echo "gosec is required but not installed"; exit 1; }
-	@command -v $(STATICCHECK) >/dev/null 2>&1 || { echo "staticcheck is required but not installed"; exit 1; }
+
+srv-fmt: check-tools ## Format Go code
+	gofmt -w server/
+	cd server && $(GOIMPORTS) -w .
 
 srv-lint: check-tools ## Run server linting and security checks
-	# cd server && $(GOLANGCI_LINT) run --timeout=5m
-	# cd server && $(GOSEC) ./...
-	# cd server && $(STATICCHECK) ./...
-	# cd server && go vet ./...
+	cd server && $(GOLANGCI_LINT) run --timeout=5m
+	cd server && $(STATICCHECK) ./...
+	cd server && go vet ./...
 
 srv-test: check-tools ## Run server tests with race detection
 	cd server && go test -race ./...
 
-srv-build: srv-lint srv-test ## Build the Go backend with all checks
+srv-sec: check-tools ## Run server security checks
+	cd server && $(GOSEC) ./...
+
+srv-build: fmt srv-lint srv-test ## Build the Go backend with all checks
 	cd server && go build -v -o server.exe .
 
 srv-dev: check-tools ## Run backend development server with hot reload
 	cd server && $(AIR) 
+
+front-fmt: check-tools ## Format Gleam code
+	cd jst_lustre && gleam format
 
 front-test: check-tools ## Run frontend tests
 	cd jst_lustre && gleam test
@@ -44,7 +47,7 @@ front-build: front-test ## Build the Gleam/Lustre frontend
 front-dev: check-tools ## Run frontend development server
 	cd jst_lustre && gleam run -m lustre/dev start --tailwind-entry=./src/styles.css
 
-check: srv-lint srv-test front-test ## Run all checks (lint + test, server + frontend)
+check: fmt srv-lint srv-test front-test ## Run all checks (format + lint + test, server + frontend)
 	@echo "All checks passed!"
 
 build: front-build srv-build ## Build complete application (frontend + backend)
@@ -57,6 +60,18 @@ dev: check-tools ## Run both frontend and backend dev servers concurrently
 	(cd jst_lustre && gleam run -m lustre/dev start --tailwind-entry=./src/styles.css) & \
 	(cd server && $(AIR)) & \
 	wait
+
+check-tools: ## Validate required tools are installed
+	@command -v go >/dev/null 2>&1 || { echo "go is required but not installed"; exit 1; }
+	@command -v gleam >/dev/null 2>&1 || { echo "gleam is required but not installed"; exit 1; }
+	@command -v $(AIR) >/dev/null 2>&1 || { echo "air is required but not installed"; exit 1; }
+	@command -v $(GOLANGCI_LINT) >/dev/null 2>&1 || { echo "golangci-lint is required but not installed"; exit 1; }
+	@command -v $(GOSEC) >/dev/null 2>&1 || { echo "gosec is required but not installed"; exit 1; }
+	@command -v $(STATICCHECK) >/dev/null 2>&1 || { echo "staticcheck is required but not installed"; exit 1; }
+	@command -v $(GOIMPORTS) >/dev/null 2>&1 || { echo "goimports is required but not installed"; exit 1; }
+
+fmt: srv-fmt front-fmt ## Format all code (Go + Gleam)
+	@echo "Formatting complete!"
 
 deploy: ## Deploy to production
 	@echo "Deploying to production..."

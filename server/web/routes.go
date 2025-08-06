@@ -5,11 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"jst_dev/server/articles"
-	"jst_dev/server/jst_log"
-	shortUrlApi "jst_dev/server/urlShort/api"
-	"jst_dev/server/who"
-	whoApi "jst_dev/server/who/api"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -19,6 +14,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
+
+	"jst_dev/server/articles"
+	"jst_dev/server/jst_log"
+	shortUrlApi "jst_dev/server/urlShort/api"
+	"jst_dev/server/who"
+	whoApi "jst_dev/server/who/api"
 )
 
 const (
@@ -27,7 +28,6 @@ const (
 )
 
 func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc *nats.Conn, embeddedFS fs.FS, jwtSecret string, dev bool) {
-
 	// Add routes with their respective handlers
 	mux.Handle("GET /api/articles", handleArticleList(l, repo))
 	mux.Handle("POST /api/articles", handleArticleNew(l, repo, nc))
@@ -93,21 +93,6 @@ func cors(_ *jst_log.Logger, next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
-func authJwtDummy(jwtSecret string, next http.Handler) http.Handler {
-	if jwtSecret == "" {
-		panic("no jwt secret specified")
-	}
-	if next == nil {
-		panic("next handler is nil")
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := context.WithValue(r.Context(), who.UserKey, whoApi.User{
-			ID:          "TEST_USER",
-			Permissions: []whoApi.Permission{whoApi.PermissionPostEditAny},
-		})
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
-}
 
 // authJwt middleware validates JWT tokens from cookies and sets user context
 //
@@ -155,7 +140,6 @@ func authJwt(jwtSecret string, next http.Handler) http.Handler {
 //
 // NOTE: this handler uses the the logger that is passed without adding any breadcrumbs
 func handleProxy(l *jst_log.Logger, targetUrl string) http.Handler {
-
 	proxyUrl, err := url.Parse(targetUrl)
 	if err != nil {
 		l.Error("handleProxy: error parsing target URL: %s\n", err)
@@ -450,6 +434,11 @@ func handleArticleNew(l *jst_log.Logger, repo articles.ArticleRepo, nc *nats.Con
 		whoReq, err := json.Marshal(whoApi.UserGetRequest{
 			ID: user.ID,
 		})
+		if err != nil {
+			logger.Error("failed to marshal user request: %v", err)
+			http.Error(w, "failed to marshal user request", http.StatusInternalServerError)
+			return
+		}
 		msg, err := nc.Request(
 			whoApi.Subj.UserGroup+"."+whoApi.Subj.UserGet,
 			whoReq,
@@ -681,7 +670,6 @@ func handleArticleRevision(l *jst_log.Logger, repo articles.ArticleRepo) http.Ha
 }
 
 func handleStaticFsFile(l *jst_log.Logger, embeddedFSs fs.FS, filename string) http.Handler {
-
 	logger := l.WithBreadcrumb("static").WithBreadcrumb(filename)
 
 	// Check if file exists and log size, panic if not found
@@ -699,7 +687,6 @@ func handleStaticFsFile(l *jst_log.Logger, embeddedFSs fs.FS, filename string) h
 }
 
 func handleStaticFs(l *jst_log.Logger, embeddedFS fs.FS) http.Handler {
-
 	logger := l.WithBreadcrumb("static")
 
 	err := fs.WalkDir(embeddedFS, ".", func(path string, d fs.DirEntry, err error) error {
@@ -1210,5 +1197,8 @@ func respJson(w http.ResponseWriter, content any, code int) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	w.Write(respBytes)
+	if _, err := w.Write(respBytes); err != nil {
+		http.Error(w, "failed to write response", http.StatusInternalServerError)
+		return
+	}
 }

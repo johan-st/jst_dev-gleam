@@ -31,32 +31,46 @@ type StdOutService struct {
 func StdOut(nc *nats.Conn, base string, conf LoggerSubjects, level LogLevel) *StdOutService {
 	svc := &StdOutService{nc: nc, base: base, conf: conf, level: level}
 
-	nc.Subscribe(base+"."+conf.debug, func(m *nats.Msg) {
+	_, err := nc.Subscribe(base+"."+conf.debug, func(m *nats.Msg) {
 		if svc.level <= LogLevelDebug {
 			fmt.Printf("%s [%s] %s\n", conf.debug, m.Header.Get("breadcrumbs"), m.Data)
 		}
 	})
-	nc.Subscribe(base+"."+conf.info, func(m *nats.Msg) {
+	if err != nil {
+		panic(err)
+	}
+	_, err = nc.Subscribe(base+"."+conf.info, func(m *nats.Msg) {
 		if svc.level <= LogLevelInfo {
 			fmt.Printf("%s [%s] %s\n", conf.info, m.Header.Get("breadcrumbs"), m.Data)
 		}
 	})
-	nc.Subscribe(base+"."+conf.warn, func(m *nats.Msg) {
+	if err != nil {
+		panic(err)
+	}
+	_, err = nc.Subscribe(base+"."+conf.warn, func(m *nats.Msg) {
 		if svc.level <= LogLevelWarn {
 			fmt.Printf("%s [%s] %s\n", conf.warn, m.Header.Get("breadcrumbs"), m.Data)
 		}
 	})
-	nc.Subscribe(base+"."+conf.err, func(m *nats.Msg) {
+	if err != nil {
+		panic(err)
+	}
+	_, err = nc.Subscribe(base+"."+conf.err, func(m *nats.Msg) {
 		if svc.level <= LogLevelError {
 			fmt.Printf("%s [%s] %s\n", conf.err, m.Header.Get("breadcrumbs"), m.Data)
 		}
 	})
-	nc.Subscribe(base+"."+conf.fatal, func(m *nats.Msg) {
+	if err != nil {
+		panic(err)
+	}
+	_, err = nc.Subscribe(base+"."+conf.fatal, func(m *nats.Msg) {
 		if svc.level <= LogLevelFatal {
 			fmt.Printf("%s [%s] %s\n", conf.fatal, m.Header.Get("breadcrumbs"), m.Data)
 		}
 	})
-
+	if err != nil {
+		panic(err)
+	}
 	time.Sleep(1 * time.Millisecond) // TODO: refactor this hack
 	return svc
 }

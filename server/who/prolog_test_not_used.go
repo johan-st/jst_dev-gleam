@@ -97,7 +97,7 @@ func TestWhoPermissions(t *testing.T) {
 			t.Fatalf("Failed to marshal results: %v", err)
 		}
 
-		err = os.WriteFile(goldenPath, data, 0644)
+		err = os.WriteFile(goldenPath, data, 0600)
 		if err != nil {
 			t.Fatalf("Failed to write golden file: %v", err)
 		}

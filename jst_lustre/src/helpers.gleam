@@ -73,4 +73,4 @@ pub fn validate_host(host: String) -> Bool {
       }
     }
   }
-} 
+}

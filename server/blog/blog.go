@@ -110,7 +110,11 @@ func (b *Blog) Start(ctx context.Context) error {
 }
 
 func (b *Blog) updatesWatcher(ctx context.Context, w jetstream.KeyWatcher, l *jst_log.Logger) {
-	defer w.Stop()
+	defer func() {
+		if err := w.Stop(); err != nil {
+			l.Error("failed to stop watcher: %v", err)
+		}
+	}()
 	for {
 		select {
 		case <-ctx.Done():
@@ -151,20 +155,20 @@ func (b *Blog) HandleValidate() micro.HandlerFunc {
 		err := json.Unmarshal(req.Data(), &article)
 		if err != nil {
 			l.Info("blog validate request: %w", err)
-			req.Respond([]byte(fmt.Sprintf("invalid: %s", err.Error())))
+			if err := req.Respond([]byte(fmt.Sprintf("invalid: %s", err.Error()))); err != nil {
+				l.Error("failed to respond to validate request: %v", err)
+			}
 			return
 		}
-		req.Respond([]byte("ok"))
+
+		if err := req.Respond([]byte("ok")); err != nil {
+			l.Error("failed to respond to validate request: %v", err)
+		}
 	}
 }
 
 func (b *Blog) HandleAdd() micro.HandlerFunc {
 	l := b.l.WithBreadcrumb("add")
-	type req struct {
-		Slug    string `json:"slug"`
-		Title   string `json:"title"`
-		Content string `json:"content"`
-	}
 	return func(req micro.Request) {
 		l.Info("blog add request")
 		ctx, cancel := context.WithTimeout(b.ctx, 250*time.Millisecond)
@@ -173,16 +177,22 @@ func (b *Blog) HandleAdd() micro.HandlerFunc {
 		err := json.Unmarshal(req.Data(), &article)
 		if err != nil {
 			l.Warn("blog add request: %w", err)
-			req.Error("400", "invalid request", []byte("shape of data is not valid. Expected: {title: string, slug: string, content: string}"))
+			if err := req.Error("400", "invalid request", []byte("shape of data is not valid. Expected: {title: string, slug: string, content: string}")); err != nil {
+				l.Error("failed to respond to add request: %v", err)
+			}
 			return
 		}
 		rev, err := b.kv.Put(ctx, article.Slug, []byte(req.Data()))
 		if err != nil {
 			l.Warn("blog add request: %w", err)
-			req.Error("500", "failed to add article", []byte("failed to add article"))
+			if err := req.Error("500", "failed to add article", []byte("failed to add article")); err != nil {
+				l.Error("failed to respond to add request: %v", err)
+			}
 			return
 		}
-		req.Respond([]byte(fmt.Sprintf("%s:%d", article.Slug, rev)))
+		if err := req.Respond([]byte(fmt.Sprintf("%s:%d", article.Slug, rev))); err != nil {
+			l.Error("failed to respond to add request: %v", err)
+		}
 	}
 }
 
@@ -201,7 +211,9 @@ func (b *Blog) HandleList() micro.HandlerFunc {
 		keyList, err = b.kv.ListKeys(ctx)
 		if err != nil {
 			l.Warn("blog list request: %w", err)
-			req.Error("500", "failed to list articles", []byte("failed to list articles"))
+			if err := req.Error("500", "failed to list articles", []byte("failed to list articles")); err != nil {
+				l.Error("failed to respond to list request: %v", err)
+			}
 			return
 		}
 		for key := range keyList.Keys() {
@@ -209,7 +221,9 @@ func (b *Blog) HandleList() micro.HandlerFunc {
 			history, err := b.kv.History(ctx, key, jetstream.MetaOnly())
 			if err != nil {
 				l.Warn("blog list request: %w", err)
-				req.Error("500", "failed to get history for slug %s", []byte(key))
+				if err := req.Error("500", "failed to get history for slug %s", []byte(key)); err != nil {
+					l.Error("failed to respond to list request: %v", err)
+				}
 				return
 			}
 			if len(history) > 0 {
@@ -218,7 +232,9 @@ func (b *Blog) HandleList() micro.HandlerFunc {
 			}
 			sb.WriteString(fmt.Sprintf("%s:%d-%d\n", key, revFirst, revLast))
 		}
-		req.Respond([]byte(sb.String()))
+		if err := req.Respond([]byte(sb.String())); err != nil {
+			l.Error("failed to respond to list request: %v", err)
+		}
 	}
 }
 
@@ -266,19 +282,31 @@ func (b *Blog) HandleGet() micro.HandlerFunc {
 		l.Info("blog get request %s:%d", slug, rev)
 		if err != nil {
 			l.Warn("blog get request: %w", err)
-			req.Error("400", "invalid request", []byte(err.Error()))
+			if err := req.Error("400", "invalid request", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to get request: %v", err)
+			}
 			return
 		}
 		if rev != 0 {
+			if rev < 0 {
+				if err := req.Error("400", "invalid request", []byte("revision cannot be negative")); err != nil {
+					l.Error("failed to respond to get request: %v", err)
+				}
+				return
+			}
 			entry, err = b.kv.GetRevision(ctx, slug, uint64(rev))
 		} else {
 			entry, err = b.kv.Get(ctx, slug)
 		}
 		if err != nil {
 			l.Warn("blog get request: %w", err)
-			req.Error("500", "failed to get article", []byte("failed to get article"))
+			if err := req.Error("500", "failed to get article", []byte("failed to get article")); err != nil {
+				l.Error("failed to respond to get request: %v", err)
+			}
 			return
 		}
-		req.Respond(entry.Value())
+		if err := req.Respond(entry.Value()); err != nil {
+			l.Error("failed to respond to get request: %v", err)
+		}
 	}
 }

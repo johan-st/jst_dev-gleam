@@ -24,8 +24,8 @@ import modem
 import pages/pages
 import routes.{type Route}
 import session.{type Session}
-import utils/error_string
 import utils/dom_utils
+import utils/error_string
 import utils/http.{type HttpError}
 import utils/icon
 import utils/jot_to_lustre
@@ -391,8 +391,17 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                     // Don't submit with empty fields
                     username, password -> {
                       #(
-                        Model(..model, login_loading: True, session: session.Pending),
-                        session.login(AuthLoginResponse, username, password, model.base_uri),
+                        Model(
+                          ..model,
+                          login_loading: True,
+                          session: session.Pending,
+                        ),
+                        session.login(
+                          AuthLoginResponse,
+                          username,
+                          password,
+                          model.base_uri,
+                        ),
                       )
                     }
                   }
@@ -1501,7 +1510,10 @@ fn view_nav_hints(session: session.Session) -> Element(Msg) {
   ])
 }
 
-fn view_status_bar(keys: Set(keyboard.Key), session: session.Session) -> Element(Msg) {
+fn view_status_bar(
+  keys: Set(keyboard.Key),
+  session: session.Session,
+) -> Element(Msg) {
   case session {
     session.Authenticated(_) -> {
       let key_list = set.to_list(keys)
@@ -1519,7 +1531,9 @@ fn view_status_bar(keys: Set(keyboard.Key), session: session.Session) -> Element
                 html.div(
                   [
                     attr.class(
-                      case set.contains(keys, keyboard.Captured(keyboard.Ctrl)) {
+                      case
+                        set.contains(keys, keyboard.Captured(keyboard.Ctrl))
+                      {
                         True -> "w-3 h-3 bg-green-500 rounded-full"
                         False -> "w-3 h-3 bg-gray-500 rounded-full"
                       },
@@ -1557,7 +1571,8 @@ fn view_status_bar(keys: Set(keyboard.Key), session: session.Session) -> Element
                   keyboard.Captured(keyboard.CtrlE) -> "Ctrl+E"
                   keyboard.Captured(keyboard.CtrlN) -> "Ctrl+N"
                   keyboard.Captured(keyboard.CtrlSpace) -> "Ctrl+Space"
-                  keyboard.Unhandled(code, key) -> "(" <> code <> ": " <> key <> ")"
+                  keyboard.Unhandled(code, key) ->
+                    "(" <> code <> ": " <> key <> ")"
                 }
                 html.span([], [html.text(text)])
               })
@@ -2081,10 +2096,10 @@ fn view_article_listing(
         ArticleV1(
           id: _,
           slug:,
-                      author: _,
-            title: _,
-            leading: _,
-            subtitle: _,
+          author: _,
+          title: _,
+          leading: _,
+          subtitle: _,
           content: _,
           draft: _,
           published_at: _,

@@ -156,7 +156,7 @@ func TestShortUrlValidation(t *testing.T) {
 	if len(shortUrl.ShortCode) != 4 {
 		t.Errorf("Expected 4-character short code, got %d characters: %s", len(shortUrl.ShortCode), shortUrl.ShortCode)
 	}
-	
+
 	// Test that generated short code is unique
 	shortUrl2, err := service.shortUrlCreate("", "https://example2.com", "user")
 	if err != nil {
@@ -214,7 +214,7 @@ func TestShortUrlAPIStructs(t *testing.T) {
 	if unmarshaled.ShortCode != shortUrl.ShortCode {
 		t.Errorf("Expected short code %s, got %s", shortUrl.ShortCode, unmarshaled.ShortCode)
 	}
-} 
+}
 
 func TestShortCodeGeneration(t *testing.T) {
 	// Create a minimal service for testing generation functions
@@ -223,12 +223,18 @@ func TestShortCodeGeneration(t *testing.T) {
 	}
 
 	// Test generateShortCode
-	code1 := service.generateShortCode()
+	code1, err := service.generateUniqueShortCode()
+	if err != nil {
+		t.Fatalf("Failed to generate short code: %v", err)
+	}
 	if len(code1) != 4 {
 		t.Errorf("Expected 4-character code, got %d: %s", len(code1), code1)
 	}
 
-	code2 := service.generateShortCode()
+	code2, err := service.generateUniqueShortCode()
+	if err != nil {
+		t.Fatalf("Failed to generate short code: %v", err)
+	}
 	if len(code2) != 4 {
 		t.Errorf("Expected 4-character code, got %d: %s", len(code2), code2)
 	}
@@ -239,7 +245,10 @@ func TestShortCodeGeneration(t *testing.T) {
 	}
 
 	// Test generateUniqueShortCode with empty list
-	uniqueCode := service.generateUniqueShortCode()
+	uniqueCode, err := service.generateUniqueShortCode()
+	if err != nil {
+		t.Fatalf("Failed to generate unique short code: %v", err)
+	}
 	if len(uniqueCode) != 4 {
 		t.Errorf("Expected 4-character unique code, got %d: %s", len(uniqueCode), uniqueCode)
 	}
@@ -253,7 +262,10 @@ func TestShortCodeGeneration(t *testing.T) {
 		{ShortUrl: api.ShortUrl{ShortCode: "efgh"}},
 	}
 
-	uniqueCode2 := service.generateUniqueShortCode()
+	uniqueCode2, err := service.generateUniqueShortCode()
+	if err != nil {
+		t.Fatalf("Failed to generate unique short code: %v", err)
+	}
 	if len(uniqueCode2) != 4 {
 		t.Errorf("Expected 4-character unique code, got %d: %s", len(uniqueCode2), uniqueCode2)
 	}
@@ -265,7 +277,7 @@ func TestShortCodeGeneration(t *testing.T) {
 	if uniqueCode2 == "abcd" || uniqueCode2 == "efgh" {
 		t.Errorf("Generated code should not match existing codes: %s", uniqueCode2)
 	}
-} 
+}
 
 func TestShortCodeLengthProgression(t *testing.T) {
 	// Create a service with many existing codes to force length progression
@@ -276,35 +288,38 @@ func TestShortCodeLengthProgression(t *testing.T) {
 	// Fill up with many 4-character codes to force progression to 5 characters
 	charset := "abcdefghijklmnopqrstuvwxyz0123456789"
 	for i := 0; i < 1000; i++ { // Add 1000 codes to increase collision probability
-		code := fmt.Sprintf("%c%c%c%c", 
-			charset[i%len(charset)], 
-			charset[(i+1)%len(charset)], 
-			charset[(i+2)%len(charset)], 
+		code := fmt.Sprintf("%c%c%c%c",
+			charset[i%len(charset)],
+			charset[(i+1)%len(charset)],
+			charset[(i+2)%len(charset)],
 			charset[(i+3)%len(charset)])
-		
+
 		service.shortUrls = append(service.shortUrls, ShortUrl{
 			ShortUrl: api.ShortUrl{ShortCode: code},
 		})
 	}
 
 	// Generate a unique code - should be 5 characters due to collisions
-	uniqueCode := service.generateUniqueShortCode()
+	uniqueCode, err := service.generateUniqueShortCode()
+	if err != nil {
+		t.Fatalf("Failed to generate unique short code: %v", err)
+	}
 	if uniqueCode == "" {
 		t.Error("Expected non-empty unique code even with many collisions")
 	}
-	
+
 	// Should be at least 4 characters, but likely 5 due to collisions
 	if len(uniqueCode) < 4 {
 		t.Errorf("Expected code length >= 4, got %d: %s", len(uniqueCode), uniqueCode)
 	}
-	
+
 	// Verify it's unique
 	for _, existing := range service.shortUrls {
 		if existing.ShortCode == uniqueCode {
 			t.Errorf("Generated code should be unique: %s", uniqueCode)
 		}
 	}
-} 
+}
 
 func TestShortUrlAuthentication(t *testing.T) {
 	// Create a minimal service for testing
@@ -358,4 +373,4 @@ func TestShortUrlAuthentication(t *testing.T) {
 	if len(filtered) != 0 {
 		t.Errorf("Expected 0 short URLs for nonexistent user, got %d", len(filtered))
 	}
-} 
+}

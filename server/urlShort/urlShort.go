@@ -5,10 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"jst_dev/server/jst_log"
-	"jst_dev/server/urlShort/api"
 	"strings"
 	"time"
+
+	"jst_dev/server/jst_log"
+	"jst_dev/server/urlShort/api"
 
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
@@ -19,11 +20,11 @@ import (
 const ShortUrlKey = "shorturl_url"
 
 type ShortUrlService struct {
-	shortUrls []ShortUrl
-	l         *jst_log.Logger
-	nc        *nats.Conn
+	shortUrls   []ShortUrl
+	l           *jst_log.Logger
+	nc          *nats.Conn
 	shortUrlsKv jetstream.KeyValue
-	ctx        context.Context
+	ctx         context.Context
 }
 
 type ShortUrl struct {
@@ -62,7 +63,7 @@ func (s *ShortUrlService) Start(ctx context.Context) error {
 		Bucket:       "url_short",
 		Description:  "short url mappings",
 		Storage:      jetstream.FileStorage,
-		MaxValueSize: 1 * 1024,       // 1 KB
+		MaxValueSize: 1 * 1024,         // 1 KB
 		MaxBytes:     50 * 1024 * 1024, // 50 MB
 		History:      1,
 		Compression:  false,
@@ -73,7 +74,9 @@ func (s *ShortUrlService) Start(ctx context.Context) error {
 		return fmt.Errorf("create short urls kv store %s:%w", confKv.Bucket, err)
 	}
 	s.shortUrlsKv = kv
-	s.shortUrlWatcher()
+	if err := s.shortUrlWatcher(); err != nil {
+		return fmt.Errorf("failed to start short url watcher: %w", err)
+	}
 
 	svcMetadata := map[string]string{}
 	svcMetadata["location"] = "unknown"
@@ -116,9 +119,9 @@ func (s *ShortUrlService) Start(ctx context.Context) error {
 
 func (s *ShortUrlService) shortUrlWatcher() error {
 	var (
-		watcher jetstream.KeyWatcher
-		err     error
-		kv      jetstream.KeyValueEntry
+		watcher  jetstream.KeyWatcher
+		err      error
+		kv       jetstream.KeyValueEntry
 		shortUrl ShortUrl
 	)
 
@@ -191,22 +194,28 @@ func (s *ShortUrlService) handleShortUrlCreate() micro.HandlerFunc {
 		err = json.Unmarshal(req.Data(), &reqData)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to unmarshal short url create request: %s", err.Error()))
-			req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error()))
+			if err := req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to short url create request: %v", err)
+			}
 			return
 		}
 		if reqData.ShortCode == "" {
 			l.Debug("short code is empty, generating one")
-			reqData.ShortCode = s.generateUniqueShortCode()
-			if reqData.ShortCode == "" {
-				l.Error("failed to generate unique short code after 10000 attempts")
-				req.Error("SERVER_ERROR", "unable to generate unique short code", []byte("short code generation failed"))
+			reqData.ShortCode, err = s.generateUniqueShortCode()
+			if err != nil {
+				l.Error("failed to generate unique short code: %s", err.Error())
+				if err := req.Error("SERVER_ERROR", "unable to generate unique short code", []byte(err.Error())); err != nil {
+					l.Error("failed to respond to short url create request: %v", err)
+				}
 				return
 			}
 			l.Debug("generated short code: %s", reqData.ShortCode)
 		}
 		if reqData.TargetURL == "" {
 			l.Warn("target URL is empty")
-			req.Error("INVALID_REQUEST", "target URL is empty", []byte("target URL is empty"))
+			if err := req.Error("INVALID_REQUEST", "target URL is empty", []byte("target URL is empty")); err != nil {
+				l.Error("failed to respond to short url create request: %v", err)
+			}
 			return
 		}
 		// Note: CreatedBy is now optional - will be handled by the web layer
@@ -215,18 +224,24 @@ func (s *ShortUrlService) handleShortUrlCreate() micro.HandlerFunc {
 		existing := s.shortUrlByShortCode(reqData.ShortCode)
 		if existing != nil {
 			l.Warn("short code already exists")
-			req.Error("SHORT_CODE_TAKEN", "a short url with this code already exists", []byte(reqData.ShortCode))
+			if err := req.Error("SHORT_CODE_TAKEN", "a short url with this code already exists", []byte(reqData.ShortCode)); err != nil {
+				l.Error("failed to respond to short url create request: %v", err)
+			}
 			return
 		}
 
 		shortUrl, err = s.shortUrlCreate(reqData.ShortCode, reqData.TargetURL, reqData.CreatedBy)
 		if err != nil {
 			l.Error(fmt.Sprintf("failed to create short url: %s", err.Error()))
-			req.Error("SERVER_ERROR", "server error", []byte(err.Error()))
+			if err := req.Error("SERVER_ERROR", "server error", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to short url create request: %v", err)
+			}
 			return
 		}
 
-		req.RespondJSON(shortUrl.ShortUrl)
+		if err := req.RespondJSON(shortUrl.ShortUrl); err != nil {
+			l.Error("failed to respond to short url create request: %v", err)
+		}
 	}
 }
 
@@ -235,39 +250,49 @@ func (s *ShortUrlService) handleShortUrlGet() micro.HandlerFunc {
 
 	return func(req micro.Request) {
 		var (
-			reqData api.ShortUrlGetRequest
-			err     error
+			reqData  api.ShortUrlGetRequest
+			err      error
 			shortUrl *ShortUrl
 		)
 		l.Debug("got request")
 		err = json.Unmarshal(req.Data(), &reqData)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to unmarshal short url get request: %s", err.Error()))
-			req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error()))
+			if err := req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to short url get request: %v", err)
+			}
 			return
 		}
 		if reqData.ID == "" && reqData.ShortCode == "" {
 			l.Warn("no id or short code provided")
-			req.Error("INVALID_REQUEST", "no id or short code provided", []byte("no id or short code provided"))
+			if err := req.Error("INVALID_REQUEST", "no id or short code provided", []byte("no id or short code provided")); err != nil {
+				l.Error("failed to respond to short url get request: %v", err)
+			}
 			return
 		}
 		if reqData.ID != "" {
 			shortUrl = s.shortUrlGet(reqData.ID)
 			if shortUrl == nil {
 				l.Warn(fmt.Sprintf("short url not found: %s", reqData.ID))
-				req.Error("NOT_FOUND", "short url not found", []byte(reqData.ID))
+				if err := req.Error("NOT_FOUND", "short url not found", []byte(reqData.ID)); err != nil {
+					l.Error("failed to respond to short url get request: %v", err)
+				}
 				return
 			}
 		} else if reqData.ShortCode != "" {
 			shortUrl = s.shortUrlByShortCode(reqData.ShortCode)
 			if shortUrl == nil {
 				l.Warn(fmt.Sprintf("short url not found: %s", reqData.ShortCode))
-				req.Error("NOT_FOUND", "short url not found", []byte(reqData.ShortCode))
+				if err := req.Error("NOT_FOUND", "short url not found", []byte(reqData.ShortCode)); err != nil {
+					l.Error("failed to respond to short url get request: %v", err)
+				}
 				return
 			}
 		}
 
-		req.RespondJSON(shortUrl.ShortUrl)
+		if err := req.RespondJSON(shortUrl.ShortUrl); err != nil {
+			l.Error("failed to respond to short url get request: %v", err)
+		}
 	}
 }
 
@@ -286,13 +311,17 @@ func (s *ShortUrlService) handleShortUrlUpdate() micro.HandlerFunc {
 		err = json.Unmarshal(req.Data(), &reqData)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to unmarshal short url update request: %s", err.Error()))
-			req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error()))
+			if err := req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to short url update request: %v", err)
+			}
 			return
 		}
 		shortUrl = s.shortUrlGet(reqData.ID)
 		if shortUrl == nil {
 			l.Warn(fmt.Sprintf("short url not found: %s", reqData.ID))
-			req.Error("NOT_FOUND", "short url not found", []byte(reqData.ID))
+			if err := req.Error("NOT_FOUND", "short url not found", []byte(reqData.ID)); err != nil {
+				l.Error("failed to respond to short url update request: %v", err)
+			}
 			return
 		}
 
@@ -302,7 +331,9 @@ func (s *ShortUrlService) handleShortUrlUpdate() micro.HandlerFunc {
 			existing := s.shortUrlByShortCode(reqData.ShortCode)
 			if existing != nil && existing.ID != shortUrl.ID {
 				l.Warn("short code already exists")
-				req.Error("SHORT_CODE_TAKEN", "a short url with this code already exists", []byte(reqData.ShortCode))
+				if err := req.Error("SHORT_CODE_TAKEN", "a short url with this code already exists", []byte(reqData.ShortCode)); err != nil {
+					l.Error("failed to respond to short url update request: %v", err)
+				}
 				return
 			}
 			shortUrl.ShortCode = reqData.ShortCode
@@ -318,17 +349,23 @@ func (s *ShortUrlService) handleShortUrlUpdate() micro.HandlerFunc {
 		userBytes, err = json.Marshal(shortUrl)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to marshal short url: %s", err.Error()))
-			req.Error("SERVER_ERROR", "server error while updating short url", []byte(err.Error()))
+			if err := req.Error("SERVER_ERROR", "server error while updating short url", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to short url update request: %v", err)
+			}
 			return
 		}
 		rev, err = s.shortUrlsKv.Put(s.ctx, shortUrl.ID, userBytes)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to update short url: %s", err.Error()))
-			req.Error("SERVER_ERROR", "server error while updating short url", []byte(err.Error()))
+			if err := req.Error("SERVER_ERROR", "server error while updating short url", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to short url update request: %v", err)
+			}
 			return
 		}
 		shortUrl.revision = rev
-		req.RespondJSON(shortUrl.ShortUrl)
+		if err := req.RespondJSON(shortUrl.ShortUrl); err != nil {
+			l.Error("failed to respond to short url update request: %v", err)
+		}
 	}
 }
 
@@ -345,25 +382,33 @@ func (s *ShortUrlService) handleShortUrlDelete() micro.HandlerFunc {
 		err = json.Unmarshal(req.Data(), &reqData)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to unmarshal short url delete request: %s", err.Error()))
-			req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error()))
+			if err := req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to short url delete request: %v", err)
+			}
 			return
 		}
 		shortUrl = s.shortUrlGet(reqData.ID)
 		if shortUrl == nil {
 			l.Warn(fmt.Sprintf("short url not found: %s", reqData.ID))
-			req.Error("NOT_FOUND", "short url not found and could thus not be deleted", []byte(reqData.ID))
+			if err := req.Error("NOT_FOUND", "short url not found and could thus not be deleted", []byte(reqData.ID)); err != nil {
+				l.Error("failed to respond to short url delete request: %v", err)
+			}
 			return
 		}
 		err = s.shortUrlsKv.Delete(s.ctx, shortUrl.ID)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to delete short url: %s", err.Error()))
-			req.Error("SERVER_ERROR", "server error while deleting short url", []byte(err.Error()))
+			if err := req.Error("SERVER_ERROR", "server error while deleting short url", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to short url delete request: %v", err)
+			}
 			return
 		}
 		respData = api.ShortUrlDeleteResponse{
 			IDDeleted: shortUrl.ID,
 		}
-		req.RespondJSON(respData)
+		if err := req.RespondJSON(respData); err != nil {
+			l.Error("failed to respond to short url delete request: %v", err)
+		}
 	}
 }
 
@@ -380,7 +425,9 @@ func (s *ShortUrlService) handleShortUrlList() micro.HandlerFunc {
 		err = json.Unmarshal(req.Data(), &reqData)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to unmarshal short url list request: %s", err.Error()))
-			req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error()))
+			if err := req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to short url list request: %v", err)
+			}
 			return
 		}
 
@@ -419,7 +466,9 @@ func (s *ShortUrlService) handleShortUrlList() micro.HandlerFunc {
 			Limit:     reqData.Limit,
 			Offset:    reqData.Offset,
 		}
-		req.RespondJSON(respData)
+		if err := req.RespondJSON(respData); err != nil {
+			l.Error("failed to respond to short url list request: %v", err)
+		}
 	}
 }
 
@@ -436,12 +485,16 @@ func (s *ShortUrlService) handleShortUrlAccess() micro.HandlerFunc {
 		err = json.Unmarshal(req.Data(), &reqData)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to unmarshal short url access request: %s", err.Error()))
-			req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error()))
+			if err := req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to short url access request: %v", err)
+			}
 			return
 		}
 		if reqData.ShortCode == "" {
 			l.Warn("short code is empty")
-			req.Error("INVALID_REQUEST", "short code is empty", []byte("short code is empty"))
+			if err := req.Error("INVALID_REQUEST", "short code is empty", []byte("short code is empty")); err != nil {
+				l.Error("failed to respond to short url access request: %v", err)
+			}
 			return
 		}
 
@@ -449,14 +502,18 @@ func (s *ShortUrlService) handleShortUrlAccess() micro.HandlerFunc {
 		shortUrl := s.shortUrlByShortCode(reqData.ShortCode)
 		if shortUrl == nil {
 			l.Warn(fmt.Sprintf("short url not found: %s", reqData.ShortCode))
-			req.Error("NOT_FOUND", "short url not found", []byte(reqData.ShortCode))
+			if err := req.Error("NOT_FOUND", "short url not found", []byte(reqData.ShortCode)); err != nil {
+				l.Error("failed to respond to short url access request: %v", err)
+			}
 			return
 		}
 
 		// Check if short URL is active
 		if !shortUrl.IsActive {
 			l.Warn(fmt.Sprintf("short url is inactive: %s", reqData.ShortCode))
-			req.Error("GONE", "short url is inactive", []byte(reqData.ShortCode))
+			if err := req.Error("GONE", "short url is inactive", []byte(reqData.ShortCode)); err != nil {
+				l.Error("failed to respond to short url access request: %v", err)
+			}
 			return
 		}
 
@@ -471,7 +528,9 @@ func (s *ShortUrlService) handleShortUrlAccess() micro.HandlerFunc {
 			TargetURL: shortUrl.TargetURL,
 			Redirect:  true,
 		}
-		req.RespondJSON(respData)
+		if err := req.RespondJSON(respData); err != nil {
+			l.Error("failed to respond to short url access request: %v", err)
+		}
 	}
 }
 
@@ -479,10 +538,10 @@ func (s *ShortUrlService) handleShortUrlAccess() micro.HandlerFunc {
 
 func (s *ShortUrlService) shortUrlCreate(shortCode, targetURL, createdBy string) (*ShortUrl, error) {
 	var (
-		err       error
-		shortUrl  *ShortUrl
+		err           error
+		shortUrl      *ShortUrl
 		shortUrlBytes []byte
-		rev       uint64
+		rev           uint64
 	)
 
 	if shortCode == "" || targetURL == "" {
@@ -541,7 +600,7 @@ func (s *ShortUrlService) filterShortUrls(createdBy string) []ShortUrl {
 	if createdBy == "" {
 		return s.shortUrls
 	}
-	
+
 	filtered := make([]ShortUrl, 0)
 	for _, shortUrl := range s.shortUrls {
 		if shortUrl.CreatedBy == createdBy {
@@ -572,56 +631,39 @@ func (s *ShortUrlService) IncrementAccessCount(shortCode string) error {
 	return nil
 }
 
-// generateShortCode creates a random 4-character alphanumeric short code
-func (s *ShortUrlService) generateShortCode() string {
-	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-	const length = 4
-	
-	bytes := make([]byte, length)
-	rand.Read(bytes)
-	
-	result := make([]byte, length)
-	for i := range result {
-		result[i] = charset[bytes[i]%byte(len(charset))]
-	}
-	
-	return string(result)
-}
-
 // generateUniqueShortCode generates a unique short code, starting with 4 chars and increasing length if needed
-func (s *ShortUrlService) generateUniqueShortCode() string {
+func (s *ShortUrlService) generateUniqueShortCode() (string, error) {
 	const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
 	maxTotalAttempts := 10000
 	totalAttempts := 0
-	
+
 	// Start with 4 characters
 	length := 4
-	
+
 	for totalAttempts < maxTotalAttempts {
 		// Try up to 100 attempts at current length
 		for i := 0; i < 100 && totalAttempts < maxTotalAttempts; i++ {
 			totalAttempts++
-			
+
 			// Generate random code at current length
 			bytes := make([]byte, length)
-			rand.Read(bytes)
-			
+			if _, err := rand.Read(bytes); err != nil {
+				return "", fmt.Errorf("failed to generate random bytes: %w", err)
+			}
+
 			result := make([]byte, length)
 			for j := range result {
 				result[j] = charset[bytes[j]%byte(len(charset))]
 			}
-			
+
 			shortCode := string(result)
 			if s.shortUrlByShortCode(shortCode) == nil {
-				return shortCode
+				return shortCode, nil
 			}
 		}
-		
+
 		// If we hit 100 attempts at current length, try one character longer
 		length++
 	}
-	
-	// If we've exhausted all attempts, fail
-	return ""
+	return "", fmt.Errorf("failed to generate unique short code after %d attempts", maxTotalAttempts)
 }
-

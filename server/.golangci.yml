@@ -2,8 +2,6 @@ run:
   timeout: 5m
   modules-download-mode: readonly
   tests: true
-  skip-dirs:
-    - vendor
 
 linters:
   disable-all: true
@@ -17,9 +15,7 @@ linters:
     - staticcheck
     - govet
     - ineffassign
-    - deadcode
     - unused
-    - varcheck
 
 linters-settings:
   gofmt:
@@ -28,6 +24,8 @@ linters-settings:
     local-prefixes: jst_dev/server
 
 issues:
+  exclude-dirs:
+    - vendor
   exclude-rules:
     - path: _test\.go
       linters:

@@ -47,7 +47,7 @@ pub fn parse_key(code: String, key: String, ctrl: Bool, alt: Bool) -> Key {
     "Digit4", _, False, True -> Captured(Alt4)
     "Digit5", _, False, True -> Captured(Alt5)
     "Digit6", _, False, True -> Captured(Alt6)
-    
+
     // Alt + letter combinations
     "KeyL", _, False, True -> Captured(AltL)
 

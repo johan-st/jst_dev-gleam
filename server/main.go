@@ -100,13 +100,13 @@ func run(
 
 	// - logger (connect)
 	lRoot.Connect(nc)
-	
+
 	// Parse log level from configuration
 	logLevel, err := jst_log.LogLevelFromString(conf.Flags.LogLevel)
 	if err != nil {
 		log.Fatalf("Failed to parse log level: %v\n", err)
 	}
-	
+
 	jst_log.StdOut(nc, "log."+conf.AppName, jst_log.DefaultSubjects(), logLevel)
 	time.Sleep(1 * time.Millisecond)
 

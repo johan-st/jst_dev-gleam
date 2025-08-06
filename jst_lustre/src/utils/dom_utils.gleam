@@ -9,4 +9,4 @@ pub fn focus_and_select_element(element_id: String) -> effect.Effect(msg) {
     focus_and_select_element_js(element_id)
     Nil
   })
-} 
+}

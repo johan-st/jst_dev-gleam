@@ -131,7 +131,6 @@ func (ps Permissions) Includes(perm1 Permission, perms ...Permission) bool {
 	return true
 }
 
-
 type PermissionsListResponse struct {
 	Permissions Permissions `json:"permissions"`
 }
