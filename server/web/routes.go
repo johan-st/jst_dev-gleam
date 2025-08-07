@@ -17,6 +17,7 @@ import (
 
 	"jst_dev/server/articles"
 	"jst_dev/server/jst_log"
+	"jst_dev/server/ntfy"
 	shortUrlApi "jst_dev/server/urlShort/api"
 	"jst_dev/server/who"
 	whoApi "jst_dev/server/who/api"
@@ -51,6 +52,9 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 	mux.Handle("GET /u/{shortCode}", handleShortUrlRedirect(l, nc))
 	mux.Handle("GET u.jst.dev/{shortCode}", handleShortUrlRedirect(l, nc))
 	mux.Handle("GET url.jst.dev/{shortCode}", handleShortUrlRedirect(l, nc))
+
+	// notifications
+	mux.Handle("POST /api/notifications", handleNotificationSend(l, nc))
 
 	// web
 	if dev {
@@ -1183,6 +1187,103 @@ func handleShortUrlRedirect(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 
 		logger.Debug("redirecting %s to %s", shortCode, shortUrl.TargetURL)
 		http.Redirect(w, r, shortUrl.TargetURL, http.StatusMovedPermanently)
+	})
+}
+
+// --- NOTIFICATION HANDLERS ---
+
+func handleNotificationSend(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger := l.WithBreadcrumb("handleNotificationSend")
+
+		// Get user from context
+		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		if !ok {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// Parse request body
+		var req struct {
+			Title     string                 `json:"title"`
+			Message   string                 `json:"message"`
+			Category  string                 `json:"category"`
+			Priority  ntfy.Priority          `json:"priority"`
+			NtfyTopic string                 `json:"ntfy_topic"`
+			Data      map[string]interface{} `json:"data,omitempty"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			logger.Error("failed to decode request: %v", err)
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		// Validate required fields
+		if req.Title == "" {
+			http.Error(w, "title is required", http.StatusBadRequest)
+			return
+		}
+		if req.Message == "" {
+			http.Error(w, "message is required", http.StatusBadRequest)
+			return
+		}
+		if req.Category == "" {
+			http.Error(w, "category is required", http.StatusBadRequest)
+			return
+		}
+
+		// Create notification
+		notification := ntfy.Notification{
+			ID:        uuid.New().String(),
+			UserID:    user.ID,
+			Title:     req.Title,
+			Message:   req.Message,
+			Category:  req.Category,
+			Priority:  req.Priority,
+			NtfyTopic: req.NtfyTopic,
+			Data:      req.Data,
+			CreatedAt: time.Now(),
+		}
+
+		// Set default priority if not provided
+		if notification.Priority == "" {
+			notification.Priority = ntfy.PriorityNormal
+		}
+
+		// Marshal notification
+		notificationBytes, err := json.Marshal(notification)
+		if err != nil {
+			logger.Error("failed to marshal notification: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Send notification via NATS
+		msg, err := nc.Request(ntfy.SubjectNotification, notificationBytes, 10*time.Second)
+		if err != nil {
+			logger.Error("failed to send notification: %v", err)
+			http.Error(w, "failed to send notification", http.StatusInternalServerError)
+			return
+		}
+
+		// Check for service errors
+		if msg.Header.Get("Nats-Service-Error") != "" {
+			errorCode := msg.Header.Get("Nats-Service-Error-Code")
+			if errorCode == "400" {
+				http.Error(w, string(msg.Data), http.StatusBadRequest)
+				return
+			}
+			http.Error(w, "notification service error", http.StatusInternalServerError)
+			return
+		}
+
+		// Return success response
+		respJson(w, map[string]string{
+			"status":  "success",
+			"message": "Notification sent successfully",
+			"id":      notification.ID,
+		}, http.StatusOK)
 	})
 }
 

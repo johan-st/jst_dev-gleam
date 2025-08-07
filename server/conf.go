@@ -17,6 +17,7 @@ type GlobalConfig struct {
 	WebJwtSecret string
 	WebHashSalt  string
 	WebPort      string
+	NtfyToken    string
 
 	AppName string
 	Talk    talk.Conf
@@ -65,12 +66,20 @@ func loadConf() (*GlobalConfig, error) {
 	if envPort == "" {
 		log.Fatalf("missing env-var: PORT")
 	}
+
+	// NTFY_TOKEN is optional
+	envNtfyToken := os.Getenv("NTFY_TOKEN")
+	if envNtfyToken == "" {
+		log.Fatalf("missing env-var: NTFY_TOKEN")
+	}
+
 	conf := &GlobalConfig{
 		NatsJWT:      envNatsJwt,
 		NatsNKEY:     envNatsNkey,
 		WebJwtSecret: envJwtSecret,
 		WebHashSalt:  envHashSalt,
 		WebPort:      envPort,
+		NtfyToken:    envNtfyToken,
 
 		AppName: os.Getenv("FLY_APP_NAME") + "-" + os.Getenv("PRIMARY_REGION"),
 		Talk: talk.Conf{

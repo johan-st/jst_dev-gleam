@@ -12,6 +12,7 @@ import (
 
 	"jst_dev/server/articles"
 	"jst_dev/server/jst_log"
+	"jst_dev/server/ntfy"
 	"jst_dev/server/talk"
 	"jst_dev/server/urlShort"
 	web "jst_dev/server/web"
@@ -120,6 +121,17 @@ func run(
 	// if err != nil {
 	// 	return fmt.Errorf("start blog: %w", err)
 	// }
+
+	// - ntfy
+	l.Debug("starting ntfy")
+	ntfySvc, err := ntfy.NewWithConfig(ctx, nc, lRoot.WithBreadcrumb("ntfy"), ntfy.DefaultNtfyServer, conf.NtfyToken)
+	if err != nil {
+		return fmt.Errorf("new ntfy: %w", err)
+	}
+	err = ntfySvc.Start(ctx)
+	if err != nil {
+		return fmt.Errorf("start ntfy: %w", err)
+	}
 
 	// - who
 	l.Debug("starting who")

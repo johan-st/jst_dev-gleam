@@ -34,6 +34,7 @@ import utils/remote_data.{
   type RemoteData, Errored, Loaded, NotInitialized, Optimistic, Pending,
 }
 import utils/short_url.{type ShortUrl, type ShortUrlListResponse}
+import utils/notification.{type NotificationRequest, type NotificationResponse}
 import utils/window_events
 
 @external(javascript, "./app.ffi.mjs", "clipboard_copy")
@@ -85,6 +86,14 @@ fn init(_) -> #(Model, Effect(Msg)) {
       login_password: "",
       login_loading: False,
       key_shortcuts_active: set.new(),
+      // Notification form fields
+      notification_form_title: "",
+      notification_form_message: "",
+      notification_form_category: "",
+      notification_form_priority: "normal",
+      notification_form_ntfy_topic: "",
+      notification_form_data: [],
+      notification_sending: False,
     )
   let effect_modem =
     modem.init(fn(uri) {
@@ -138,6 +147,14 @@ type Model {
     login_password: String,
     login_loading: Bool,
     key_shortcuts_active: Set(keyboard.Key),
+    // Notification form fields
+    notification_form_title: String,
+    notification_form_message: String,
+    notification_form_category: String,
+    notification_form_priority: String,
+    notification_form_ntfy_topic: String,
+    notification_form_data: List(#(String, String)),
+    notification_sending: Bool,
   )
 }
 
@@ -207,6 +224,16 @@ pub type Msg {
 
   // Other events
   WindowUnfocused
+
+  // Notifications
+  NotificationFormTitleUpdated(String)
+  NotificationFormMessageUpdated(String)
+  NotificationFormCategoryUpdated(String)
+  NotificationFormPriorityUpdated(String)
+  NotificationFormNtfyTopicUpdated(String)
+  NotificationFormDataUpdated(List(#(String, String)))
+  NotificationSendClicked
+  NotificationSendResponse(Result(NotificationResponse, HttpError))
 
   // UI Components
   NoOp
@@ -437,6 +464,12 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               #(
                 model,
                 modem.push(routes.to_string(routes.UiComponents), None, None),
+              )
+            }
+            keyboard.Alt7 -> {
+              #(
+                model,
+                modem.push(routes.to_string(routes.Notifications), None, None),
               )
             }
             keyboard.AltL -> {
@@ -1174,6 +1207,78 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       }
       #(Model(..model, expanded_urls: updated_expanded_urls), effect.none())
     }
+    // NOTIFICATION HANDLERS
+    NotificationFormTitleUpdated(title) -> {
+      #(Model(..model, notification_form_title: title), effect.none())
+    }
+    NotificationFormMessageUpdated(message) -> {
+      #(Model(..model, notification_form_message: message), effect.none())
+    }
+    NotificationFormCategoryUpdated(category) -> {
+      #(Model(..model, notification_form_category: category), effect.none())
+    }
+    NotificationFormPriorityUpdated(priority) -> {
+      #(Model(..model, notification_form_priority: priority), effect.none())
+    }
+    NotificationFormNtfyTopicUpdated(topic) -> {
+      #(Model(..model, notification_form_ntfy_topic: topic), effect.none())
+    }
+    NotificationFormDataUpdated(data) -> {
+      #(Model(..model, notification_form_data: data), effect.none())
+    }
+    NotificationSendClicked -> {
+      case model.notification_form_title, model.notification_form_message, model.notification_form_category {
+        "", _, _ | _, "", _ | _, _, "" -> #(model, effect.none())
+        title, message, category -> {
+          let request = notification.create_notification_request(
+            title,
+            message,
+            category,
+            model.notification_form_priority,
+            model.notification_form_ntfy_topic,
+            model.notification_form_data,
+          )
+          #(
+            Model(..model, notification_sending: True),
+            notification.send_notification(
+              NotificationSendResponse,
+              model.base_uri,
+              request,
+            ),
+          )
+        }
+      }
+    }
+    NotificationSendResponse(result) -> {
+      case result {
+        Ok(response) -> {
+          #(
+            Model(
+              ..model,
+              notification_sending: False,
+              notification_form_title: "",
+              notification_form_message: "",
+              notification_form_category: "",
+              notification_form_priority: "normal",
+              notification_form_ntfy_topic: "",
+              notification_form_data: [],
+              notice: "Notification sent successfully!",
+            ),
+            effect.none(),
+          )
+        }
+        Error(err) -> {
+          #(
+            Model(
+              ..model,
+              notification_sending: False,
+              notice: "Failed to send notification: " <> error_string.http_error(err),
+            ),
+            effect.none(),
+          )
+        }
+      }
+    }
     DebugToggleLocalStorage -> {
       // Fells a bit wierd to call a function just for the side-effect and not use the result.. 
       case model.debug_use_local_storage {
@@ -1317,6 +1422,7 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
     routes.UrlShortInfo(short_code) -> #(Model(..model, route:), effect.none())
     routes.DjotDemo -> #(Model(..model, route:), effect.none())
     routes.UiComponents -> #(Model(..model, route:), effect.none())
+    routes.Notifications -> #(Model(..model, route:), effect.none())
     routes.NotFound(_uri) -> #(Model(..model, route:), effect.none())
   }
 }
@@ -1353,6 +1459,7 @@ fn view(model: Model) -> Element(Msg) {
     pages.PageUrlShortInfo(short, _) -> view_url_info_page(model, short)
     pages.PageDjotDemo(content) -> view_djot_demo(content)
     pages.PageUiComponents(_) -> view_ui_components()
+    pages.PageNotifications(_) -> view_notifications(model)
     pages.PageNotFound(uri) -> view_not_found(uri)
   }
   let nav_hints_overlay = case
@@ -1430,6 +1537,7 @@ fn view_nav_hints(session: session.Session) -> Element(Msg) {
       #("Djot Demo", "Alt+4"),
       #("URL Shortener", "Alt+5"),
       #("UI Components", "Alt+6"),
+      #("Notifications", "Alt+7"),
     ]
     session.Unauthenticated -> [
       // Unauthenticated users can only access these
@@ -1563,6 +1671,7 @@ fn view_status_bar(
                   keyboard.Captured(keyboard.Alt4) -> "Alt+4"
                   keyboard.Captured(keyboard.Alt5) -> "Alt+5"
                   keyboard.Captured(keyboard.Alt6) -> "Alt+6"
+                  keyboard.Captured(keyboard.Alt7) -> "Alt+7"
                   keyboard.Captured(keyboard.AltL) -> "Alt+L"
                   keyboard.Captured(keyboard.Ctrl) -> ""
                   keyboard.Captured(keyboard.Escape) -> "Esc"
@@ -1695,6 +1804,14 @@ fn page_from_model(model: Model) -> pages.Page {
           pages.PageUiComponents(session_auth)
         _ ->
           pages.PageError(pages.AuthenticationRequired("access UI components"))
+      }
+    }
+    routes.Notifications -> {
+      case model.session {
+        session.Authenticated(session_auth) ->
+          pages.PageNotifications(session_auth)
+        _ ->
+          pages.PageError(pages.AuthenticationRequired("access notifications"))
       }
     }
     routes.NotFound(uri) -> pages.PageNotFound(uri)
@@ -1831,6 +1948,12 @@ fn view_header(model: Model) -> Element(Msg) {
                       label: "UI Components",
                       attributes: [],
                     ),
+                    view_header_link(
+                      target: routes.Notifications,
+                      current: model.route,
+                      label: "Notifications",
+                      attributes: [],
+                    ),
                   ]
                   _ -> []
                 },
@@ -1904,6 +2027,12 @@ fn view_header(model: Model) -> Element(Msg) {
                                   target: routes.UiComponents,
                                   current: model.route,
                                   label: "UI Components",
+                                  attributes: top_nav_attributes_small,
+                                ),
+                                view_header_link(
+                                  target: routes.Notifications,
+                                  current: model.route,
+                                  label: "Notifications",
                                   attributes: top_nav_attributes_small,
                                 ),
                               ]
@@ -4368,4 +4497,145 @@ fn view_ui_components() -> List(Element(Msg)) {
       ]),
     ]),
   ]
+}
+
+fn view_notifications(model: Model) -> List(Element(Msg)) {
+  [
+    view_title("Send Notification", "notifications"),
+    view_simple_paragraph("Send push notifications to your devices via ntfy.sh. Configure your ntfy topic to receive notifications on your mobile device or desktop."),
+    view_notification_help(),
+    view_notification_form(model),
+  ]
+}
+
+fn view_notification_help() -> Element(Msg) {
+  html.div([attr.class("mt-6 p-4 bg-teal-900/30 border border-teal-600/40 rounded-lg")], [
+    html.h4([attr.class("text-teal-400 font-medium mb-2")], [html.text("How to use:")]),
+    html.ul([attr.class("text-sm text-zinc-300 space-y-1")], [
+      html.li([attr.class("flex items-start")], [
+        html.span([attr.class("text-teal-400 mr-2")], [html.text("•")]),
+        html.text("Download the ntfy app on your phone or subscribe to a topic on ntfy.sh"),
+      ]),
+      html.li([attr.class("flex items-start")], [
+        html.span([attr.class("text-teal-400 mr-2")], [html.text("•")]),
+        html.text("Enter your custom topic or leave empty to use your default user topic"),
+      ]),
+      html.li([attr.class("flex items-start")], [
+        html.span([attr.class("text-teal-400 mr-2")], [html.text("•")]),
+        html.text("Choose priority: Low (silent), Normal (default sound), High (louder), Urgent (critical alert)"),
+      ]),
+      html.li([attr.class("flex items-start")], [
+        html.span([attr.class("text-teal-400 mr-2")], [html.text("•")]),
+        html.text("Categories help organize your notifications (e.g., 'system', 'alerts', 'reminders')"),
+      ]),
+    ]),
+  ])
+}
+
+fn view_notification_form(model: Model) -> Element(Msg) {
+  html.div(
+    [attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")],
+    [
+      html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
+        html.text("Send Notification"),
+      ]),
+      html.div([attr.class("space-y-4")], [
+        ui.form_input(
+          "Title",
+          model.notification_form_title,
+          "Enter notification title",
+          "text",
+          True,
+          None,
+          NotificationFormTitleUpdated,
+        ),
+        ui.form_input(
+          "Message",
+          model.notification_form_message,
+          "Enter notification message",
+          "text",
+          True,
+          None,
+          NotificationFormMessageUpdated,
+        ),
+        ui.form_input(
+          "Category",
+          model.notification_form_category,
+          "e.g., system, alerts, reminders, info",
+          "text",
+          True,
+          None,
+          NotificationFormCategoryUpdated,
+        ),
+        html.div([attr.class("space-y-2")], [
+          html.label([attr.class("block text-sm font-medium text-zinc-400")], [
+            html.text("Priority"),
+          ]),
+          html.select(
+            [
+              attr.class(
+                "w-full bg-zinc-800 border border-zinc-600 rounded-md p-2 text-zinc-100 focus:border-pink-700 focus:ring-1 focus:ring-pink-700 focus:outline-none transition-colors duration-200",
+              ),
+              event.on_input(NotificationFormPriorityUpdated),
+            ],
+            [
+              html.option(
+                [
+                  attr.value("low"),
+                  attr.selected(model.notification_form_priority == "low"),
+                ],
+                "Low",
+              ),
+              html.option(
+                [
+                  attr.value("normal"),
+                  attr.selected(model.notification_form_priority == "normal"),
+                ],
+                "Normal",
+              ),
+              html.option(
+                [
+                  attr.value("high"),
+                  attr.selected(model.notification_form_priority == "high"),
+                ],
+                "High",
+              ),
+              html.option(
+                [
+                  attr.value("urgent"),
+                  attr.selected(model.notification_form_priority == "urgent"),
+                ],
+                "Urgent",
+              ),
+            ],
+          ),
+        ]),
+        ui.form_input(
+          "Ntfy Topic (optional)",
+          model.notification_form_ntfy_topic,
+          "Custom topic name or leave empty for user_{your_id}",
+          "text",
+          False,
+          None,
+          NotificationFormNtfyTopicUpdated,
+        ),
+        ui.button(
+          case model.notification_sending {
+            True -> "Sending..."
+            False -> "Send Notification"
+          },
+          ui.ColorTeal,
+          case
+            model.notification_sending,
+            model.notification_form_title == "" || model.notification_form_message == "" || model.notification_form_category == ""
+          {
+            True, _ -> ui.ButtonStatePending
+            False, True -> ui.ButtonStateDisabled
+            _, _ -> ui.ButtonStateNormal
+          },
+          NotificationSendClicked,
+        ),
+      ]),
+    ],
+  )
 }

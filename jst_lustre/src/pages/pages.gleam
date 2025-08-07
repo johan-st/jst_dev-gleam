@@ -35,6 +35,9 @@ pub type Page {
   // UI Components showcase
   PageUiComponents(session_authenticated: session.SessionAuthenticated)
 
+  // Notifications
+  PageNotifications(session_authenticated: session.SessionAuthenticated)
+
   // Error states  
   PageError(error: PageError)
 
@@ -88,6 +91,10 @@ pub fn to_uri(page: Page) -> Uri {
     }
     PageUiComponents(_) -> {
       let assert Ok(uri) = uri.parse("/ui-components")
+      uri
+    }
+    PageNotifications(_) -> {
+      let assert Ok(uri) = uri.parse("/notifications")
       uri
     }
 
@@ -258,6 +265,16 @@ pub fn from_route(
               PageError(AuthenticationRequired("access UI components"))
             session.Pending ->
               PageError(AuthenticationRequired("access UI components"))
+          }
+        }
+        routes.Notifications -> {
+          case session {
+            session.Authenticated(session_auth) ->
+              PageNotifications(session_auth)
+            session.Unauthenticated ->
+              PageError(AuthenticationRequired("access notifications"))
+            session.Pending ->
+              PageError(AuthenticationRequired("access notifications"))
           }
         }
         routes.NotFound(uri) -> PageNotFound(uri)
