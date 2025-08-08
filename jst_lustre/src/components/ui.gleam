@@ -655,27 +655,39 @@ pub fn card(content: List(Element(msg))) -> Element(msg) {
     ],
     [
       // static corner accents
-      html.span([
-        attr.class(
-          "card-corner pointer-events-none absolute top-0 right-0 w-6 h-6 border-t border-r border-zinc-700 transition-colors duration-25",
-        ),
-      ], []),
-      html.span([
-        attr.class(
-          "card-corner pointer-events-none absolute top-0 left-0 w-6 h-6 border-t border-zinc-700 transition-colors duration-25",
-        ),
-      ], []),
-      html.span([
-        attr.class(
-          "card-corner pointer-events-none absolute bottom-0 right-0 w-6 h-6 border-b border-r border-zinc-700 transition-colors duration-25",
-        ),
-      ], []),
-      html.span([
-        attr.class(
-          "card-corner pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b border-zinc-700 transition-colors duration-25",
-        ),
-      ], []),
-      ..content,
+      html.span(
+        [
+          attr.class(
+            "card-corner pointer-events-none absolute top-0 right-0 w-6 h-6 border-t border-r border-zinc-700 transition-colors duration-25",
+          ),
+        ],
+        [],
+      ),
+      html.span(
+        [
+          attr.class(
+            "card-corner pointer-events-none absolute top-0 left-0 w-6 h-6 border-t border-zinc-700 transition-colors duration-25",
+          ),
+        ],
+        [],
+      ),
+      html.span(
+        [
+          attr.class(
+            "card-corner pointer-events-none absolute bottom-0 right-0 w-6 h-6 border-b border-r border-zinc-700 transition-colors duration-25",
+          ),
+        ],
+        [],
+      ),
+      html.span(
+        [
+          attr.class(
+            "card-corner pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b border-zinc-700 transition-colors duration-25",
+          ),
+        ],
+        [],
+      ),
+      ..content
     ],
   )
 }
@@ -693,26 +705,38 @@ pub fn card_with_title(
     ],
     [
       // static corner accents
-      html.span([
-        attr.class(
-          "card-corner pointer-events-none absolute top-0 right-0 w-6 h-6 border-t border-r border-zinc-700 transition-colors duration-25",
-        ),
-      ], []),
-      html.span([
-        attr.class(
-          "card-corner pointer-events-none absolute top-0 left-0 w-6 h-6 border-t border-zinc-700 transition-colors duration-25",
-        ),
-      ], []),
-      html.span([
-        attr.class(
-          "card-corner pointer-events-none absolute bottom-0 right-0 w-6 h-6 border-b border-r border-zinc-700 transition-colors duration-25",
-        ),
-      ], []),
-      html.span([
-        attr.class(
-          "card-corner pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b border-zinc-700 transition-colors duration-25",
-        ),
-      ], []),
+      html.span(
+        [
+          attr.class(
+            "card-corner pointer-events-none absolute top-0 right-0 w-6 h-6 border-t border-r border-zinc-700 transition-colors duration-25",
+          ),
+        ],
+        [],
+      ),
+      html.span(
+        [
+          attr.class(
+            "card-corner pointer-events-none absolute top-0 left-0 w-6 h-6 border-t border-zinc-700 transition-colors duration-25",
+          ),
+        ],
+        [],
+      ),
+      html.span(
+        [
+          attr.class(
+            "card-corner pointer-events-none absolute bottom-0 right-0 w-6 h-6 border-b border-r border-zinc-700 transition-colors duration-25",
+          ),
+        ],
+        [],
+      ),
+      html.span(
+        [
+          attr.class(
+            "card-corner pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b border-zinc-700 transition-colors duration-25",
+          ),
+        ],
+        [],
+      ),
       html.div([attr.class("mb-2")], [
         html.h3([attr.class("text-lg font-semibold text-zinc-100")], [
           html.text(title),
@@ -785,4 +809,3 @@ pub fn skeleton_card() -> Element(msg) {
     ],
   )
 }
-

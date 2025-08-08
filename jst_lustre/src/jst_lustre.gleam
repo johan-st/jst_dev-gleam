@@ -29,15 +29,15 @@ import utils/error_string
 import utils/http.{type HttpError}
 import utils/icon
 import utils/jot_to_lustre
+import utils/mouse
 import utils/notification.{type NotificationResponse}
 import utils/persist.{type PersistentModel, PersistentModelV0, PersistentModelV1}
 import utils/remote_data.{
-  type RemoteData, Errored, Loaded, NotInitialized, Optimistic, Pending,
-}
+  type RemoteData, Errored, Loaded, NotInitialized, Pending,
+} as rd
 import utils/short_url.{type ShortUrl, type ShortUrlListResponse}
 import utils/user
 import utils/window_events
-import utils/mouse
 
 @external(javascript, "./app.ffi.mjs", "clipboard_copy")
 fn clipboard_copy(text: String) -> Nil
@@ -282,11 +282,10 @@ fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       let #(new_model, effect) = update(model, msg)
       let persistent_model = fn(model: Model) -> PersistentModel {
         PersistentModelV1(articles: case model.articles {
+          Loaded(articles, _, _) -> articles
           NotInitialized -> []
-          Pending -> []
-          Loaded(articles) -> articles
-          Optimistic(_) -> []
-          Errored(_) -> []
+          Pending(_, _) -> []
+          Errored(_, _) -> []
         })
       }
       case msg {
@@ -324,7 +323,11 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                 Model(
                   ..model,
                   debug_use_local_storage: True,
-                  articles: Loaded(articles),
+                  articles: Loaded(
+                    articles,
+                    birl.from_unix(0),
+                    birl.from_unix(0),
+                  ),
                 ),
                 uri,
               )
@@ -550,7 +553,13 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     PersistGotModel(opt:) -> {
       case opt {
         Some(PersistentModelV1(articles)) -> {
-          #(Model(..model, articles: Loaded(articles)), effect.none())
+          #(
+            Model(
+              ..model,
+              articles: Loaded(articles, birl.from_unix(0), birl.from_unix(0)),
+            ),
+            effect.none(),
+          )
         }
         Some(PersistentModelV0) -> {
           #(model, effect.none())
@@ -581,18 +590,22 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               let articles_with_pending_content =
                 list.map(articles, fn(article) {
                   case article.slug == slug {
-                    True -> ArticleV1(..article, content: Pending)
+                    True ->
+                      ArticleV1(..article, content: Pending(None, birl.now()))
                     False -> article
                   }
                 })
               #(
-                Model(..model, articles: Loaded(articles_with_pending_content)),
+                Model(
+                  ..model,
+                  articles: Loaded(
+                    articles_with_pending_content,
+                    birl.now(),
+                    birl.now(),
+                  ),
+                ),
                 article.article_get(ArticleGot(id, _), id, model.base_uri),
               )
-            }
-            Ok(_) -> {
-              echo "article exists. content is pending or loading."
-              #(model, effect.none())
             }
             Error(Nil) -> #(
               model,
@@ -608,16 +621,16 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           }
         }
         Ok(articles), routes.ArticleEdit(id) -> #(
-          Model(..model, articles: Loaded(articles)),
+          Model(..model, articles: model.articles |> rd.to_loaded(articles)),
           article.article_get(ArticleGot(id, _), id, model.base_uri),
         )
 
         Ok(articles), _ -> #(
-          Model(..model, articles: Loaded(articles)),
+          Model(..model, articles: model.articles |> rd.to_loaded(articles)),
           effect.none(),
         )
         Error(err), _ -> #(
-          Model(..model, articles: Errored(err)),
+          Model(..model, articles: model.articles |> rd.to_errored(err)),
           effect.none(),
         )
       }
@@ -628,8 +641,8 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           let assert True = id == article.id
           let updated_articles =
             model.articles
-            |> remote_data.map(
-              with: list.map(_, fn(article_current) {
+            |> rd.map(
+              list.map(_, fn(article_current) {
                 case id == article_current.id {
                   True -> article
                   False -> article_current
@@ -641,10 +654,14 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         Error(err) -> {
           let updated_articles =
             model.articles
-            |> remote_data.map(
-              with: list.map(_, fn(article_current) {
+            |> rd.map(
+              list.map(_, fn(article_current) {
                 case id == article_current.id {
-                  True -> ArticleV1(..article_current, content: Errored(err))
+                  True ->
+                    ArticleV1(
+                      ..article_current,
+                      content: Errored(err, birl.now()),
+                    )
                   False -> article_current
                 }
               }),
@@ -658,10 +675,14 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         NotInitialized -> {
           let updated_articles =
             model.articles
-            |> remote_data.map(
-              with: list.map(_, fn(article_current) {
+            |> rd.map(
+              list.map(_, fn(article_current) {
                 case article.id == article_current.id {
-                  True -> ArticleV1(..article_current, content: Pending)
+                  True ->
+                    ArticleV1(
+                      ..article_current,
+                      content: article.content |> rd.to_pending(None),
+                    )
                   False -> article_current
                 }
               }),
@@ -675,7 +696,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             ),
           )
         }
-        Errored(_) -> #(
+        Errored(_, _) -> #(
           model,
           article.article_get(
             ArticleGot(article.id, _),
@@ -683,7 +704,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             model.base_uri,
           ),
         )
-        Pending | Loaded(_) | Optimistic(_) -> {
+        Pending(_, _) | Loaded(_, _, _) -> {
           #(model, effect.none())
         }
       }
@@ -711,9 +732,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           #(
             Model(
               ..model,
-              articles: remote_data.map(
+              articles: rd.map(
                 model.articles,
-                with: list.map(_, fn(article_current) {
+                list.map(_, fn(article_current) {
                   case article.id == article_current.id {
                     True -> updated_article
                     False -> article_current
@@ -731,9 +752,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       let updated_article =
         article.draft_update(article, fn(draft) { draft.set_title(draft, text) })
       let updated_articles =
-        remote_data.map(
+        rd.map(
           model.articles,
-          with: list.map(_, fn(article_current) {
+          list.map(_, fn(article_current) {
             case article.id == article_current.id {
               True -> updated_article
               False -> article_current
@@ -748,9 +769,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           draft.set_leading(draft, text)
         })
       let updated_articles =
-        remote_data.map(
+        rd.map(
           model.articles,
-          with: list.map(_, fn(article_current) {
+          list.map(_, fn(article_current) {
             case article.id == article_current.id {
               True -> updated_article
               False -> article_current
@@ -765,9 +786,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           draft.set_subtitle(draft, text)
         })
       let updated_articles =
-        remote_data.map(
+        rd.map(
           model.articles,
-          with: list.map(_, fn(article_current) {
+          list.map(_, fn(article_current) {
             case article.id == article_current.id {
               True -> updated_article
               False -> article_current
@@ -784,9 +805,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(
         Model(
           ..model,
-          articles: remote_data.map(
+          articles: rd.map(
             model.articles,
-            with: list.map(_, fn(article_current) {
+            list.map(_, fn(article_current) {
               case article.id == article_current.id {
                 True -> updated_article
                 False -> article_current
@@ -801,7 +822,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ArticleDraftDiscardClicked(article) -> {
       echo "article draft discard clicked"
       let updated_articles =
-        remote_data.map(
+        rd.map(
           model.articles,
           list.map(_, fn(article_current) {
             case article.id == article_current.id {
@@ -831,11 +852,14 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               title: draft.title(current_draft),
               leading: draft.leading(current_draft),
               subtitle: draft.subtitle(current_draft),
-              content: Loaded(draft.content(current_draft)),
+              content: rd.to_loaded(
+                rd.NotInitialized,
+                draft.content(current_draft),
+              ),
               draft: Some(current_draft),
             )
           let updated_articles =
-            remote_data.map(
+            rd.map(
               model.articles,
               list.map(_, fn(article_current) {
                 case article.id == article_current.id {
@@ -868,7 +892,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       case result {
         Ok(saved_article) -> {
           let updated_articles =
-            remote_data.map(
+            rd.map(
               model.articles,
               list.map(_, fn(article_current) {
                 case id == article_current.id {
@@ -897,7 +921,12 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       case session_result {
         Ok(sess) -> {
           let schedule_effect = case session.expiry(sess) {
-            Some(expiry) -> session.schedule_refresh(AuthRefreshTimerFired, model.base_uri, expiry)
+            Some(expiry) ->
+              session.schedule_refresh(
+                AuthRefreshTimerFired,
+                model.base_uri,
+                expiry,
+              )
             None -> effect.none()
           }
           #(
@@ -946,10 +975,18 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       case result {
         Ok(sess) -> {
           let schedule_effect = case session.expiry(sess) {
-            Some(expiry) -> session.schedule_refresh(AuthRefreshTimerFired, model.base_uri, expiry)
+            Some(expiry) ->
+              session.schedule_refresh(
+                AuthRefreshTimerFired,
+                model.base_uri,
+                expiry,
+              )
             None -> effect.none()
           }
-          #(Model(..model, session: sess, notice: "auth check, OK"), schedule_effect)
+          #(
+            Model(..model, session: sess, notice: "auth check, OK"),
+            schedule_effect,
+          )
         }
         Error(err) -> {
           echo "session check response error"
@@ -966,16 +1003,18 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       }
     }
     AuthRefreshTimerFired -> {
-      #(
-        model,
-        session.refresh(AuthRefreshResponse, model.base_uri),
-      )
+      #(model, session.refresh(AuthRefreshResponse, model.base_uri))
     }
     AuthRefreshResponse(result) -> {
       case result {
         Ok(sess) -> {
           let schedule_effect = case session.expiry(sess) {
-            Some(expiry) -> session.schedule_refresh(AuthRefreshTimerFired, model.base_uri, expiry)
+            Some(expiry) ->
+              session.schedule_refresh(
+                AuthRefreshTimerFired,
+                model.base_uri,
+                expiry,
+              )
             None -> effect.none()
           }
           #(Model(..model, session: sess), schedule_effect)
@@ -1017,7 +1056,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           title: "",
           subtitle: "",
           leading: "",
-          content: Loaded(""),
+          content: rd.to_pending(rd.NotInitialized, Some("")),
           draft: None,
         )
       #(
@@ -1035,7 +1074,8 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           echo "article created successfully with id: " <> created_article.id
           // Add the new article to the local state
           let updated_articles = case model.articles {
-            Loaded(articles) -> Loaded([created_article, ..articles])
+            Loaded(articles, _, _) ->
+              Loaded([created_article, ..articles], birl.now(), birl.now())
             other -> other
             // If articles aren't loaded, don't update
           }
@@ -1081,7 +1121,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       case result {
         Ok(_) -> {
           let updated_articles =
-            remote_data.map(
+            rd.map(
               model.articles,
               list.filter(_, fn(article_current) { article_current.id != id }),
             )
@@ -1144,16 +1184,17 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       case result {
         Ok(short_url) -> {
           let updated_short_urls = case model.short_urls {
-            NotInitialized -> Loaded([short_url])
-            Pending -> Loaded([short_url])
-            Loaded(urls) -> Loaded([short_url, ..urls])
-            Optimistic(_) -> Loaded([short_url])
-            Errored(_) -> Loaded([short_url])
+            Pending(Some(urls), _) | Loaded(urls, _, _) ->
+              Loaded([short_url, ..urls], birl.now(), birl.now())
+            _ -> Loaded([short_url], birl.now(), birl.now())
           }
           #(Model(..model, short_urls: updated_short_urls), effect.none())
         }
         Error(err) -> {
-          #(Model(..model, short_urls: Errored(err)), effect.none())
+          #(
+            Model(..model, short_urls: rd.to_errored(model.short_urls, err)),
+            effect.none(),
+          )
         }
       }
     }
@@ -1161,12 +1202,18 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       case result {
         Ok(response) -> {
           #(
-            Model(..model, short_urls: Loaded(response.short_urls)),
+            Model(
+              ..model,
+              short_urls: model.short_urls |> rd.to_loaded(response.short_urls),
+            ),
             effect.none(),
           )
         }
         Error(err) -> {
-          #(Model(..model, short_urls: Errored(err)), effect.none())
+          #(
+            Model(..model, short_urls: rd.to_errored(model.short_urls, err)),
+            effect.none(),
+          )
         }
       }
     }
@@ -1190,11 +1237,13 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       case result {
         Ok(_) -> {
           let updated_short_urls = case model.short_urls {
-            NotInitialized -> NotInitialized
-            Pending -> Pending
-            Loaded(urls) -> Loaded(list.filter(urls, fn(url) { url.id != id }))
-            Optimistic(_) -> NotInitialized
-            Errored(_) -> NotInitialized
+            Pending(Some(urls), _) | Loaded(urls, _, _) ->
+              Loaded(
+                list.filter(urls, fn(url) { url.id != id }),
+                birl.now(),
+                birl.now(),
+              )
+            _ -> Loaded([], birl.now(), birl.now())
           }
           #(
             Model(..model, short_urls: updated_short_urls),
@@ -1206,6 +1255,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           )
         }
         Error(_) -> #(model, effect.none())
+        // TODO: Handle error
       }
     }
 
@@ -1245,9 +1295,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       case result {
         Ok(updated_url) -> {
           let updated_short_urls = case model.short_urls {
-            NotInitialized -> NotInitialized
-            Pending -> Pending
-            Loaded(urls) ->
+            Pending(Some(urls), _) | Loaded(urls, _, _) ->
               Loaded(
                 list.map(urls, fn(url) {
                   case url.id == id {
@@ -1255,14 +1303,18 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                     False -> url
                   }
                 }),
+                birl.now(),
+                birl.now(),
               )
-            Optimistic(_) -> NotInitialized
-            Errored(_) -> NotInitialized
+            _ -> Loaded([], birl.now(), birl.now())
           }
           #(Model(..model, short_urls: updated_short_urls), effect.none())
         }
         Error(err) -> {
-          #(Model(..model, short_urls: Errored(err)), effect.none())
+          #(
+            Model(..model, short_urls: rd.to_errored(model.short_urls, err)),
+            effect.none(),
+          )
         }
       }
     }
@@ -1357,14 +1409,14 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         Ok(user_full) -> #(
           Model(
             ..model,
-            profile_user: Loaded(user_full),
+            profile_user: model.profile_user |> rd.to_loaded(user_full),
             profile_form_username: user_full.username,
             profile_form_email: user_full.email,
           ),
           effect.none(),
         )
         Error(err) -> #(
-          Model(..model, profile_user: Errored(err)),
+          Model(..model, profile_user: model.profile_user |> rd.to_errored(err)),
           effect.none(),
         )
       }
@@ -1415,17 +1467,17 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             profile_saving: False,
             profile_form_new_password: "",
             profile_form_confirm_password: "",
-            profile_user: case model.profile_user {
-              Loaded(user_full) ->
-                Loaded(user.UserFull(
-                  id: updated.id,
-                  revision: updated.revision,
-                  username: updated.username,
-                  email: updated.email,
-                  permissions: user_full.permissions,
-                ))
-              other -> other
-            },
+            profile_user: model.profile_user
+              |> rd.to_loaded(user.UserFull(
+                id: updated.id,
+                revision: updated.revision,
+                username: updated.username,
+                email: updated.email,
+                permissions: model.profile_user
+                  |> rd.data
+                  |> option.map(fn(user) { user.permissions })
+                  |> option.unwrap([]),
+              )),
             notice: "Profile updated",
           ),
           effect.none(),
@@ -1504,11 +1556,8 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         False -> {
           let persistent_model = {
             PersistentModelV1(articles: case model.articles {
-              NotInitialized -> []
-              Pending -> []
-              Loaded(articles) -> articles
-              Optimistic(_) -> []
-              Errored(_) -> []
+              Loaded(articles, _, _) -> articles
+              _ -> []
             })
           }
           persist.localstorage_set(
@@ -1530,7 +1579,7 @@ fn fetch_articles_model(model_effect_touple) -> #(Model, Effect(Msg)) {
   echo "fetch_articles_model called"
   let #(model, effect) = model_effect_touple
 
-  let model = Model(..model, articles: remote_data.Pending)
+  let model = Model(..model, articles: model.articles |> rd.to_pending(None))
   let effect =
     effect.batch([
       effect,
@@ -1547,10 +1596,14 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
     routes.Article(slug) -> {
       case model.articles {
         NotInitialized -> #(
-          Model(..model, route:, articles: Pending),
+          Model(
+            ..model,
+            route:,
+            articles: model.articles |> rd.to_pending(None),
+          ),
           article.article_metadata_get(ArticleMetaGot, model.base_uri),
         )
-        Loaded(articles) -> {
+        Loaded(articles, _, _) -> {
           let #(effect, articles_updated) =
             list.map_fold(
               over: articles,
@@ -1566,13 +1619,23 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
                         model.base_uri,
                       ),
                     ]),
-                    ArticleV1(..art, content: Pending),
+                    ArticleV1(
+                      ..art,
+                      content: art.content |> rd.to_pending(None),
+                    ),
                   )
                   _, _ -> #(eff, art)
                 }
               },
             )
-          #(Model(..model, route:, articles: Loaded(articles_updated)), effect)
+          #(
+            Model(
+              ..model,
+              route:,
+              articles: model.articles |> rd.to_loaded(articles_updated),
+            ),
+            effect,
+          )
         }
         _ -> #(Model(..model, route:), effect.none())
       }
@@ -1580,10 +1643,14 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
     routes.ArticleEdit(id) ->
       case model.articles {
         NotInitialized -> #(
-          Model(..model, route:, articles: Pending),
+          Model(
+            ..model,
+            route:,
+            articles: model.articles |> rd.to_pending(None),
+          ),
           article.article_metadata_get(ArticleMetaGot, model.base_uri),
         )
-        Loaded(articles) -> {
+        Loaded(articles, _, _) -> {
           let #(effect, articles_updated) =
             list.map_fold(
               over: articles,
@@ -1606,7 +1673,7 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
                     ArticleV1(
                       ..art,
                       draft: article.to_draft(art),
-                      content: Pending,
+                      content: art.content |> rd.to_pending(None),
                     ),
                   )
                   _, _ -> #(eff, art)
@@ -1614,14 +1681,25 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
               },
             )
           echo routes.to_string(route)
-          #(Model(..model, route:, articles: Loaded(articles_updated)), effect)
+          #(
+            Model(
+              ..model,
+              route:,
+              articles: model.articles |> rd.to_loaded(articles_updated),
+            ),
+            effect,
+          )
         }
         _ -> #(Model(..model, route:), effect.none())
       }
     routes.Articles -> {
       case model.articles {
         NotInitialized -> #(
-          Model(..model, route:, articles: Pending),
+          Model(
+            ..model,
+            route:,
+            articles: model.articles |> rd.to_pending(None),
+          ),
           article.article_metadata_get(ArticleMetaGot, model.base_uri),
         )
         _ -> #(Model(..model, route:), effect.none())
@@ -1631,7 +1709,11 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
     routes.UrlShortIndex -> {
       case model.short_urls {
         NotInitialized -> #(
-          Model(..model, route:, short_urls: Pending),
+          Model(
+            ..model,
+            route:,
+            short_urls: model.short_urls |> rd.to_pending(None),
+          ),
           short_url.list_short_urls(ShortUrlListGot, model.base_uri, 10, 0),
         )
         _ -> #(Model(..model, route:), effect.none())
@@ -1644,7 +1726,11 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
     routes.Profile -> {
       case session.subject(model.session) {
         Some(subject) -> #(
-          Model(..model, route:, profile_user: Pending),
+          Model(
+            ..model,
+            route:,
+            profile_user: model.profile_user |> rd.to_pending(None),
+          ),
           user.user_get(ProfileMeGot, model.base_uri, subject),
         )
         None -> #(Model(..model, route:), effect.none())
@@ -1932,9 +2018,17 @@ fn view_profile(model: Model) -> List(Element(Msg)) {
     )
   let content = case model.profile_user {
     NotInitialized -> [ui.loading_state("Loading profile", None, ui.ColorTeal)]
-    Optimistic(_) -> [ui.loading_state("Loading profile", None, ui.ColorTeal)]
-    Pending -> [ui.loading_state("Loading profile", None, ui.ColorTeal)]
-    Errored(_err) -> [
+    Pending(Some(user), _) -> [
+      ui.loading_state(
+        "Loading profile (could have been optimistic)",
+        None,
+        ui.ColorTeal,
+      ),
+    ]
+    Pending(None, _) -> [
+      ui.loading_state("Loading profile...", None, ui.ColorTeal),
+    ]
+    Errored(_, _) -> [
       ui.error_state(
         ui.ErrorGeneric,
         "Failed to load profile",
@@ -1942,7 +2036,7 @@ fn view_profile(model: Model) -> List(Element(Msg)) {
         Some(UserNavigatedTo(routes.to_uri(routes.Profile))),
       ),
     ]
-    Loaded(_user_full) -> [
+    Loaded(_user_full, _, _) -> [
       ui.card([
         html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
           html.text("Profile Information"),
@@ -2065,23 +2159,23 @@ fn page_from_model(model: Model) -> pages.Page {
     routes.Index -> pages.PageIndex
     routes.Articles -> {
       case model.articles {
-        Pending -> pages.PageArticleListLoading
+        Pending(_, _) -> pages.PageArticleListLoading
         NotInitialized ->
           pages.PageError(pages.Other("articles not initialized"))
-        Errored(error) ->
+        Errored(error, _) ->
           pages.PageError(pages.HttpError(error, "Failed to load article list"))
-        Loaded(articles_list) | Optimistic(articles_list) ->
+        Loaded(articles_list, _, _) ->
           pages.PageArticleList(articles_list, model.session)
       }
     }
     routes.Article(slug) -> {
       case model.articles {
-        Pending -> pages.PageArticleListLoading
+        Pending(_, _) -> pages.PageArticleListLoading
         NotInitialized ->
           pages.PageError(pages.Other("articles not initialized"))
-        Errored(error) ->
+        Errored(error, _) ->
           pages.PageError(pages.HttpError(error, "Failed to load articles"))
-        Loaded(articles_list) | Optimistic(articles_list) -> {
+        Loaded(articles_list, _, _) -> {
           case list.find(articles_list, fn(art) { art.slug == slug }) {
             Ok(article) -> pages.PageArticle(article, model.session)
             Error(_) ->
@@ -2095,15 +2189,15 @@ fn page_from_model(model: Model) -> pages.Page {
     }
     routes.ArticleEdit(id) -> {
       case model.articles {
-        Pending -> pages.PageArticleListLoading
+        Pending(_, _) -> pages.PageArticleListLoading
         NotInitialized ->
           pages.PageError(pages.Other("articles not initialized"))
-        Errored(error) ->
+        Errored(error, _) ->
           pages.PageError(pages.HttpError(
             error,
             "Failed to load articles for editing",
           ))
-        Loaded(articles_list) | Optimistic(articles_list) -> {
+        Loaded(articles_list, _, _) -> {
           case list.find(articles_list, fn(art) { art.id == id }) {
             Ok(article) -> {
               case article.can_edit(article, model.session), article.draft {
@@ -2627,20 +2721,28 @@ fn view_article_listing(
                 ),
                 attr.href(uri.to_string(article_uri)),
                 event.on_mouse_enter(ArticleHovered(article)),
-                mouse.on_mouse_down_no_right(UserMouseDownNavigation(article_uri)),
+                mouse.on_mouse_down_no_right(UserMouseDownNavigation(
+                  article_uri,
+                )),
               ],
               [
                 // static corner accents on the left side
-                html.span([
-                  attr.class(
-                    "card-corner pointer-events-none absolute top-0 left-0 w-6 h-6 border-t border-zinc-700 transition-colors duration-25",
-                  ),
-                ], []),
-                html.span([
-                  attr.class(
-                    "card-corner pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b border-zinc-700 transition-colors duration-25",
-                  ),
-                ], []),
+                html.span(
+                  [
+                    attr.class(
+                      "card-corner pointer-events-none absolute top-0 left-0 w-6 h-6 border-t border-zinc-700 transition-colors duration-25",
+                    ),
+                  ],
+                  [],
+                ),
+                html.span(
+                  [
+                    attr.class(
+                      "card-corner pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b border-zinc-700 transition-colors duration-25",
+                    ),
+                  ],
+                  [],
+                ),
                 html.div([attr.class("flex justify-between gap-4")], [
                   html.div([attr.class("flex flex-col")], [
                     html.h3(
@@ -2725,7 +2827,7 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
           published_at: article.published_at,
           tags: article.tags,
           title: draft.title(draft),
-          content: Loaded(preview_content),
+          content: article.content |> rd.to_loaded(preview_content),
           draft: None,
           id: article.id,
           leading: draft.leading(draft),
@@ -3052,13 +3154,12 @@ fn view_article(
 ) -> List(Element(Msg)) {
   let content: List(Element(Msg)) = case article.content {
     NotInitialized -> [view_error("content not initialized")]
-    Pending -> [
+    Pending(_, _) -> [
       ui.loading_bar(ui.ColorTeal),
       ui.loading("Loading article...", ui.ColorNeutral),
     ]
-    Loaded(content_string) | Optimistic(content_string) ->
-      jot_to_lustre.to_lustre(content_string)
-    Errored(error) -> [view_error(error_string.http_error(error))]
+    Loaded(content_string, _, _) -> jot_to_lustre.to_lustre(content_string)
+    Errored(error, _) -> [view_error(error_string.http_error(error))]
   }
   [
     html.article([attr.class("with-transition")], [
@@ -3089,21 +3190,15 @@ fn view_article_not_found(
   slug: String,
 ) -> List(Element(Msg)) {
   case available_articles {
-    Loaded(_articles) -> [
+    Loaded(_articles, _, _) -> [
       view_title("Article not found", slug),
       view_simple_paragraph("The article you are looking for does not exist."),
     ]
-    Optimistic(_articles) -> [
-      view_title("Article not found", slug),
-      view_simple_paragraph(
-        "The article you are looking for might not exist yet. Please check back later.",
-      ),
-    ]
-    Errored(error) -> [
+    Errored(error, _) -> [
       view_title("There was an error loading the article", slug),
       view_simple_paragraph(error_string.http_error(error)),
     ]
-    Pending -> [
+    Pending(_, _) -> [
       view_title("Loading article", slug),
       view_simple_paragraph("Loading article..."),
     ]
@@ -3198,7 +3293,7 @@ fn view_url_list(model: Model) -> Element(Msg) {
           ui.loading("Loading URLs...", ui.ColorNeutral),
         ],
       )
-    Pending ->
+    Pending(_, _) ->
       html.div(
         [attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")],
         [
@@ -3208,7 +3303,7 @@ fn view_url_list(model: Model) -> Element(Msg) {
           ui.loading("Loading URLs...", ui.ColorNeutral),
         ],
       )
-    Loaded(short_urls) -> {
+    Loaded(short_urls, _, _) -> {
       case short_urls {
         [] ->
           html.div(
@@ -3262,7 +3357,7 @@ fn view_url_list(model: Model) -> Element(Msg) {
         }
       }
     }
-    Errored(error) ->
+    Errored(error, _) ->
       html.div(
         [attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")],
         [
@@ -3277,16 +3372,6 @@ fn view_url_list(model: Model) -> Element(Msg) {
               html.text(error_string.http_error(error)),
             ]),
           ]),
-        ],
-      )
-    Optimistic(_) ->
-      html.div(
-        [attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")],
-        [
-          html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
-            html.text("URLs"),
-          ]),
-          ui.loading("Loading URLs...", ui.ColorNeutral),
         ],
       )
   }
@@ -3466,7 +3551,7 @@ fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
             attr.class(
               "flex items-center space-x-2 ml-4 cursor-pointer hover:text-zinc-300 transition-colors",
             ),
-             mouse.on_mouse_down_no_right(ShortUrlToggleExpanded(url.id)),
+            mouse.on_mouse_down_no_right(ShortUrlToggleExpanded(url.id)),
           ],
           [html.div([attr.class("text-zinc-500 text-sm")], [html.text("▲")])],
         ),
@@ -3484,7 +3569,7 @@ fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
                 "text-zinc-300 break-all bg-zinc-900 rounded px-3 py-2 text-sm cursor-pointer hover:bg-zinc-850 transition-colors",
               ),
               attr.title(url.target_url <> " (click to collapse)"),
-             mouse.on_mouse_down_no_right(ShortUrlToggleExpanded(url.id)),
+              mouse.on_mouse_down_no_right(ShortUrlToggleExpanded(url.id)),
             ],
             [html.text(url.target_url)],
           ),
@@ -3626,7 +3711,7 @@ fn view_delete_confirmation(
 
 fn view_url_info_page(model: Model, short_code: String) -> List(Element(Msg)) {
   case model.short_urls {
-    Loaded(urls) -> {
+    Loaded(urls, _, _) -> {
       case list.find(urls, fn(url) { url.short_code == short_code }) {
         Ok(url) -> [
           view_title("URL Info", "url-info"),

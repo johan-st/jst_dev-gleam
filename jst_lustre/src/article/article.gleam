@@ -5,12 +5,13 @@ import gleam/http as gleam_http
 import gleam/http/request
 import gleam/json
 import gleam/option.{type Option, None, Some}
-import gleam/order
+
+// import gleam/order
 import gleam/uri.{type Uri}
 import lustre/effect.{type Effect}
-import session.{type Session, Authenticated, Unauthenticated}
+import session.{type Session, Authenticated}
 import utils/http.{type HttpError}
-import utils/remote_data.{type RemoteData, Loaded, NotInitialized}
+import utils/remote_data.{type RemoteData} as rd
 
 pub type Article {
   ArticleV1(
@@ -94,10 +95,13 @@ pub fn to_draft(article: Article) -> Option(Draft) {
       title:,
       subtitle:,
       leading:,
-      content: remote_data.Loaded(content_loaded),
+      content:,
       draft: _,
-    ) -> draft.new(slug, title, subtitle, leading, content_loaded) |> Some
-    _ -> None
+    ) ->
+      rd.data(content)
+      |> option.unwrap("")
+      |> draft.new(slug, title, subtitle, leading)
+      |> Some
   }
 }
 
@@ -194,15 +198,15 @@ fn add_base_uri(req, base_uri: Uri) {
     _ -> req |> request.set_scheme(gleam_http.Https)
   }
 
-  let req = case base_uri.host {
-    Some(host) -> req |> request.set_host(host)
-    None -> req
-  }
+  let req =
+    base_uri.host
+    |> option.map(request.set_host(req, _))
+    |> option.unwrap(req)
 
-  let req = case base_uri.port {
-    Some(port) -> req |> request.set_port(port)
-    None -> req
-  }
+  let req =
+    base_uri.port
+    |> option.map(request.set_port(req, _))
+    |> option.unwrap(req)
 
   req
 }
@@ -243,8 +247,8 @@ pub fn article_decoder() -> decode.Decoder(Article) {
   use content_string <- decode.optional_field("content", "", decode.string)
 
   let content = case content_string {
-    "" -> NotInitialized
-    _ -> Loaded(content_string)
+    "" -> rd.NotInitialized
+    content_string -> rd.to_loaded(rd.NotInitialized, content_string)
   }
 
   decode.success(ArticleV1(
@@ -279,14 +283,17 @@ pub fn article_encoder(article: Article) -> json.Json {
       content:,
       draft: _,
     ) -> {
-      let content_string = case content {
-        Loaded(content) -> json.string(content)
-        _ -> json.string("")
-      }
-      let published_at_timestamp = case published_at {
-        Some(time) -> json.int(birl.to_unix_milli(time))
-        None -> json.int(0)
-      }
+      let content_string =
+        rd.data(content)
+        |> option.unwrap("")
+        |> json.string
+
+      let published_at_timestamp =
+        published_at
+        |> option.map(birl.to_unix_milli)
+        |> option.unwrap(0)
+        |> json.int
+
       json.object([
         #("struct_version", json.int(1)),
         #("id", json.string(id)),
@@ -340,7 +347,7 @@ pub fn loading_article() -> Article {
     title: "fetching articles..",
     subtitle: "articles have not been fetched yet",
     leading: "This is a placeholder article. At the moment, the articles are being fetched from the server.. please wait.",
-    content: NotInitialized,
+    content: rd.Pending(None, birl.now()),
     draft: None,
   )
 }

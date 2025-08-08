@@ -1,6 +1,7 @@
 // In test/yourapp_test.gleam
 import article/article.{ArticleV1}
 
+import birl
 import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/option.{None}
@@ -31,7 +32,7 @@ pub fn model_encoder_and_decoder_test() {
         leading: "leading",
         title: "test",
         subtitle: "subtitle",
-        content: Loaded("# test\n\ntest"),
+        content: Loaded("# test\n\ntest", birl.from_unix(0), birl.from_unix(0)),
         author: "author",
         published_at: None,
         tags: [],
@@ -44,7 +45,7 @@ pub fn model_encoder_and_decoder_test() {
         leading: "leading",
         title: "test2",
         subtitle: "subtitle",
-        content: Errored(NotFound),
+        content: Errored(NotFound, birl.from_unix(0)),
         author: "author",
         published_at: None,
         tags: [],
@@ -57,7 +58,7 @@ pub fn model_encoder_and_decoder_test() {
         leading: "leading",
         title: "test3",
         subtitle: "subtitle",
-        content: Pending,
+        content: Pending(None, birl.from_unix(0)),
         author: "author",
         published_at: None,
         tags: [],
@@ -130,7 +131,7 @@ pub fn model_encoder_and_decoder_test() {
               subtitle |> should.equal("subtitle")
               draft |> should.equal(None)
               case content {
-                Loaded(loaded_content) -> {
+                Loaded(loaded_content, _, _) -> {
                   loaded_content
                   |> should.equal("# test\n\ntest")
                 }

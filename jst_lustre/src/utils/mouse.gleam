@@ -1,5 +1,5 @@
-import gleam/dynamic/decode as dec
 import gleam/dynamic as dyn
+import gleam/dynamic/decode as dec
 import gleam/result
 import lustre/attribute.{type Attribute}
 import lustre/event
@@ -18,4 +18,3 @@ pub fn on_mouse_down_no_right(msg: msg) -> Attribute(msg) {
   dec.run(ev, decoder)
   |> result.map_error(fn(_errs) { [] })
 }
-

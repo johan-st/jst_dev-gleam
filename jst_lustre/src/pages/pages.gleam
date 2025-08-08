@@ -5,7 +5,7 @@ import gleam/uri.{type Uri}
 import routes.{type Route}
 import session.{type Session}
 import utils/http.{type HttpError}
-import utils/remote_data.{type RemoteData}
+import utils/remote_data as rd
 
 // Improved Page type with better state management
 pub type Page {
@@ -145,7 +145,7 @@ pub fn from_route(
   loading: Bool,
   route: Route,
   session: Session,
-  articles: RemoteData(List(Article), HttpError),
+  articles: rd.RemoteData(List(Article), HttpError),
 ) -> Page {
   case loading {
     True -> Loading(route)
@@ -154,12 +154,11 @@ pub fn from_route(
         routes.Index -> PageIndex
         routes.Articles -> {
           case articles {
-            remote_data.Pending -> PageArticleListLoading
-            remote_data.NotInitialized -> PageArticleListLoading
-            remote_data.Errored(error) ->
+            rd.Pending(_, _) -> PageArticleListLoading
+            rd.NotInitialized -> PageArticleListLoading
+            rd.Errored(error, _) ->
               PageError(HttpError(error, "Failed to load article list"))
-            remote_data.Loaded(articles_list)
-            | remote_data.Optimistic(articles_list) -> {
+            rd.Loaded(articles_list, _, _) -> {
               let allowed_articles =
                 articles_list
                 |> list.filter(article.can_view(_, session))
@@ -169,13 +168,11 @@ pub fn from_route(
         }
         routes.Article(slug) -> {
           case articles {
-            remote_data.Pending -> PageArticleListLoading
-            remote_data.NotInitialized ->
-              PageError(Other("articles not initialized"))
-            remote_data.Errored(error) ->
+            rd.Pending(_, _) -> PageArticleListLoading
+            rd.NotInitialized -> PageError(Other("articles not initialized"))
+            rd.Errored(error, _) ->
               PageError(HttpError(error, "Failed to load articles"))
-            remote_data.Loaded(articles_list)
-            | remote_data.Optimistic(articles_list) -> {
+            rd.Loaded(articles_list, _, _) -> {
               let allowed_articles =
                 articles_list
                 |> list.filter(article.can_view(_, session))
@@ -192,13 +189,11 @@ pub fn from_route(
         }
         routes.ArticleEdit(id) -> {
           case articles {
-            remote_data.Pending -> PageArticleListLoading
-            remote_data.NotInitialized ->
-              PageError(Other("articles not initialized"))
-            remote_data.Errored(error) ->
+            rd.Pending(_, _) -> PageArticleListLoading
+            rd.NotInitialized -> PageError(Other("articles not initialized"))
+            rd.Errored(error, _) ->
               PageError(HttpError(error, "Failed to load articles for editing"))
-            remote_data.Loaded(articles_list)
-            | remote_data.Optimistic(articles_list) -> {
+            rd.Loaded(articles_list, _, _) -> {
               let allowed_articles =
                 articles_list
                 |> list.filter(article.can_view(_, session))
