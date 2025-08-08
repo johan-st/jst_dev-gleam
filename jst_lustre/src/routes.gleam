@@ -1,4 +1,5 @@
 import gleam/uri.{type Uri}
+import gleam/list
 
 pub type Route {
   Index
@@ -23,8 +24,22 @@ pub type Route {
   NotFound(uri: Uri)
 }
 
+fn drop_trailing_empty(segs: List(String)) -> List(String) {
+  case segs {
+    [] -> []
+    [""] -> []
+    _ -> {
+      let rev = list.reverse(segs)
+      case rev {
+        [last, ..rest] if last == "" -> list.reverse(rest)
+        _ -> segs
+      }
+    }
+  }
+}
+
 pub fn from_uri(uri: Uri) -> Route {
-  case uri.path_segments(uri.path) {
+  case uri.path_segments(uri.path) |> drop_trailing_empty {
     [] | [""] -> Index
     ["articles"] -> Articles
     ["article", slug] -> Article(slug)
@@ -46,8 +61,8 @@ pub fn to_string(route: Route) -> String {
     Articles -> "/articles"
     Article(slug) -> "/article/" <> slug
     ArticleEdit(id) -> "/article/" <> id <> "/edit"
-    DjotDemo -> "/djot-demo/"
-    UrlShortIndex -> "/url/"
+    DjotDemo -> "/djot-demo"
+    UrlShortIndex -> "/url"
     UrlShortInfo(short) -> "/url/" <> short
     UiComponents -> "/ui-components"
     Notifications -> "/notifications"

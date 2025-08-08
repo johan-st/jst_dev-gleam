@@ -1,3 +1,4 @@
+import gleam/io
 import lustre/effect
 import plinth/browser/document
 import plinth/browser/window
@@ -8,7 +9,10 @@ pub fn setup(window_unfocused: msg) -> effect.Effect(msg) {
       case document.visibility_state() {
         "hidden" -> dispatch(window_unfocused)
         "visible" -> Nil
-        other -> todo as other
+        vis -> {
+          io.println("unhandled window visibility: " <> vis)
+          Nil
+        }
       }
     })
 

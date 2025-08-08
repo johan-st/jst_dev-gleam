@@ -21,7 +21,7 @@ export function localstorage_set(key, value) {
  */
 export function localstorage_get(key) {
     const value = localStorage.getItem(key)
-    if (!value) {
+    if (value === null) {
         return new Error(undefined)
     }
     return new Ok(value)
@@ -36,7 +36,11 @@ export function localstorage_get(key) {
  * @throws {SyntaxError} If {@link value} is not valid JSON.
  */
 export function string_to_dynamic(value) {
-    return JSON.parse(value)
+    try {
+        return JSON.parse(value)
+    } catch (_e) {
+        return undefined
+    }
 }
 
 /**
@@ -45,11 +49,26 @@ export function string_to_dynamic(value) {
  * @param {string} text - The text to copy to clipboard.
  */
 export function clipboard_copy(text) {
-    navigator.clipboard.writeText(text).then(() => {
-        // Successfully copied - Lustre will handle the feedback
-    }).catch(err => {
-        console.error('Failed to copy to clipboard:', err);
-    });
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(err => {
+            console.error('Failed to copy to clipboard:', err);
+        });
+        return;
+    }
+    // Fallback for non-secure contexts or unsupported clipboard API
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try {
+        document.execCommand('copy');
+    } finally {
+        document.body.removeChild(ta);
+    }
 }
 
 /**

@@ -37,7 +37,7 @@ pub fn decoder() -> Decoder(PersistentModel) {
       )
       decode.success(PersistentModelV1(articles: articles))
     }
-    _ -> decode.failure(PersistentModelV0, "Unsupported model version")
+    _ -> decode.success(PersistentModelV0)
   }
 }
 

@@ -55,7 +55,10 @@ pub fn main() {
 
 fn init(_) -> #(Model, Effect(Msg)) {
   // if this failes we have no app to run..
-  let assert Ok(uri) = modem.initial_uri()
+  let uri = case modem.initial_uri() {
+    Ok(u) -> u
+    Error(_) -> routes.to_uri(routes.Index)
+  }
 
   let local_storage_effect =
     persist.localstorage_get(
@@ -374,16 +377,17 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             }
             keyboard.CtrlS -> {
               case model.route {
-                routes.ArticleEdit(id) -> {
-                  todo as "Save article"
+                routes.ArticleEdit(_) -> {
+                  // Not implemented yet; avoid crashing on keypress
+                  #(model, effect.none())
                 }
                 _ -> #(model, effect.none())
               }
             }
             keyboard.CtrlE -> {
               case model.route {
-                routes.ArticleEdit(id) -> {
-                  todo as "Edit article"
+                routes.ArticleEdit(_) -> {
+                  #(model, effect.none())
                 }
                 _ -> #(model, effect.none())
               }
@@ -391,7 +395,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             keyboard.CtrlN -> {
               case model.session {
                 session.Authenticated(_) -> {
-                  todo as "New article"
+                  #(model, effect.none())
                 }
                 _ -> #(model, effect.none())
               }
@@ -399,7 +403,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             keyboard.CtrlSpace -> {
               case model.route {
                 routes.ArticleEdit(_) -> {
-                  todo as "Toggle edit view mode"
+                  #(model, effect.none())
                 }
                 _ -> #(model, effect.none())
               }
