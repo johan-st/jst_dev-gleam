@@ -619,7 +619,7 @@ pub fn gradient_text(text: String) -> Element(msg) {
 }
 
 pub fn glass_panel(content: List(Element(msg))) -> Element(msg) {
-  html.div([attr.class("glass p-6")], content)
+  html.div([attr.class("glass px-4 py-6")], content)
 }
 
 /// Status badge component for displaying state (active/inactive, etc.)
@@ -646,7 +646,37 @@ pub fn status_badge(text: String, variant: Color) -> Element(msg) {
 
 /// Card component with consistent styling
 pub fn card(content: List(Element(msg))) -> Element(msg) {
-  html.div([attr.class("bg-zinc-800 border border-zinc-700 p-4")], content)
+  html.div(
+    [
+      attr.class(
+        "article-card relative block border-l border-zinc-700 px-4 py-6 my-4 hover:border-pink-700 transition-colors duration-25",
+      ),
+    ],
+    [
+      // static corner accents
+      html.span([
+        attr.class(
+          "card-corner pointer-events-none absolute top-0 right-0 w-6 h-6 border-t border-r border-zinc-700 transition-colors duration-25",
+        ),
+      ], []),
+      html.span([
+        attr.class(
+          "card-corner pointer-events-none absolute top-0 left-0 w-6 h-6 border-t border-zinc-700 transition-colors duration-25",
+        ),
+      ], []),
+      html.span([
+        attr.class(
+          "card-corner pointer-events-none absolute bottom-0 right-0 w-6 h-6 border-b border-r border-zinc-700 transition-colors duration-25",
+        ),
+      ], []),
+      html.span([
+        attr.class(
+          "card-corner pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b border-zinc-700 transition-colors duration-25",
+        ),
+      ], []),
+      ..content,
+    ],
+  )
 }
 
 /// Card with custom title
@@ -654,14 +684,42 @@ pub fn card_with_title(
   title: String,
   content: List(Element(msg)),
 ) -> Element(msg) {
-  html.div([attr.class("bg-zinc-800 border border-zinc-700")], [
-    html.div([attr.class("p-6 border-b border-zinc-700/50")], [
-      html.h3([attr.class("text-lg font-semibold text-zinc-100")], [
-        html.text(title),
+  html.div(
+    [
+      attr.class(
+        "article-card relative block border-l border-zinc-700 px-4 py-6 my-4 hover:border-pink-700 transition-colors duration-25",
+      ),
+    ],
+    [
+      // static corner accents
+      html.span([
+        attr.class(
+          "card-corner pointer-events-none absolute top-0 right-0 w-6 h-6 border-t border-r border-zinc-700 transition-colors duration-25",
+        ),
+      ], []),
+      html.span([
+        attr.class(
+          "card-corner pointer-events-none absolute top-0 left-0 w-6 h-6 border-t border-zinc-700 transition-colors duration-25",
+        ),
+      ], []),
+      html.span([
+        attr.class(
+          "card-corner pointer-events-none absolute bottom-0 right-0 w-6 h-6 border-b border-r border-zinc-700 transition-colors duration-25",
+        ),
+      ], []),
+      html.span([
+        attr.class(
+          "card-corner pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b border-zinc-700 transition-colors duration-25",
+        ),
+      ], []),
+      html.div([attr.class("mb-2")], [
+        html.h3([attr.class("text-lg font-semibold text-zinc-100")], [
+          html.text(title),
+        ]),
       ]),
-    ]),
-    html.div([attr.class("p-6")], content),
-  ])
+      html.div([], content),
+    ],
+  )
 }
 
 /// Notice/toast component for inline notifications
@@ -726,3 +784,4 @@ pub fn skeleton_card() -> Element(msg) {
     ],
   )
 }
+

@@ -192,14 +192,20 @@
     background-clip: text;
   }
   
-  /* Article card hover effects */
-  .article-card:hover .article-title {
-    color: rgb(244 114 182);
-  }
-  
+  /* Article card hover effects (meta only, keep title color stable) */
   .article-card:hover .article-meta {
     color: rgb(212 212 216);
   }
+
+  /* Provide vertical spacing between cards (match py-6 = 1.5rem top/bottom) */
+  .article-card { margin-top: 1.5rem; margin-bottom: 1.5rem; }
+
+  /* Corner spans transition with the same timing as left border */
+  .card-corner { transition: border-color 150ms ease; }
+
+  /* Change corner borders to accent on hover */
+  .article-card:hover > .card-corner { border-color: rgb(190 24 93); }
+
   
   /* Gradient text utility */
   .gradient-text {

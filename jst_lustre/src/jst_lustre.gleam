@@ -2244,13 +2244,24 @@ fn view_article_listing(
             html.a(
               [
                 attr.class(
-                  "group block border-l border-zinc-700 pl-4 hover:border-pink-700 transition-colors duration-25",
+                  "relative article-card block border-l border-zinc-700 pl-4 hover:border-pink-700 transition-colors duration-25",
                 ),
                 attr.href(uri.to_string(article_uri)),
                 event.on_mouse_enter(ArticleHovered(article)),
                 event.on_mouse_down(UserMouseDownNavigation(article_uri)),
               ],
               [
+                // static corner accents on the left side
+                html.span([
+                  attr.class(
+                    "card-corner pointer-events-none absolute top-0 left-0 w-6 h-6 border-t border-zinc-700 transition-colors duration-25",
+                  ),
+                ], []),
+                html.span([
+                  attr.class(
+                    "card-corner pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b border-zinc-700 transition-colors duration-25",
+                  ),
+                ], []),
                 html.div([attr.class("flex justify-between gap-4")], [
                   html.div([attr.class("flex flex-col")], [
                     html.h3(
@@ -3959,10 +3970,7 @@ fn view_ui_components() -> List(Element(Msg)) {
     ),
     // Loading States Section
     html.section([attr.class("space-y-6")], [
-      html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
-        html.text("Loading States"),
-      ]),
-      ui.card([
+      ui.card_with_title("Loading States", [
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
           html.text("Loading Indicators"),
         ]),
@@ -4007,10 +4015,7 @@ fn view_ui_components() -> List(Element(Msg)) {
     ]),
     // Buttons Section
     html.section([attr.class("space-y-6")], [
-      html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
-        html.text("Buttons"),
-      ]),
-      ui.card([
+      ui.card_with_title("Buttons", [
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
           html.text("Button Variants"),
         ]),
@@ -4218,10 +4223,7 @@ fn view_ui_components() -> List(Element(Msg)) {
     ]),
     // Form Components Section
     html.section([attr.class("space-y-6")], [
-      html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
-        html.text("Form Components"),
-      ]),
-      ui.card([
+      ui.card_with_title("Form Components", [
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
           html.text("Input Fields"),
         ]),
@@ -4258,10 +4260,7 @@ fn view_ui_components() -> List(Element(Msg)) {
     ]),
     // Status & Feedback Section
     html.section([attr.class("space-y-6")], [
-      html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
-        html.text("Status & Feedback"),
-      ]),
-      ui.card([
+      ui.card_with_title("Status & Feedback", [
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
           html.text("Status Badges"),
         ]),
@@ -4313,10 +4312,7 @@ fn view_ui_components() -> List(Element(Msg)) {
     ]),
     // Error States Section
     html.section([attr.class("space-y-6")], [
-      html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
-        html.text("Error States"),
-      ]),
-      ui.card([
+      ui.card_with_title("Error States", [
         html.div([attr.class("space-y-8")], [
           ui.error_state(
             ui.ErrorNetwork,
@@ -4347,10 +4343,7 @@ fn view_ui_components() -> List(Element(Msg)) {
     ]),
     // Modal Section
     html.section([attr.class("space-y-6")], [
-      html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
-        html.text("Modals"),
-      ]),
-      ui.card([
+      ui.card_with_title("Modals", [
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
           html.text("Modal Example"),
         ]),
@@ -4369,14 +4362,11 @@ fn view_ui_components() -> List(Element(Msg)) {
     ]),
     // Layout Components Section  
     html.section([attr.class("space-y-6")], [
-      html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
-        html.text("Layout Components"),
-      ]),
-      ui.card([
+      ui.card_with_title("Layout Components", [
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
           html.text("Cards"),
         ]),
-        html.div([attr.class("space-y-6")], [
+        html.div([attr.class("space-y-0")], [
           ui.card_with_title("Card with Title", [
             html.p([attr.class("text-zinc-300")], [
               html.text("This is a card with a title section."),
@@ -4408,10 +4398,7 @@ fn view_ui_components() -> List(Element(Msg)) {
     ]),
     // Skeleton Loaders Section
     html.section([attr.class("space-y-6")], [
-      html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
-        html.text("Skeleton Loaders"),
-      ]),
-      ui.card([
+      ui.card_with_title("Skeleton Loaders", [
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
           html.text("Loading Placeholders"),
         ]),
@@ -4433,10 +4420,7 @@ fn view_ui_components() -> List(Element(Msg)) {
     ]),
     // Page Headers Section
     html.section([attr.class("space-y-6")], [
-      html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
-        html.text("Page Headers"),
-      ]),
-      ui.card([
+      ui.card_with_title("Page Headers", [
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
           html.text("Page Header with Subtitle"),
         ]),
@@ -4452,10 +4436,7 @@ fn view_ui_components() -> List(Element(Msg)) {
     ]),
     // Typography & Links Section
     html.section([attr.class("space-y-6")], [
-      html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
-        html.text("Typography & Links"),
-      ]),
-      ui.card([
+      ui.card_with_title("Typography & Links", [
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
           html.text("Text Styles"),
         ]),
@@ -4474,10 +4455,7 @@ fn view_ui_components() -> List(Element(Msg)) {
     ]),
     // Layout Helpers Section
     html.section([attr.class("space-y-6")], [
-      html.h2([attr.class("text-2xl font-light text-zinc-200 mb-6")], [
-        html.text("Layout Helpers"),
-      ]),
-      ui.card([
+      ui.card_with_title("Layout Helpers", [
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
           html.text("Flex Between Layout"),
         ]),
