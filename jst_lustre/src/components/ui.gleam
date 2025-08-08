@@ -94,7 +94,7 @@ pub fn page_header(title: String, subtitle: Option(String)) -> Element(msg) {
     html.h1(
       [
         attr.class(
-          "page-title text-3xl sm:text-4xl md:text-5xl font-light leading-tight mb-4",
+          "bg-gradient-to-tr from-pink-800 via-pink-700 to-pink-500 bg-clip-text text-transparent text-3xl sm:text-4xl md:text-5xl font-light leading-tight mb-4",
         ),
       ],
       [html.text(title)],
@@ -113,7 +113,7 @@ pub fn page_title(title: String) -> Element(msg) {
   html.h1(
     [
       attr.class(
-        "page-title text-3xl sm:text-4xl md:text-5xl font-light leading-tight mb-4",
+        "bg-gradient-to-tr from-pink-800 via-pink-700 to-pink-500 bg-clip-text text-transparent text-3xl sm:text-4xl md:text-5xl font-light leading-tight mb-4",
       ),
     ],
     [html.text(title)],
@@ -413,9 +413,9 @@ pub fn form_input_with_focus(
         [
           attr.class(case error {
             Some(_) ->
-              "form-input w-full bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 pl-4 pr-4 py-4 sm:py-3 text-zinc-100 placeholder-zinc-500 transition-all duration-300 ease-out outline-none border-l-red-500 focus:border-l-red-400 focus:bg-red-500/5"
+              "w-full bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 pl-4 pr-4 py-4 sm:py-3 text-zinc-100 placeholder-zinc-500 transition-all duration-300 ease-out outline-none border-l-red-500 focus:border-l-red-400 focus:bg-red-500/5 focus:ring-2 focus:ring-red-400/30"
             None ->
-              "form-input w-full bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 pl-4 pr-4 py-4 sm:py-3 text-zinc-100 placeholder-zinc-500 transition-all duration-300 ease-out outline-none border-l-teal-600 focus:border-l-teal-400 focus:bg-teal-500/5"
+              "w-full bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 pl-4 pr-4 py-4 sm:py-3 text-zinc-100 placeholder-zinc-500 transition-all duration-300 ease-out outline-none border-l-teal-600 focus:border-l-teal-400 focus:bg-teal-500/5 focus:ring-2 focus:ring-teal-400/30"
           }),
           attr.type_(input_type),
           attr.value(value),
@@ -467,11 +467,11 @@ pub fn form_textarea(
           Some(_) ->
             "w-full "
             <> height_class
-            <> " bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 p-4 sm:p-3 text-zinc-100 placeholder-zinc-500 resize-none transition-all duration-300 ease-out outline-none border-l-red-500 focus:border-l-red-400 focus:bg-red-500/5"
+            <> " bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 p-4 sm:p-3 text-zinc-100 placeholder-zinc-500 resize-none transition-all duration-300 ease-out outline-none border-l-red-500 focus:border-l-red-400 focus:bg-red-500/5 focus:ring-2 focus:ring-red-400/30"
           None ->
             "w-full "
             <> height_class
-            <> " bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 p-4 sm:p-3 text-zinc-100 placeholder-zinc-500 resize-none transition-all duration-300 ease-out outline-none border-l-teal-600 focus:border-l-teal-400 focus:bg-teal-500/5"
+            <> " bg-zinc-800 border-l-2 border-r border-t border-b border-zinc-600 p-4 sm:p-3 text-zinc-100 placeholder-zinc-500 resize-none transition-all duration-300 ease-out outline-none border-l-teal-600 focus:border-l-teal-400 focus:bg-teal-500/5 focus:ring-2 focus:ring-teal-400/30"
         }),
         attr.value(value),
         attr.placeholder(placeholder),
@@ -498,7 +498,7 @@ pub fn form_textarea(
 
 pub fn modal_backdrop(onclose: msg) -> Element(msg) {
   html.div(
-    [attr.class("modal-backdrop fixed inset-0 z-40"), event.on_click(onclose)],
+    [attr.class("fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"), event.on_click(onclose)],
     [],
   )
 }
@@ -512,14 +512,14 @@ pub fn modal(
   html.div(
     [
       attr.class(
-        "modal-content fixed inset-0 z-50 flex items-center justify-center p-4",
+        "fixed inset-0 z-50 flex items-center justify-center p-4",
       ),
     ],
     [
       html.div(
         [
           attr.class(
-            "glass border-l-2 border-teal-600 border-r border-r-zinc-700 border-t border-t-zinc-700 border-b border-b-zinc-700 max-w-md w-full mx-4 overflow-hidden",
+            "bg-zinc-800/80 backdrop-blur-md border-l-2 border-teal-600 border-r border-r-zinc-700 border-t border-t-zinc-700 border-b border-b-zinc-700 max-w-md w-full mx-4 overflow-hidden",
           ),
         ],
         [
@@ -615,12 +615,8 @@ pub fn flex_between(left: Element(msg), right: Element(msg)) -> Element(msg) {
 
 // MODERN UTILITIES -----------------------------------------------------------
 
-pub fn gradient_text(text: String) -> Element(msg) {
-  html.span([attr.class("gradient-text")], [html.text(text)])
-}
-
 pub fn glass_panel(content: List(Element(msg))) -> Element(msg) {
-  html.div([attr.class("glass px-4 py-6")], content)
+  html.div([attr.class("bg-zinc-800/80 backdrop-blur-md px-4 py-6 border border-white/10")], content)
 }
 
 /// Status badge component for displaying state (active/inactive, etc.)
@@ -650,7 +646,7 @@ pub fn card(content: List(Element(msg))) -> Element(msg) {
   html.div(
     [
       attr.class(
-        "article-card relative block border-l border-zinc-700 px-4 py-6 my-4 hover:border-pink-700 transition-colors duration-25",
+        "group relative block border-l border-zinc-700 px-4 py-6 my-4 hover:border-pink-700 transition-colors duration-150",
       ),
     ],
     [
@@ -658,7 +654,7 @@ pub fn card(content: List(Element(msg))) -> Element(msg) {
       html.span(
         [
           attr.class(
-            "card-corner pointer-events-none absolute top-0 right-0 w-6 h-6 border-t border-r border-zinc-700 transition-colors duration-25",
+            "pointer-events-none absolute top-0 right-0 w-6 h-6 border-t border-r border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
           ),
         ],
         [],
@@ -666,7 +662,7 @@ pub fn card(content: List(Element(msg))) -> Element(msg) {
       html.span(
         [
           attr.class(
-            "card-corner pointer-events-none absolute top-0 left-0 w-6 h-6 border-t border-zinc-700 transition-colors duration-25",
+            "pointer-events-none absolute top-0 left-0 w-6 h-6 border-t border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
           ),
         ],
         [],
@@ -674,7 +670,7 @@ pub fn card(content: List(Element(msg))) -> Element(msg) {
       html.span(
         [
           attr.class(
-            "card-corner pointer-events-none absolute bottom-0 right-0 w-6 h-6 border-b border-r border-zinc-700 transition-colors duration-25",
+            "pointer-events-none absolute bottom-0 right-0 w-6 h-6 border-b border-r border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
           ),
         ],
         [],
@@ -682,7 +678,7 @@ pub fn card(content: List(Element(msg))) -> Element(msg) {
       html.span(
         [
           attr.class(
-            "card-corner pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b border-zinc-700 transition-colors duration-25",
+            "pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
           ),
         ],
         [],
@@ -700,7 +696,7 @@ pub fn card_with_title(
   html.div(
     [
       attr.class(
-        "article-card relative block border-l border-zinc-700 px-4 py-6 my-4 hover:border-pink-700 transition-colors duration-25",
+        "group relative block border-l border-zinc-700 px-4 py-6 my-4 hover:border-pink-700 transition-colors duration-150",
       ),
     ],
     [
@@ -708,7 +704,7 @@ pub fn card_with_title(
       html.span(
         [
           attr.class(
-            "card-corner pointer-events-none absolute top-0 right-0 w-6 h-6 border-t border-r border-zinc-700 transition-colors duration-25",
+            "pointer-events-none absolute top-0 right-0 w-6 h-6 border-t border-r border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
           ),
         ],
         [],
@@ -716,7 +712,7 @@ pub fn card_with_title(
       html.span(
         [
           attr.class(
-            "card-corner pointer-events-none absolute top-0 left-0 w-6 h-6 border-t border-zinc-700 transition-colors duration-25",
+            "pointer-events-none absolute top-0 left-0 w-6 h-6 border-t border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
           ),
         ],
         [],
@@ -724,7 +720,7 @@ pub fn card_with_title(
       html.span(
         [
           attr.class(
-            "card-corner pointer-events-none absolute bottom-0 right-0 w-6 h-6 border-b border-r border-zinc-700 transition-colors duration-25",
+            "pointer-events-none absolute bottom-0 right-0 w-6 h-6 border-b border-r border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
           ),
         ],
         [],
@@ -732,7 +728,7 @@ pub fn card_with_title(
       html.span(
         [
           attr.class(
-            "card-corner pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b border-zinc-700 transition-colors duration-25",
+            "pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
           ),
         ],
         [],

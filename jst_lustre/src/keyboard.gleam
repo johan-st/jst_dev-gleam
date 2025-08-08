@@ -3,57 +3,88 @@ import plinth/browser/event
 import plinth/browser/window
 
 pub type Key {
-  Captured(CapturedKey)
-  Unhandled(String, String)
+  Captured(captured_key: CapturedKey)
+  Unhandled(code: String, key: String)
 }
 
 pub type CapturedKey {
   Escape
+  Space
   Enter
-
+  Shift
   Ctrl
-  CtrlS
-  CtrlE
-  CtrlN
-  CtrlSpace
-
   Alt
-  Alt1
-  Alt2
-  Alt3
-  Alt4
-  Alt5
-  Alt6
-  Alt7
-  AltL
+
+  Digit1
+  Digit2
+  Digit3
+  Digit4
+  Digit5
+  Digit6
+  Digit7
+  Digit8
+  Digit9
+  Digit0
+
+  E
+  L
+  N
+  S
 }
 
-pub fn parse_key(code: String, key: String, ctrl: Bool, alt: Bool) -> Key {
-  case code, key, ctrl, alt {
-    "Escape", _, False, False -> Captured(Escape)
-    "Enter", _, False, False -> Captured(Enter)
+pub fn to_string(key: CapturedKey) -> String {
+  case key {
+    Escape -> "Escape"
+    Space -> "Space"
+    Enter -> "Enter"
+    Shift -> "Shift"
+    Ctrl -> "Ctrl"
+    Alt -> "Alt"
 
-    _, "Control", _, _ -> Captured(Ctrl)
-    _, "Alt", _, _ -> Captured(Alt)
+    Digit1 -> "1"
+    Digit2 -> "2"
+    Digit3 -> "3"
+    Digit4 -> "4"
+    Digit5 -> "5"
+    Digit6 -> "6"
+    Digit7 -> "7"
+    Digit8 -> "8"
+    Digit9 -> "9"
+    Digit0 -> "0"
 
-    _, "s", True, False -> Captured(CtrlS)
-    _, "e", True, False -> Captured(CtrlE)
-    _, "n", True, False -> Captured(CtrlN)
-    _, " ", True, False -> Captured(CtrlSpace)
+    S -> "S"
+    E -> "E"
+    N -> "N"
+    L -> "L"
+  }
+}
 
-    // Alt + number combinations
-    "Digit1", _, False, True -> Captured(Alt1)
-    "Digit2", _, False, True -> Captured(Alt2)
-    "Digit3", _, False, True -> Captured(Alt3)
-    "Digit4", _, False, True -> Captured(Alt4)
-    "Digit5", _, False, True -> Captured(Alt5)
-    "Digit6", _, False, True -> Captured(Alt6)
-    "Digit7", _, False, True -> Captured(Alt7)
+pub fn parse_key(code: String, key: String) -> Key {
+  case code, key {
+    "Escape", _ -> Captured(Escape)
+    "Space", _ -> Captured(Space)
+    "Enter", _ -> Captured(Enter)
+    _, "Shift" -> Captured(Shift)
+    _, "Control" -> Captured(Ctrl)
+    _, "Alt" -> Captured(Alt)
 
-    // Alt + letter combinations
-    "KeyL", _, False, True -> Captured(AltL)
+    "Digit1", _ -> Captured(Digit1)
+    "Digit2", _ -> Captured(Digit2)
+    "Digit3", _ -> Captured(Digit3)
+    "Digit4", _ -> Captured(Digit4)
+    "Digit5", _ -> Captured(Digit5)
+    "Digit6", _ -> Captured(Digit6)
+    "Digit7", _ -> Captured(Digit7)
+    "Digit8", _ -> Captured(Digit8)
+    "Digit9", _ -> Captured(Digit9)
+    "Digit0", _ -> Captured(Digit0)
 
-    _, _, _, _ -> Unhandled(code, key)
+    "KeyS", _ -> Captured(S)
+    "KeyE", _ -> Captured(E)
+    "KeyN", _ -> Captured(N)
+    "KeyL", _ -> Captured(L)
+
+    _, _ -> Unhandled(code, key)
   }
 }
 
@@ -63,13 +94,11 @@ pub fn setup(down: fn(Key) -> msg, up: fn(Key) -> msg) -> Effect(msg) {
       window.add_event_listener("keydown", fn(event) {
         let code = event.code(event)
         let key = event.key(event)
-        let ctrl = event.ctrl_key(event)
-        let alt = event.alt_key(event)
 
-        case parse_key(code, key, ctrl, alt) {
-          Captured(shortcut) -> {
-            event.prevent_default(event)
-            dispatch(down(Captured(shortcut)))
+        case parse_key(code, key) {
+          Captured(captured_key) -> {
+            // event.prevent_default(event)
+            dispatch(down(Captured(captured_key)))
           }
           Unhandled(code, key) -> {
             dispatch(down(Unhandled(code, key)))
@@ -82,49 +111,11 @@ pub fn setup(down: fn(Key) -> msg, up: fn(Key) -> msg) -> Effect(msg) {
       window.add_event_listener("keyup", fn(event) {
         let code = event.code(event)
         let key = event.key(event)
-        let ctrl = event.ctrl_key(event)
-        let shift = event.shift_key(event)
 
-        // For keyup events, we need to be more flexible with key matching
-        // to handle cases where the key property might differ between down/up
-        let parsed_key = case code, key, ctrl, shift {
-          // Escape key (no modifiers)
-          "Escape", _, False, False -> Captured(Escape)
-          "Enter", _, False, False -> Captured(Enter)
-
-          // Modifier keys - use the key property for these
-          _, "Control", _, _ -> Captured(Ctrl)
-          _, "Alt", _, _ -> Captured(Alt)
-
-          // Ctrl combinations - handle both upper and lower case
-          _, "s", True, False -> Captured(CtrlS)
-          _, "S", True, False -> Captured(CtrlS)
-          _, "e", True, False -> Captured(CtrlE)
-          _, "E", True, False -> Captured(CtrlE)
-          _, "n", True, False -> Captured(CtrlN)
-          _, "N", True, False -> Captured(CtrlN)
-          _, " ", True, False -> Captured(CtrlSpace)
-
-          // Alt + number combinations
-          "Digit1", _, False, True -> Captured(Alt1)
-          "Digit2", _, False, True -> Captured(Alt2)
-          "Digit3", _, False, True -> Captured(Alt3)
-          "Digit4", _, False, True -> Captured(Alt4)
-          "Digit5", _, False, True -> Captured(Alt5)
-          "Digit6", _, False, True -> Captured(Alt6)
-          "Digit7", _, False, True -> Captured(Alt7)
-
-          // Alt + letter combinations
-          "KeyL", _, False, True -> Captured(AltL)
-
-          // Not in our whitelist - use code for consistency
-          _, _, _, _ -> Unhandled(code, key)
-        }
-
-        case parsed_key {
-          Captured(shortcut) -> {
-            event.prevent_default(event)
-            dispatch(up(Captured(shortcut)))
+        case parse_key(code, key) {
+          Captured(captured_key) -> {
+            // event.prevent_default(event)
+            dispatch(up(Captured(captured_key)))
           }
           Unhandled(code, key) -> {
             dispatch(up(Unhandled(code, key)))

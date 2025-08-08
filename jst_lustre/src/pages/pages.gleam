@@ -45,7 +45,10 @@ pub type Page {
   // Static pages
   PageAbout
   PageNotFound(requested_uri: Uri)
-  PageDjotDemo(content: String)
+  PageDjotDemo(
+    session_authenticated: session.SessionAuthenticated,
+    content: String,
+  )
 }
 
 // Consolidated error types
@@ -131,7 +134,7 @@ pub fn to_uri(page: Page) -> Uri {
       let assert Ok(uri) = uri.parse("/about")
       uri
     }
-    PageDjotDemo(content) -> {
+    PageDjotDemo(_session_authenticated, content) -> {
       let assert Ok(uri) = uri.parse("/djot-demo/" <> content)
       uri
     }
@@ -236,7 +239,15 @@ pub fn from_route(
           }
         }
         routes.About -> PageAbout
-        routes.DjotDemo -> PageDjotDemo("")
+        routes.DjotDemo ->
+          case session {
+            session.Authenticated(session_auth) ->
+              PageDjotDemo(session_auth, "")
+            session.Unauthenticated ->
+              PageError(AuthenticationRequired("access DJOT demo"))
+            session.Pending ->
+              PageError(AuthenticationRequired("access DJOT demo"))
+          }
         routes.UrlShortIndex -> {
           case session {
             session.Authenticated(session_auth) ->

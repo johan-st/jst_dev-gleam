@@ -13,7 +13,7 @@ import gleam/string
 import gleam/uri.{type Uri}
 
 import helpers
-import keyboard
+import keyboard as key
 import lustre
 import lustre/attribute.{type Attribute} as attr
 import lustre/effect.{type Effect}
@@ -45,98 +45,6 @@ fn clipboard_copy(text: String) -> Nil
 @external(javascript, "./app.ffi.mjs", "set_timeout")
 fn set_timeout(callback: fn() -> Nil, delay: Int) -> Nil
 
-// MAIN ------------------------------------------------------------------------
-
-pub fn main() {
-  // let app = lustre.application(init, update, view)
-  let app = lustre.application(init, update_with_localstorage, view)
-  let assert Ok(_) = lustre.start(app, "#app", Nil)
-
-  Nil
-}
-
-fn init(_) -> #(Model, Effect(Msg)) {
-  // if this failes we have no app to run..
-  let uri = case modem.initial_uri() {
-    Ok(u) -> u
-    Error(_) -> routes.to_uri(routes.Index)
-  }
-
-  let local_storage_effect =
-    persist.localstorage_get(
-      persist.model_localstorage_key,
-      persist.decoder(),
-      GotLocalModelResult,
-    )
-
-  let model =
-    Model(
-      route: routes.from_uri(uri),
-      session: session.Unauthenticated,
-      articles: NotInitialized,
-      short_urls: NotInitialized,
-      short_url_form_short_code: "",
-      short_url_form_target_url: "",
-      base_uri: uri,
-      djot_demo_content: initial_djot,
-      edit_view_mode: EditViewModeEdit,
-      profile_menu_open: False,
-      notice: "",
-      debug_use_local_storage: True,
-      delete_confirmation: None,
-      copy_feedback: None,
-      expanded_urls: set.new(),
-      login_form_open: False,
-      login_username: "",
-      login_password: "",
-      login_loading: False,
-      key_shortcuts_active: set.new(),
-      // Notification form fields
-      notification_form_title: "",
-      notification_form_message: "",
-      notification_form_category: "",
-      notification_form_priority: "normal",
-      notification_form_ntfy_topic: "",
-      notification_form_data: [],
-      notification_sending: False,
-      // profile state
-      profile_user: NotInitialized,
-      profile_form_username: "",
-      profile_form_email: "",
-      profile_form_new_password: "",
-      profile_form_confirm_password: "",
-      profile_form_old_password: "",
-      profile_saving: False,
-      password_saving: False,
-    )
-  let effect_modem =
-    modem.init(fn(uri) {
-      uri
-      |> UserNavigatedTo
-    })
-
-  // let #(model_nav, effect_nav) = update_navigation(model, uri)
-
-  // Set up global keyboard listener
-
-  #(
-    model,
-    effect.batch([
-      effect_modem,
-      local_storage_effect,
-      // effect_nav,
-      session.auth_check(AuthCheckResponse, model.base_uri),
-      keyboard.setup(KeyboardDown, KeyboardUp),
-      window_events.setup(WindowUnfocused),
-    ]),
-  )
-}
-
-// pub fn flags_get(msg) -> Effect(Msg) {
-//   let url = "http://127.0.0.1:1234/priv/static/flags.json"
-//   http.get(url, http.expect_json(article_decoder(), msg))
-// }
-
 // MODEL -----------------------------------------------------------------------
 
 type Model {
@@ -160,7 +68,8 @@ type Model {
     login_username: String,
     login_password: String,
     login_loading: Bool,
-    key_shortcuts_active: Set(keyboard.Key),
+    // Keyboard
+    keys_down: Set(key.Key),
     // Notification form fields
     notification_form_title: String,
     notification_form_message: String,
@@ -244,8 +153,8 @@ pub type Msg {
   LoginFormSubmitted
 
   // Keyboard events
-  KeyboardDown(keyboard.Key)
-  KeyboardUp(keyboard.Key)
+  KeyboardDown(key.Key)
+  KeyboardUp(key.Key)
 
   // Other events
   WindowUnfocused
@@ -398,151 +307,18 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     // Keyboard events
     KeyboardDown(key) -> {
-      let model =
-        Model(
-          ..model,
-          key_shortcuts_active: set.insert(model.key_shortcuts_active, key),
-        )
-      case key {
-        keyboard.Captured(shortcut) -> {
-          case shortcut {
-            keyboard.Alt -> {
-              #(model, effect.none())
-            }
-            keyboard.Ctrl -> {
-              #(model, effect.none())
-            }
-            keyboard.CtrlS -> {
-              case model.route {
-                routes.ArticleEdit(_) -> {
-                  // Not implemented yet; avoid crashing on keypress
-                  #(model, effect.none())
-                }
-                _ -> #(model, effect.none())
-              }
-            }
-            keyboard.CtrlE -> {
-              case model.route {
-                routes.ArticleEdit(_) -> {
-                  #(model, effect.none())
-                }
-                _ -> #(model, effect.none())
-              }
-            }
-            keyboard.CtrlN -> {
-              case model.session {
-                session.Authenticated(_) -> {
-                  #(model, effect.none())
-                }
-                _ -> #(model, effect.none())
-              }
-            }
-            keyboard.CtrlSpace -> {
-              case model.route {
-                routes.ArticleEdit(_) -> {
-                  #(model, effect.none())
-                }
-                _ -> #(model, effect.none())
-              }
-            }
-            keyboard.Escape -> {
-              #(
-                Model(..model, profile_menu_open: False, login_form_open: False),
-                effect.none(),
-              )
-            }
-            keyboard.Enter -> {
-              case model.login_form_open {
-                True -> {
-                  case model.login_username, model.login_password {
-                    "", _ | _, "" -> #(model, effect.none())
-                    // Don't submit with empty fields
-                    username, password -> {
-                      #(
-                        Model(
-                          ..model,
-                          login_loading: True,
-                          session: session.Pending,
-                        ),
-                        session.login(
-                          AuthLoginResponse,
-                          username,
-                          password,
-                          model.base_uri,
-                        ),
-                      )
-                    }
-                  }
-                }
-                False -> #(model, effect.none())
-              }
-            }
-            keyboard.Alt1 -> {
-              #(model, modem.push(routes.to_string(routes.Index), None, None))
-            }
-            keyboard.Alt2 -> {
-              #(
-                model,
-                modem.push(routes.to_string(routes.Articles), None, None),
-              )
-            }
-            keyboard.Alt3 -> {
-              #(model, modem.push(routes.to_string(routes.About), None, None))
-            }
-            keyboard.Alt4 -> {
-              #(
-                model,
-                modem.push(routes.to_string(routes.DjotDemo), None, None),
-              )
-            }
-            keyboard.Alt5 -> {
-              #(
-                model,
-                modem.push(routes.to_string(routes.UrlShortIndex), None, None),
-              )
-            }
-            keyboard.Alt6 -> {
-              #(
-                model,
-                modem.push(routes.to_string(routes.UiComponents), None, None),
-              )
-            }
-            keyboard.Alt7 -> {
-              #(
-                model,
-                modem.push(routes.to_string(routes.Notifications), None, None),
-              )
-            }
-            keyboard.AltL -> {
-              case model.session {
-                session.Authenticated(_) -> #(model, effect.none())
-                session.Unauthenticated -> {
-                  #(
-                    Model(..model, login_form_open: True),
-                    dom_utils.focus_and_select_element("login-username-input"),
-                  )
-                }
-                session.Pending -> #(model, effect.none())
-              }
-            }
-          }
-        }
-        keyboard.Unhandled(_, _) -> #(model, effect.none())
-      }
+      let model = Model(..model, keys_down: set.insert(model.keys_down, key))
+      #(model, effect.none())
     }
 
     KeyboardUp(key) -> {
-      let model =
-        Model(
-          ..model,
-          key_shortcuts_active: set.delete(model.key_shortcuts_active, key),
-        )
+      let model = Model(..model, keys_down: set.delete(model.keys_down, key))
       #(model, effect.none())
     }
 
     // Other events
     WindowUnfocused -> {
-      #(Model(..model, key_shortcuts_active: set.new()), effect.none())
+      #(Model(..model, keys_down: set.new()), effect.none())
     }
 
     // Messages
@@ -1770,20 +1546,20 @@ fn view(model: Model) -> Element(Msg) {
     pages.PageAbout -> view_about()
     pages.PageUrlShortIndex(_) -> view_url_index(model)
     pages.PageUrlShortInfo(short, _) -> view_url_info_page(model, short)
-    pages.PageDjotDemo(content) -> view_djot_demo(content)
+    pages.PageDjotDemo(_, content) -> view_djot_demo(content)
     pages.PageUiComponents(_) -> view_ui_components()
     pages.PageNotifications(_) -> view_notifications(model)
     pages.PageProfile(_) -> view_profile(model)
     pages.PageNotFound(uri) -> view_not_found(uri)
   }
   let nav_hints_overlay = case
-    set.contains(model.key_shortcuts_active, keyboard.Captured(keyboard.Alt))
+    set.contains(model.keys_down, key.Captured(key.Alt))
   {
     True -> view_nav_hints(model.session)
     False -> element.none()
   }
   let layout = case page {
-    pages.PageDjotDemo(_) | pages.PageArticleEdit(_, _) -> {
+    pages.PageDjotDemo(_, _) | pages.PageArticleEdit(_, _) -> {
       fn(content) {
         html.div(
           [
@@ -1835,7 +1611,7 @@ fn view(model: Model) -> Element(Msg) {
   html.div([], [
     nav_hints_overlay,
     layout(content),
-    view_status_bar(model.key_shortcuts_active, model.session),
+    view_status_bar(model.keys_down, model.session),
   ])
 }
 
@@ -1932,10 +1708,7 @@ fn view_nav_hints(session: session.Session) -> Element(Msg) {
   ])
 }
 
-fn view_status_bar(
-  keys: Set(keyboard.Key),
-  session: session.Session,
-) -> Element(Msg) {
+fn view_status_bar(keys: Set(key.Key), session: session.Session) -> Element(Msg) {
   case session {
     session.Authenticated(_) -> {
       let key_list = set.to_list(keys)
@@ -1952,14 +1725,10 @@ fn view_status_bar(
                 html.span([], [html.text("Ctrl")]),
                 html.div(
                   [
-                    attr.class(
-                      case
-                        set.contains(keys, keyboard.Captured(keyboard.Ctrl))
-                      {
-                        True -> "w-3 h-3 bg-green-500 rounded-full"
-                        False -> "w-3 h-3 bg-gray-500 rounded-full"
-                      },
-                    ),
+                    attr.class(case set.contains(keys, key.Captured(key.Ctrl)) {
+                      True -> "w-3 h-3 bg-green-500 rounded-full"
+                      False -> "w-3 h-3 bg-gray-500 rounded-full"
+                    }),
                   ],
                   [],
                 ),
@@ -1967,35 +1736,17 @@ fn view_status_bar(
               html.span([], [html.text("Alt")]),
               html.div(
                 [
-                  attr.class(
-                    case set.contains(keys, keyboard.Captured(keyboard.Alt)) {
-                      True -> "w-3 h-3 bg-green-500 rounded-full"
-                      False -> "w-3 h-3 bg-gray-500 rounded-full"
-                    },
-                  ),
+                  attr.class(case set.contains(keys, key.Captured(key.Alt)) {
+                    True -> "w-3 h-3 bg-green-500 rounded-full"
+                    False -> "w-3 h-3 bg-gray-500 rounded-full"
+                  }),
                 ],
                 [],
               ),
               ..list.map(key_list, fn(key) {
                 let text = case key {
-                  keyboard.Captured(keyboard.Alt) -> ""
-                  keyboard.Captured(keyboard.Alt1) -> "Alt+1"
-                  keyboard.Captured(keyboard.Alt2) -> "Alt+2"
-                  keyboard.Captured(keyboard.Alt3) -> "Alt+3"
-                  keyboard.Captured(keyboard.Alt4) -> "Alt+4"
-                  keyboard.Captured(keyboard.Alt5) -> "Alt+5"
-                  keyboard.Captured(keyboard.Alt6) -> "Alt+6"
-                  keyboard.Captured(keyboard.Alt7) -> "Alt+7"
-                  keyboard.Captured(keyboard.AltL) -> "Alt+L"
-                  keyboard.Captured(keyboard.Ctrl) -> ""
-                  keyboard.Captured(keyboard.Escape) -> "Esc"
-                  keyboard.Captured(keyboard.Enter) -> "Enter"
-                  keyboard.Captured(keyboard.CtrlS) -> "Ctrl+S"
-                  keyboard.Captured(keyboard.CtrlE) -> "Ctrl+E"
-                  keyboard.Captured(keyboard.CtrlN) -> "Ctrl+N"
-                  keyboard.Captured(keyboard.CtrlSpace) -> "Ctrl+Space"
-                  keyboard.Unhandled(code, key) ->
-                    "(" <> code <> ": " <> key <> ")"
+                  key.Captured(key) -> key.to_string(key)
+                  key.Unhandled(code, key) -> "(" <> code <> ": " <> key <> ")"
                 }
                 html.span([], [html.text(text)])
               })
@@ -2255,7 +2006,12 @@ fn page_from_model(model: Model) -> pages.Page {
           ))
       }
     }
-    routes.DjotDemo -> pages.PageDjotDemo(model.djot_demo_content)
+    routes.DjotDemo ->
+      case model.session {
+        session.Authenticated(session_auth) ->
+          pages.PageDjotDemo(session_auth, model.djot_demo_content)
+        _ -> pages.PageError(pages.AuthenticationRequired("access DJOT demo"))
+      }
     routes.About -> pages.PageAbout
     routes.UiComponents -> {
       case model.session {
@@ -2404,32 +2160,25 @@ fn view_header(model: Model) -> Element(Msg) {
                     view_header_link(
                       target: routes.UrlShortIndex,
                       current: model.route,
-                      label: "Short Urls",
+                      label: "URLs",
                       attributes: [],
                     ),
                     view_header_link(
                       target: routes.UiComponents,
                       current: model.route,
-                      label: "UI Components",
+                      label: "UI",
                       attributes: [],
                     ),
                     view_header_link(
                       target: routes.Notifications,
                       current: model.route,
-                      label: "Notifications",
+                      label: "ntfy",
                       attributes: [],
                     ),
                   ]
                   _ -> []
                 },
-                [
-                  view_header_link(
-                    target: routes.DjotDemo,
-                    current: model.route,
-                    label: "Djot Demo",
-                    attributes: [],
-                  ),
-                ],
+                [],
               ]),
             ),
             // Hamburger menu for auth actions
@@ -2485,32 +2234,31 @@ fn view_header(model: Model) -> Element(Msg) {
                                 view_header_link(
                                   target: routes.UrlShortIndex,
                                   current: model.route,
-                                  label: "Short urls",
+                                  label: "URLs",
                                   attributes: top_nav_attributes_small,
                                 ),
                                 view_header_link(
                                   target: routes.UiComponents,
                                   current: model.route,
-                                  label: "UI Components",
+                                  label: "UI",
                                   attributes: top_nav_attributes_small,
                                 ),
                                 view_header_link(
                                   target: routes.Notifications,
                                   current: model.route,
-                                  label: "Notifications",
+                                  label: "ntfy",
+                                  attributes: top_nav_attributes_small,
+                                ),
+                                view_header_link(
+                                  target: routes.DjotDemo,
+                                  current: model.route,
+                                  label: "Djot",
                                   attributes: top_nav_attributes_small,
                                 ),
                               ]
                               _ -> []
                             },
-                            [
-                              view_header_link(
-                                target: routes.DjotDemo,
-                                current: model.route,
-                                label: "Djot Demo",
-                                attributes: top_nav_attributes_small,
-                              ),
-                            ],
+                            [],
                           ]),
                         ),
                         case model.session {
@@ -2713,11 +2461,11 @@ fn view_article_listing(
           tags:,
         ) -> {
           let article_uri = routes.Article(slug) |> routes.to_uri
-          html.article([attr.class("mt-6")], [
+          html.article([attr.class("mt-6 group")], [
             html.a(
               [
                 attr.class(
-                  "relative article-card block border-l border-zinc-700 pl-4 hover:border-pink-700 transition-colors duration-25",
+                  "relative group block border-l border-zinc-700 pl-4 hover:border-pink-700 transition-colors duration-150",
                 ),
                 attr.href(uri.to_string(article_uri)),
                 event.on_mouse_enter(ArticleHovered(article)),
@@ -2730,7 +2478,7 @@ fn view_article_listing(
                 html.span(
                   [
                     attr.class(
-                      "card-corner pointer-events-none absolute top-0 left-0 w-6 h-6 border-t border-zinc-700 transition-colors duration-25",
+                      "pointer-events-none absolute top-0 left-0 w-6 h-6 border-t border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
                     ),
                   ],
                   [],
@@ -2738,7 +2486,7 @@ fn view_article_listing(
                 html.span(
                   [
                     attr.class(
-                      "card-corner pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b border-zinc-700 transition-colors duration-25",
+                      "pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
                     ),
                   ],
                   [],
@@ -3162,15 +2910,15 @@ fn view_article(
     Errored(error, _) -> [view_error(error_string.http_error(error))]
   }
   [
-    html.article([attr.class("with-transition")], [
-      html.div([attr.class("flex flex-col justify-between")], [
+    html.article([], [
+      html.div([attr.class("flex flex-col justify-between group")], [
         view_article_actions(article, session),
         html.div([attr.class("flex gap-2 justify-between")], [
           html.div([attr.class("flex flex-col justify-between")], [
             view_title(article.title, article.slug),
             view_subtitle(article.subtitle, article.slug),
           ]),
-          html.div([attr.class("flex flex-col items-end")], [
+          html.div([attr.class("flex flex-col items-end ")], [
             view_publication_status(article),
             view_author(article.author),
           ]),
@@ -3995,7 +3743,7 @@ fn view_title(title: String, slug: String) -> Element(msg) {
     [
       attr.id("article-title-" <> slug),
       attr.class(
-        "page-title text-2xl sm:text-3xl sm:h-10 md:text-4xl md:h-12 text-pink-600 font-bold",
+        "text-2xl sm:text-3xl sm:h-10 md:text-4xl md:h-12 font-bold text-pink-700",
       ),
     ],
     [html.text(title)],
@@ -4905,7 +4653,6 @@ fn view_ui_components() -> List(Element(Msg)) {
           html.text("Text Styles"),
         ]),
         html.div([attr.class("space-y-4")], [
-          ui.gradient_text("Gradient Text Effect"),
           html.p([attr.class("text-zinc-300")], [
             html.text("Regular text with "),
             ui.link_primary(
@@ -5100,5 +4847,92 @@ fn view_notification_form(model: Model) -> Element(Msg) {
         ),
       ]),
     ],
+  )
+}
+
+// MAIN ------------------------------------------------------------------------
+
+pub fn main() {
+  // let app = lustre.application(init, update, view)
+  let app = lustre.application(init, update_with_localstorage, view)
+  let assert Ok(_) = lustre.start(app, "#app", Nil)
+
+  Nil
+}
+
+fn init(_) -> #(Model, Effect(Msg)) {
+  // if this failes we have no app to run..
+  let uri = case modem.initial_uri() {
+    Ok(u) -> u
+    Error(_) -> routes.to_uri(routes.Index)
+  }
+
+  let local_storage_effect =
+    persist.localstorage_get(
+      persist.model_localstorage_key,
+      persist.decoder(),
+      GotLocalModelResult,
+    )
+
+  let model =
+    Model(
+      route: routes.from_uri(uri),
+      session: session.Unauthenticated,
+      articles: NotInitialized,
+      short_urls: NotInitialized,
+      short_url_form_short_code: "",
+      short_url_form_target_url: "",
+      base_uri: uri,
+      djot_demo_content: initial_djot,
+      edit_view_mode: EditViewModeEdit,
+      profile_menu_open: False,
+      notice: "",
+      debug_use_local_storage: True,
+      delete_confirmation: None,
+      copy_feedback: None,
+      expanded_urls: set.new(),
+      login_form_open: False,
+      login_username: "",
+      login_password: "",
+      login_loading: False,
+      keys_down: set.new(),
+      // Notification form fields
+      notification_form_title: "",
+      notification_form_message: "",
+      notification_form_category: "",
+      notification_form_priority: "normal",
+      notification_form_ntfy_topic: "",
+      notification_form_data: [],
+      notification_sending: False,
+      // profile state
+      profile_user: NotInitialized,
+      profile_form_username: "",
+      profile_form_email: "",
+      profile_form_new_password: "",
+      profile_form_confirm_password: "",
+      profile_form_old_password: "",
+      profile_saving: False,
+      password_saving: False,
+    )
+  let effect_modem =
+    modem.init(fn(uri) {
+      uri
+      |> UserNavigatedTo
+    })
+
+  // let #(model_nav, effect_nav) = update_navigation(model, uri)
+
+  // Set up global keyboard listener
+
+  #(
+    model,
+    effect.batch([
+      effect_modem,
+      local_storage_effect,
+      // effect_nav,
+      session.auth_check(AuthCheckResponse, model.base_uri),
+      key.setup(KeyboardDown, KeyboardUp),
+      window_events.setup(WindowUnfocused),
+    ]),
   )
 }
