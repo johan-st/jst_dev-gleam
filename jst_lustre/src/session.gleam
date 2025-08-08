@@ -3,8 +3,10 @@ import gleam/http as gleam_http
 import gleam/http/request
 import gleam/json
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/uri.{type Uri}
+import birl
+import gleam/int
 import lustre/effect.{type Effect}
 import utils/http
 
@@ -73,6 +75,42 @@ pub fn auth_logout(msg, base_uri: Uri) -> Effect(a) {
   |> request.set_header("credentials", "include")
   |> add_base_uri(base_uri)
   |> http.send(http.expect_text(msg))
+}
+
+// Schedule a refresh call at half the remaining lifetime until expiry.
+pub fn schedule_refresh(msg, _base_uri: Uri, expiry_unix_seconds: Int) -> Effect(msg) {
+  let now_seconds = birl.to_unix(birl.now())
+  let remaining_seconds = case expiry_unix_seconds - now_seconds {
+    n if n < 0 -> 0
+    n -> n
+  }
+  let delay_ms = int.max(remaining_seconds * 500, 0) // half in milliseconds
+
+  effect.from(fn(dispatch) {
+    set_timeout(fn() { dispatch(msg) }, delay_ms)
+  })
+}
+
+pub fn refresh(msg, base_uri: Uri) -> Effect(msg) {
+  // POST /api/auth/refresh returns same session shape
+  request.new()
+  |> request.set_method(gleam_http.Post)
+  |> request.set_path("/api/auth/refresh")
+  |> request.set_header("credentials", "include")
+  |> add_base_uri(base_uri)
+  |> http.send(http.expect_json(session_decoder(), msg))
+}
+
+@external(javascript, "./app.ffi.mjs", "set_timeout")
+fn set_timeout(callback: fn() -> Nil, delay: Int) -> Nil
+
+// Accessors -------------------------------------------------------------------
+
+pub fn expiry(session: Session) -> Option(Int) {
+  case session {
+    Authenticated(SessionAuthenticated(_, expiry, _)) -> Some(expiry)
+    _ -> None
+  }
 }
 
 fn add_base_uri(req, base_uri: Uri) {

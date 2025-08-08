@@ -22,8 +22,9 @@ var Subj = struct {
 	PermissionsRevoke string
 	PermissionsCheck  string
 	// auth
-	AuthGroup string
-	AuthLogin string
+	AuthGroup   string
+	AuthLogin   string
+	AuthRefresh string
 }{
 	// users
 	UserGroup:  "svc.who.users",
@@ -38,8 +39,9 @@ var Subj = struct {
 	PermissionsRevoke: "revoke",
 	PermissionsCheck:  "check",
 	// auth
-	AuthGroup: "svc.who.auth",
-	AuthLogin: "login",
+	AuthGroup:   "svc.who.auth",
+	AuthLogin:   "login",
+	AuthRefresh: "refresh",
 }
 
 // USER
@@ -179,6 +181,11 @@ type AuthResponse struct {
 	Token       string      `json:"token"`
 	ExpiresAt   int64       `json:"expiresAt"`
 	Permissions Permissions `json:"permissions"`
+}
+
+// AuthRefreshRequest is used to request a refreshed JWT for a given subject (user id)
+type AuthRefreshRequest struct {
+	Subject string `json:"subject"`
 }
 
 // JwtClaims is the claims for the JWT token.

@@ -165,6 +165,9 @@ func (w *Who) Start(ctx context.Context) error {
 	if err = authSvcGroup.AddEndpoint("auth_login", w.handleAuth(), micro.WithEndpointSubject(api.Subj.AuthLogin)); err != nil {
 		return fmt.Errorf("add auth endpoint (auth_login): %w", err)
 	}
+	if err = authSvcGroup.AddEndpoint("auth_refresh", w.handleAuthRefresh(), micro.WithEndpointSubject(api.Subj.AuthRefresh)); err != nil {
+		return fmt.Errorf("add auth endpoint (auth_refresh): %w", err)
+	}
 	return nil
 }
 
@@ -745,6 +748,64 @@ func (w *Who) handleAuth() micro.HandlerFunc {
 		}
 		if err := req.RespondJSON(respData); err != nil {
 			l.Error("failed to respond to auth request: %v", err)
+		}
+	}
+}
+
+// handleAuthRefresh refreshes a JWT for an already authenticated subject (user ID).
+// It does not change permissions, only re-signs a new token with updated expiry.
+func (w *Who) handleAuthRefresh() micro.HandlerFunc {
+	l := w.l.WithBreadcrumb("auth_refresh")
+	return func(req micro.Request) {
+		var (
+			err      error
+			user     *User
+			token    string
+			reqData  api.AuthRefreshRequest
+			respData api.AuthResponse
+		)
+
+		l.Debug("got request")
+		err = json.Unmarshal(req.Data(), &reqData)
+		if err != nil {
+			l.Warn(fmt.Sprintf("failed to unmarshal auth refresh request: %s", err.Error()))
+			if err := req.Error("INVALID_REQUEST", "invalid request", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to auth refresh request: %v", err)
+			}
+			return
+		}
+		if reqData.Subject == "" {
+			l.Warn("subject is empty")
+			if err := req.Error("INVALID_REQUEST", "subject is empty", []byte("subject is empty")); err != nil {
+				l.Error("failed to respond to auth refresh request: %v", err)
+			}
+			return
+		}
+
+		user = w.userGet(reqData.Subject)
+		if user == nil {
+			l.Warn(fmt.Sprintf("user not found: %s", reqData.Subject))
+			if err := req.Error("NOT_FOUND", "user not found", []byte(reqData.Subject)); err != nil {
+				l.Error("failed to respond to auth refresh request: %v", err)
+			}
+			return
+		}
+
+		token, err = w.userJwt(user)
+		if err != nil {
+			l.Warn(fmt.Sprintf("failed to create token: %s", err.Error()))
+			if err := req.Error("OPERATION_FAILED", "the operation failed to complete", []byte(err.Error())); err != nil {
+				l.Error("failed to respond to auth refresh request: %v", err)
+			}
+			return
+		}
+		respData = api.AuthResponse{
+			Token:       token,
+			ExpiresAt:   time.Now().Add(jwtExpiresAfterTime).Unix(),
+			Permissions: user.Permissions,
+		}
+		if err := req.RespondJSON(respData); err != nil {
+			l.Error("failed to respond to auth refresh request: %v", err)
 		}
 	}
 }

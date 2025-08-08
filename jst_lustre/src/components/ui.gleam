@@ -4,6 +4,7 @@ import lustre/attribute as attr
 import lustre/element.{type Element, none as element_none}
 import lustre/element/html
 import lustre/event
+import utils/mouse
 
 // TYPES ---------------------------------------------------------------------
 
@@ -226,7 +227,7 @@ pub fn button_menu(
         ButtonStateNormal -> False
         _ -> True
       }),
-      event.on_mouse_down(onclick),
+      mouse.on_mouse_down_no_right(onclick),
     ],
     [html.text(text)],
   )
@@ -293,7 +294,7 @@ pub fn button_menu_custom(
         ButtonStateNormal -> False
         _ -> True
       }),
-      event.on_mouse_down(onclick),
+      mouse.on_mouse_down_no_right(onclick),
     ],
     content,
   )
@@ -360,7 +361,7 @@ pub fn button(
         ButtonStateNormal -> False
         _ -> True
       }),
-      event.on_mouse_down(onmousedown),
+      mouse.on_mouse_down_no_right(onmousedown),
     ],
     [html.text(text)],
   )

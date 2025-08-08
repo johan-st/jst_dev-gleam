@@ -36,6 +36,7 @@ import utils/remote_data.{
 import utils/short_url.{type ShortUrl, type ShortUrlListResponse}
 import utils/notification.{type NotificationRequest, type NotificationResponse}
 import utils/window_events
+import utils/mouse
 
 @external(javascript, "./app.ffi.mjs", "clipboard_copy")
 fn clipboard_copy(text: String) -> Nil
@@ -198,6 +199,8 @@ pub type Msg {
   AuthLogoutResponse(result: Result(String, HttpError))
   AuthCheckClicked
   AuthCheckResponse(result: Result(session.Session, HttpError))
+  AuthRefreshTimerFired
+  AuthRefreshResponse(result: Result(session.Session, HttpError))
   DjotDemoContentUpdated(content: String)
   ShortUrlCreateClicked(short_code: String, target_url: String)
   ShortUrlCreateResponse(result: Result(ShortUrl, HttpError))
@@ -861,18 +864,24 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     AuthLoginResponse(session_result) -> {
       case session_result {
-        Ok(session) -> #(
-          Model(
-            ..model,
-            session: session,
-            notice: "Successfully logged in",
-            login_form_open: False,
-            login_loading: False,
-            login_username: "",
-            login_password: "",
-          ),
-          effect.none(),
-        )
+        Ok(sess) -> {
+          let schedule_effect = case session.expiry(sess) {
+            Some(expiry) -> session.schedule_refresh(AuthRefreshTimerFired, model.base_uri, expiry)
+            None -> effect.none()
+          }
+          #(
+            Model(
+              ..model,
+              session: sess,
+              notice: "Successfully logged in",
+              login_form_open: False,
+              login_loading: False,
+              login_username: "",
+              login_password: "",
+            ),
+            schedule_effect,
+          )
+        }
         Error(err) -> {
           echo err
           #(
@@ -904,8 +913,12 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     AuthCheckResponse(result) -> {
       case result {
-        Ok(session) -> {
-          #(Model(..model, session:, notice: "auth check, OK"), effect.none())
+        Ok(sess) -> {
+          let schedule_effect = case session.expiry(sess) {
+            Some(expiry) -> session.schedule_refresh(AuthRefreshTimerFired, model.base_uri, expiry)
+            None -> effect.none()
+          }
+          #(Model(..model, session: sess, notice: "auth check, OK"), schedule_effect)
         }
         Error(err) -> {
           echo "session check response error"
@@ -919,6 +932,24 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             effect.none(),
           )
         }
+      }
+    }
+    AuthRefreshTimerFired -> {
+      #(
+        model,
+        session.refresh(AuthRefreshResponse, model.base_uri),
+      )
+    }
+    AuthRefreshResponse(result) -> {
+      case result {
+        Ok(sess) -> {
+          let schedule_effect = case session.expiry(sess) {
+            Some(expiry) -> session.schedule_refresh(AuthRefreshTimerFired, model.base_uri, expiry)
+            None -> effect.none()
+          }
+          #(Model(..model, session: sess), schedule_effect)
+        }
+        Error(_err) -> #(model, effect.none())
       }
     }
     // CHAT
@@ -1978,7 +2009,7 @@ fn view_header(model: Model) -> Element(Msg) {
                   attr.class(
                     "px-4 py-2 bg-zinc-800 hover:bg-teal-500/10 transition-colors duration-200",
                   ),
-                  event.on_mouse_down(ProfileMenuToggled),
+                  mouse.on_mouse_down_no_right(ProfileMenuToggled),
                 ],
                 [
                   case model.profile_menu_open {
@@ -2135,7 +2166,7 @@ fn view_header_link(
         ),
         #("active text-pink-500", routes.is_sub(route: to, maybe_sub: curr)),
       ]),
-      event.on_mouse_down(UserMouseDownNavigation(to |> routes.to_uri)),
+      mouse.on_mouse_down_no_right(UserMouseDownNavigation(to |> routes.to_uri)),
     ]),
     [view_internal_link(to |> routes.to_uri, [html.text(text)])],
   )
@@ -2240,7 +2271,7 @@ fn view_article_listing(
           tags:,
         ) -> {
           let article_uri = routes.Article(slug) |> routes.to_uri
-          html.article([attr.class("mt-14")], [
+          html.article([attr.class("mt-6")], [
             html.a(
               [
                 attr.class(
@@ -2248,7 +2279,7 @@ fn view_article_listing(
                 ),
                 attr.href(uri.to_string(article_uri)),
                 event.on_mouse_enter(ArticleHovered(article)),
-                event.on_mouse_down(UserMouseDownNavigation(article_uri)),
+                mouse.on_mouse_down_no_right(UserMouseDownNavigation(article_uri)),
               ],
               [
                 // static corner accents on the left side
@@ -2268,7 +2299,7 @@ fn view_article_listing(
                       [
                         attr.id("article-title-" <> slug),
                         attr.class("article-title"),
-                        attr.class("text-xl text-pink-700 font-light"),
+                        attr.class("text-xl text-pink-700 font-light pt-4"),
                       ],
                       [html.text(article.title)],
                     ),
@@ -2493,7 +2524,7 @@ fn view_edit_actions(draft: draft.Draft, article: Article) -> List(Element(Msg))
             attr.class(
               "px-4 py-2 bg-zinc-700 text-zinc-300 rounded-md hover:bg-zinc-600 transition-colors duration-200",
             ),
-            event.on_mouse_down(ArticleDraftDiscardClicked(article)),
+            mouse.on_mouse_down_no_right(ArticleDraftDiscardClicked(article)),
             attr.disabled(draft.is_saving(draft)),
           ],
           [html.text("Discard Changes")],
@@ -2503,7 +2534,7 @@ fn view_edit_actions(draft: draft.Draft, article: Article) -> List(Element(Msg))
             attr.class(
               "px-4 py-2 bg-teal-700 text-white rounded-md hover:bg-teal-600 transition-colors duration-200",
             ),
-            event.on_mouse_down(ArticleDraftSaveClicked(article)),
+            mouse.on_mouse_down_no_right(ArticleDraftSaveClicked(article)),
             attr.disabled(draft.is_saving(draft)),
           ],
           [
@@ -2930,7 +2961,7 @@ fn view_compact_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
               attr.class(
                 "font-mono text-sm font-medium text-zinc-100 hover:text-pink-300 transition-colors cursor-pointer",
               ),
-              event.on_mouse_down(ShortUrlCopyClicked(url.short_code)),
+              mouse.on_mouse_down_no_right(ShortUrlCopyClicked(url.short_code)),
               attr.title("Click to copy short URL"),
             ],
             [
@@ -2954,7 +2985,7 @@ fn view_compact_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
                 "text-sm text-zinc-400 truncate flex-1 cursor-pointer hover:text-zinc-300 transition-colors",
               ),
               attr.title(url.target_url),
-              event.on_mouse_down(ShortUrlToggleExpanded(url.id)),
+              mouse.on_mouse_down_no_right(ShortUrlToggleExpanded(url.id)),
             ],
             [
               html.span([attr.class("text-zinc-600")], [html.text("→ ")]),
@@ -2970,7 +3001,7 @@ fn view_compact_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
                 False ->
                   "inline-flex shrink-0 items-center rounded-full bg-red-600/20 px-2 py-1 text-xs font-medium text-red-400 ring-1 ring-inset ring-red-600/30 cursor-pointer hover:bg-red-600/30 transition-colors"
               }),
-              event.on_mouse_down(ShortUrlToggleActiveClicked(
+              mouse.on_mouse_down_no_right(ShortUrlToggleActiveClicked(
                 url.id,
                 url.is_active,
               )),
@@ -2989,7 +3020,7 @@ fn view_compact_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
               attr.class(
                 "text-xs text-zinc-500 shrink-0 cursor-pointer hover:text-zinc-400 transition-colors",
               ),
-              event.on_mouse_down(ShortUrlToggleExpanded(url.id)),
+              mouse.on_mouse_down_no_right(ShortUrlToggleExpanded(url.id)),
             ],
             [html.text(int.to_string(url.access_count) <> " clicks")],
           ),
@@ -3000,7 +3031,7 @@ fn view_compact_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
             attr.class(
               "flex items-center space-x-2 ml-4 cursor-pointer hover:text-zinc-300 transition-colors",
             ),
-            event.on_mouse_down(ShortUrlToggleExpanded(url.id)),
+            mouse.on_mouse_down_no_right(ShortUrlToggleExpanded(url.id)),
           ],
           [html.div([attr.class("text-zinc-500 text-sm")], [html.text("▼")])],
         ),
@@ -3026,7 +3057,7 @@ fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
               attr.class(
                 "font-mono text-sm font-medium text-zinc-100 hover:text-pink-300 transition-colors cursor-pointer",
               ),
-              event.on_mouse_down(ShortUrlCopyClicked(url.short_code)),
+              mouse.on_mouse_down_no_right(ShortUrlCopyClicked(url.short_code)),
               attr.title("Click to copy short URL"),
             ],
             [
@@ -3063,7 +3094,7 @@ fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
                 False ->
                   "inline-flex shrink-0 items-center rounded-full bg-red-600/20 px-2 py-1 text-xs font-medium text-red-400 ring-1 ring-inset ring-red-600/30 cursor-pointer hover:bg-red-600/30 transition-colors"
               }),
-              event.on_mouse_down(ShortUrlToggleActiveClicked(
+              mouse.on_mouse_down_no_right(ShortUrlToggleActiveClicked(
                 url.id,
                 url.is_active,
               )),
@@ -3087,7 +3118,7 @@ fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
             attr.class(
               "flex items-center space-x-2 ml-4 cursor-pointer hover:text-zinc-300 transition-colors",
             ),
-            event.on_mouse_down(ShortUrlToggleExpanded(url.id)),
+             mouse.on_mouse_down_no_right(ShortUrlToggleExpanded(url.id)),
           ],
           [html.div([attr.class("text-zinc-500 text-sm")], [html.text("▲")])],
         ),
@@ -3105,7 +3136,7 @@ fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
                 "text-zinc-300 break-all bg-zinc-900 rounded px-3 py-2 text-sm cursor-pointer hover:bg-zinc-850 transition-colors",
               ),
               attr.title(url.target_url <> " (click to collapse)"),
-              event.on_mouse_down(ShortUrlToggleExpanded(url.id)),
+             mouse.on_mouse_down_no_right(ShortUrlToggleExpanded(url.id)),
             ],
             [html.text(url.target_url)],
           ),
@@ -3158,7 +3189,7 @@ fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
               attr.class(
                 "w-full px-4 py-3 text-sm font-medium text-teal-400 border border-teal-600 bg-teal-500/10 hover:bg-teal-950/50 hover:text-teal-300 hover:border-teal-400 cursor-pointer transition-colors duration-200 rounded",
               ),
-              event.on_mouse_down(ShortUrlCopyClicked(url.short_code)),
+              mouse.on_mouse_down_no_right(ShortUrlCopyClicked(url.short_code)),
             ],
             [
               html.text(case model.copy_feedback == Some(url.short_code) {
@@ -3175,7 +3206,7 @@ fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
                 False ->
                   "w-full px-4 py-3 text-sm font-medium text-teal-400 border border-teal-600 bg-teal-500/10 hover:bg-teal-950/50 hover:text-teal-300 hover:border-teal-400 cursor-pointer transition-colors duration-200 rounded"
               }),
-              event.on_mouse_down(ShortUrlToggleActiveClicked(
+              mouse.on_mouse_down_no_right(ShortUrlToggleActiveClicked(
                 url.id,
                 url.is_active,
               )),
@@ -3192,7 +3223,7 @@ fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
               attr.class(
                 "w-full px-4 py-3 text-sm font-medium text-red-400 border border-red-600 bg-red-500/10 hover:bg-red-950/50 hover:text-red-300 hover:border-red-400 cursor-pointer transition-colors duration-200 rounded",
               ),
-              event.on_mouse_down(ShortUrlDeleteClicked(url.id)),
+              mouse.on_mouse_down_no_right(ShortUrlDeleteClicked(url.id)),
             ],
             [html.text("Delete")],
           ),
@@ -3400,7 +3431,7 @@ fn view_publication_status(article: Article) -> Element(msg) {
       html.span(
         [
           attr.class(
-            "text-xs text-zinc-500 px-2 pt-2 w-max border-t border-r border-zinc-700 group-hover:border-pink-700 transition-colors duration-25",
+            "text-xs text-zinc-500 px-4 pt-2 w-max border-t border-r border-zinc-700 group-hover:border-pink-700 transition-colors duration-25",
           ),
         ],
         [html.text(formatted_date)],
@@ -3410,7 +3441,7 @@ fn view_publication_status(article: Article) -> Element(msg) {
       html.span(
         [
           attr.class(
-            "text-xs text-zinc-500 px-2 pt-2 w-max italic border-t border-r border-zinc-700 group-hover:border-pink-700 transition-colors duration-25",
+            "text-xs text-zinc-500 px-4 pt-2 w-max italic border-t border-r border-zinc-700 group-hover:border-pink-700 transition-colors duration-25",
           ),
         ],
         [html.text("not published")],
@@ -3422,7 +3453,7 @@ fn view_author(author: String) -> Element(msg) {
   html.div(
     [
       attr.class(
-        "text-xs text-zinc-400 pt-0 border-r border-zinc-700 pr-2 group-hover:border-pink-700 transition-colors duration-25",
+        "text-xs text-zinc-400 pt-0 border-r border-zinc-700 pr-4 group-hover:border-pink-700 transition-colors duration-25",
       ),
     ],
     [
@@ -3474,7 +3505,7 @@ fn view_article_actions(
             attr.class(
               "text-gray-500 pe-4 text-underline pb-2 hover:text-teal-300 hover:border-teal-300 border-b border-zinc-700",
             ),
-            event.on_mouse_down(
+            mouse.on_mouse_down_no_right(
               UserMouseDownNavigation(
                 routes.to_uri(routes.ArticleEdit(article.id)),
               ),
@@ -3491,7 +3522,7 @@ fn view_article_actions(
             attr.class(
               "text-gray-500 pe-4 text-underline pb-2 hover:text-green-300 hover:border-green-300 border-b border-zinc-700",
             ),
-            event.on_mouse_down(ArticlePublishClicked(article)),
+            mouse.on_mouse_down_no_right(ArticlePublishClicked(article)),
           ],
           [html.text("Publish")],
         )
@@ -3504,7 +3535,7 @@ fn view_article_actions(
             attr.class(
               "text-gray-500 pe-4 text-underline pb-2 hover:text-yellow-300 hover:border-yellow-300 border-b border-zinc-700",
             ),
-            event.on_mouse_down(ArticleUnpublishClicked(article)),
+            mouse.on_mouse_down_no_right(ArticleUnpublishClicked(article)),
           ],
           [html.text("Unpublish")],
         )
@@ -3517,7 +3548,7 @@ fn view_article_actions(
             attr.class(
               "text-gray-500 pe-4 text-underline pb-2 hover:text-red-400 hover:border-red-400 border-b border-zinc-700",
             ),
-            event.on_mouse_down(ArticleDeleteClicked(article)),
+            mouse.on_mouse_down_no_right(ArticleDeleteClicked(article)),
           ],
           [html.text("Delete")],
         )
@@ -3577,7 +3608,7 @@ fn view_internal_link(uri: Uri, content: List(Element(Msg))) -> Element(Msg) {
     [
       attr.class(""),
       attr.href(uri.to_string(uri)),
-      event.on_mouse_down(UserMouseDownNavigation(uri)),
+      mouse.on_mouse_down_no_right(UserMouseDownNavigation(uri)),
     ],
     content,
   )

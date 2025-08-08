@@ -40,6 +40,7 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 
 	// auth
 	mux.Handle("POST /api/auth", handleAuth(l, nc, jwtSecret))
+	mux.Handle("POST /api/auth/refresh", handleAuthRefresh(l, nc, jwtSecret))
 	mux.Handle("GET /api/auth/logout", handleAuthLogout(l, nc))
 	mux.Handle("GET /api/auth", handleAuthCheck(l, nc, jwtSecret))
 
@@ -271,6 +272,88 @@ func handleAuth(l *jst_log.Logger, nc *nats.Conn, jwtSecret string) http.Handler
 		resp.Permissions = permissions
 		resp.ExpiresAt = time.Now().Add(30 * time.Minute).Unix()
 
+		respJson(w, resp, http.StatusOK)
+	})
+}
+
+// handleAuthRefresh refreshes JWT using the current auth cookie.
+// It verifies the existing token, then asks who service to mint a fresh one for the same subject.
+func handleAuthRefresh(l *jst_log.Logger, nc *nats.Conn, jwtSecret string) http.Handler {
+	type Resp struct {
+		Subject     string              `json:"subject"`
+		ExpiresAt   int64               `json:"expiresAt"`
+		Permissions []whoApi.Permission `json:"permissions"`
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var (
+			err      error
+			cookie   *http.Cookie
+			whoReq   whoApi.AuthRefreshRequest
+			whoBytes []byte
+			whoMsg   *nats.Msg
+			whoResp  whoApi.AuthResponse
+			resp     Resp
+		)
+
+		// Validate current cookie
+		jwtCookie, err := r.Cookie(cookieAuth)
+		if err != nil || jwtCookie == nil || jwtCookie.Value == "" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		subject, _, err := whoApi.JwtVerify(jwtSecret, audience, jwtCookie.Value)
+		if err != nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// Request refreshed token from who
+		whoReq = whoApi.AuthRefreshRequest{Subject: subject}
+		whoBytes, err = json.Marshal(whoReq)
+		if err != nil {
+			http.Error(w, "error marshalling request", http.StatusInternalServerError)
+			return
+		}
+		whoMsg, err = nc.Request(fmt.Sprintf("%s.%s", whoApi.Subj.AuthGroup, whoApi.Subj.AuthRefresh), whoBytes, 10*time.Second)
+		if err != nil {
+			http.Error(w, "error requesting auth refresh", http.StatusInternalServerError)
+			return
+		}
+		if whoMsg.Header.Get("Nats-Service-Error") != "" {
+			http.Error(w, string(whoMsg.Data), http.StatusBadGateway)
+			return
+		}
+		if err := json.Unmarshal(whoMsg.Data, &whoResp); err != nil {
+			http.Error(w, "error unmarshalling refresh response", http.StatusInternalServerError)
+			return
+		}
+
+		// Verify refreshed token and set cookie
+		subject2, permissions2, err := whoApi.JwtVerify(jwtSecret, audience, whoResp.Token)
+		if err != nil {
+			http.Error(w, "error verifying jwt", http.StatusInternalServerError)
+			return
+		}
+
+		cookie = &http.Cookie{
+			Name:     cookieAuth,
+			Value:    whoResp.Token,
+			MaxAge:   30 * 60,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   true,
+			SameSite: http.SameSiteStrictMode,
+		}
+		if err := cookie.Valid(); err != nil {
+			http.Error(w, "error validating cookie", http.StatusInternalServerError)
+			return
+		}
+		http.SetCookie(w, cookie)
+
+		resp.Subject = subject2
+		resp.Permissions = permissions2
+		resp.ExpiresAt = time.Now().Add(30 * time.Minute).Unix()
 		respJson(w, resp, http.StatusOK)
 	})
 }
