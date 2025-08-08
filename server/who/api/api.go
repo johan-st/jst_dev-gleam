@@ -76,11 +76,12 @@ type UserGetRequest struct {
 }
 
 type UserUpdateRequest struct {
-	ID       string `json:"id"`
-	Revision uint64 `json:"revision,omitempty"`
-	Username string `json:"username,omitempty"`
-	Email    string `json:"email,omitempty"`
-	Password string `json:"password,omitempty"`
+	ID          string `json:"id"`
+	Revision    uint64 `json:"revision,omitempty"`
+	Username    string `json:"username,omitempty"`
+	Email       string `json:"email,omitempty"`
+	Password    string `json:"password,omitempty"`
+	OldPassword string `json:"oldPassword,omitempty"`
 }
 type UserUpdateResponse struct {
 	ID              string `json:"id"`

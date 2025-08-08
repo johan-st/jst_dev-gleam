@@ -1,5 +1,5 @@
-import gleam/uri.{type Uri}
 import gleam/list
+import gleam/uri.{type Uri}
 
 pub type Route {
   Index
@@ -18,6 +18,9 @@ pub type Route {
 
   // NOTIFICATIONS
   Notifications
+
+  // PROFILE
+  Profile
 
   /// It's good practice to store whatever `Uri` we failed to match in case we
   /// want to log it or hint to the user that maybe they made a typo.
@@ -50,6 +53,7 @@ pub fn from_uri(uri: Uri) -> Route {
     ["url", uid] -> UrlShortInfo(uid)
     ["ui-components"] -> UiComponents
     ["notifications"] -> Notifications
+    ["profile"] -> Profile
     _ -> NotFound(uri)
   }
 }
@@ -66,6 +70,7 @@ pub fn to_string(route: Route) -> String {
     UrlShortInfo(short) -> "/url/" <> short
     UiComponents -> "/ui-components"
     Notifications -> "/notifications"
+    Profile -> "/profile"
     NotFound(uri) -> "/404?uri=" <> uri.to_string(uri)
   }
 }

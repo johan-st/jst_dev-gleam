@@ -22,11 +22,7 @@ pub type NotificationRequest {
 }
 
 pub type NotificationResponse {
-  NotificationResponse(
-    status: String,
-    message: String,
-    id: String,
-  )
+  NotificationResponse(status: String, message: String, id: String)
 }
 
 pub fn create_notification_request(
@@ -66,22 +62,23 @@ fn encode_request(request: NotificationRequest) -> Json {
   let data_object = case request.data {
     [] -> json.object([])
     data -> {
-      let data_pairs = list.map(data, fn(pair) {
-        case pair {
-          #(key, value) -> #(key, json.string(value))
-        }
-      })
+      let data_pairs =
+        list.map(data, fn(pair) {
+          case pair {
+            #(key, value) -> #(key, json.string(value))
+          }
+        })
       json.object(data_pairs)
     }
   }
-  
+
   json.object([
     #("title", json.string(request.title)),
     #("message", json.string(request.message)),
     #("category", json.string(request.category)),
     #("priority", json.string(request.priority)),
     #("ntfy_topic", json.string(request.ntfy_topic)),
-    #("data", data_object)
+    #("data", data_object),
   ])
 }
 
@@ -110,4 +107,4 @@ fn add_base_uri(req, base_uri: Uri) {
   }
 
   req
-} 
+}

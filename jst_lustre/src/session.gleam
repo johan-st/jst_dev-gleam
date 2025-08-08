@@ -36,6 +36,14 @@ pub fn permission_any(session: Session, any: List(String)) -> Bool {
   })
 }
 
+pub fn subject(session: Session) -> Option(String) {
+  case session {
+    Pending -> None
+    Unauthenticated -> None
+    Authenticated(SessionAuthenticated(subject, _, _)) -> Some(subject)
+  }
+}
+
 // EFFECTS ---------------------------------------------------------------------
 
 pub fn login(

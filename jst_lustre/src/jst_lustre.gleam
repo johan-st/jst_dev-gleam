@@ -29,12 +29,13 @@ import utils/error_string
 import utils/http.{type HttpError}
 import utils/icon
 import utils/jot_to_lustre
+import utils/notification.{type NotificationResponse}
 import utils/persist.{type PersistentModel, PersistentModelV0, PersistentModelV1}
 import utils/remote_data.{
   type RemoteData, Errored, Loaded, NotInitialized, Optimistic, Pending,
 }
 import utils/short_url.{type ShortUrl, type ShortUrlListResponse}
-import utils/notification.{type NotificationRequest, type NotificationResponse}
+import utils/user
 import utils/window_events
 import utils/mouse
 
@@ -98,6 +99,15 @@ fn init(_) -> #(Model, Effect(Msg)) {
       notification_form_ntfy_topic: "",
       notification_form_data: [],
       notification_sending: False,
+      // profile state
+      profile_user: NotInitialized,
+      profile_form_username: "",
+      profile_form_email: "",
+      profile_form_new_password: "",
+      profile_form_confirm_password: "",
+      profile_form_old_password: "",
+      profile_saving: False,
+      password_saving: False,
     )
   let effect_modem =
     modem.init(fn(uri) {
@@ -159,6 +169,15 @@ type Model {
     notification_form_ntfy_topic: String,
     notification_form_data: List(#(String, String)),
     notification_sending: Bool,
+    // Profile page state
+    profile_user: RemoteData(user.UserFull, HttpError),
+    profile_form_username: String,
+    profile_form_email: String,
+    profile_form_new_password: String,
+    profile_form_confirm_password: String,
+    profile_form_old_password: String,
+    profile_saving: Bool,
+    password_saving: Bool,
   )
 }
 
@@ -243,6 +262,18 @@ pub type Msg {
 
   // UI Components
   NoOp
+
+  // Profile
+  ProfileMeGot(Result(user.UserFull, HttpError))
+  ProfileFormUsernameUpdated(String)
+  ProfileFormEmailUpdated(String)
+  ProfileFormNewPasswordUpdated(String)
+  ProfileFormConfirmPasswordUpdated(String)
+  ProfileFormOldPasswordUpdated(String)
+  ProfileSaveClicked
+  ProfileSaveResponse(Result(user.UserUpdateResponse, HttpError))
+  ProfileChangePasswordClicked
+  ProfileChangePasswordResponse(Result(user.UserUpdateResponse, HttpError))
 }
 
 fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -1262,17 +1293,22 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(Model(..model, notification_form_data: data), effect.none())
     }
     NotificationSendClicked -> {
-      case model.notification_form_title, model.notification_form_message, model.notification_form_category {
+      case
+        model.notification_form_title,
+        model.notification_form_message,
+        model.notification_form_category
+      {
         "", _, _ | _, "", _ | _, _, "" -> #(model, effect.none())
         title, message, category -> {
-          let request = notification.create_notification_request(
-            title,
-            message,
-            category,
-            model.notification_form_priority,
-            model.notification_form_ntfy_topic,
-            model.notification_form_data,
-          )
+          let request =
+            notification.create_notification_request(
+              title,
+              message,
+              category,
+              model.notification_form_priority,
+              model.notification_form_ntfy_topic,
+              model.notification_form_data,
+            )
           #(
             Model(..model, notification_sending: True),
             notification.send_notification(
@@ -1307,11 +1343,158 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             Model(
               ..model,
               notification_sending: False,
-              notice: "Failed to send notification: " <> error_string.http_error(err),
+              notice: "Failed to send notification: "
+                <> error_string.http_error(err),
             ),
             effect.none(),
           )
         }
+      }
+    }
+    // PROFILE
+    ProfileMeGot(result) -> {
+      case result {
+        Ok(user_full) -> #(
+          Model(
+            ..model,
+            profile_user: Loaded(user_full),
+            profile_form_username: user_full.username,
+            profile_form_email: user_full.email,
+          ),
+          effect.none(),
+        )
+        Error(err) -> #(
+          Model(..model, profile_user: Errored(err)),
+          effect.none(),
+        )
+      }
+    }
+    ProfileFormUsernameUpdated(text) -> #(
+      Model(..model, profile_form_username: text),
+      effect.none(),
+    )
+    ProfileFormEmailUpdated(text) -> #(
+      Model(..model, profile_form_email: text),
+      effect.none(),
+    )
+    ProfileFormNewPasswordUpdated(text) -> #(
+      Model(..model, profile_form_new_password: text),
+      effect.none(),
+    )
+    ProfileFormConfirmPasswordUpdated(text) -> #(
+      Model(..model, profile_form_confirm_password: text),
+      effect.none(),
+    )
+    ProfileFormOldPasswordUpdated(text) -> #(
+      Model(..model, profile_form_old_password: text),
+      effect.none(),
+    )
+    ProfileSaveClicked -> {
+      case session.subject(model.session) {
+        Some(subject) -> {
+          let req =
+            user.UserUpdateMeRequest(
+              username: model.profile_form_username,
+              email: model.profile_form_email,
+              password: None,
+              old_password: None,
+            )
+          #(
+            Model(..model, profile_saving: True, notice: ""),
+            user.user_update(ProfileSaveResponse, model.base_uri, subject, req),
+          )
+        }
+        None -> #(model, effect.none())
+      }
+    }
+    ProfileSaveResponse(result) -> {
+      case result {
+        Ok(updated) -> #(
+          Model(
+            ..model,
+            profile_saving: False,
+            profile_form_new_password: "",
+            profile_form_confirm_password: "",
+            profile_user: case model.profile_user {
+              Loaded(user_full) ->
+                Loaded(user.UserFull(
+                  id: updated.id,
+                  revision: updated.revision,
+                  username: updated.username,
+                  email: updated.email,
+                  permissions: user_full.permissions,
+                ))
+              other -> other
+            },
+            notice: "Profile updated",
+          ),
+          effect.none(),
+        )
+        Error(err) -> #(
+          Model(
+            ..model,
+            profile_saving: False,
+            notice: "Failed to update profile: " <> error_string.http_error(err),
+          ),
+          effect.none(),
+        )
+      }
+    }
+    ProfileChangePasswordClicked -> {
+      case session.subject(model.session) {
+        Some(subject) -> {
+          let can_change =
+            model.profile_form_new_password != ""
+            && model.profile_form_new_password
+            == model.profile_form_confirm_password
+            && model.profile_form_old_password != ""
+          case can_change {
+            False -> #(model, effect.none())
+            True -> {
+              let req =
+                user.UserUpdateMeRequest(
+                  username: model.profile_form_username,
+                  email: model.profile_form_email,
+                  password: Some(model.profile_form_new_password),
+                  old_password: Some(model.profile_form_old_password),
+                )
+              #(
+                Model(..model, password_saving: True, notice: ""),
+                user.user_update(
+                  ProfileChangePasswordResponse,
+                  model.base_uri,
+                  subject,
+                  req,
+                ),
+              )
+            }
+          }
+        }
+        None -> #(model, effect.none())
+      }
+    }
+    ProfileChangePasswordResponse(result) -> {
+      case result {
+        Ok(_updated) -> #(
+          Model(
+            ..model,
+            password_saving: False,
+            profile_form_old_password: "",
+            profile_form_new_password: "",
+            profile_form_confirm_password: "",
+            notice: "Password changed successfully",
+          ),
+          effect.none(),
+        )
+        Error(err) -> #(
+          Model(
+            ..model,
+            password_saving: False,
+            notice: "Failed to change password: "
+              <> error_string.http_error(err),
+          ),
+          effect.none(),
+        )
       }
     }
     DebugToggleLocalStorage -> {
@@ -1458,6 +1641,15 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
     routes.DjotDemo -> #(Model(..model, route:), effect.none())
     routes.UiComponents -> #(Model(..model, route:), effect.none())
     routes.Notifications -> #(Model(..model, route:), effect.none())
+    routes.Profile -> {
+      case session.subject(model.session) {
+        Some(subject) -> #(
+          Model(..model, route:, profile_user: Pending),
+          user.user_get(ProfileMeGot, model.base_uri, subject),
+        )
+        None -> #(Model(..model, route:), effect.none())
+      }
+    }
     routes.NotFound(_uri) -> #(Model(..model, route:), effect.none())
   }
 }
@@ -1495,6 +1687,7 @@ fn view(model: Model) -> Element(Msg) {
     pages.PageDjotDemo(content) -> view_djot_demo(content)
     pages.PageUiComponents(_) -> view_ui_components()
     pages.PageNotifications(_) -> view_notifications(model)
+    pages.PageProfile(_) -> view_profile(model)
     pages.PageNotFound(uri) -> view_not_found(uri)
   }
   let nav_hints_overlay = case
@@ -1730,6 +1923,143 @@ fn view_status_bar(
   }
 }
 
+// PROFILE VIEW -----------------------------------------------------------------
+fn view_profile(model: Model) -> List(Element(Msg)) {
+  let header =
+    ui.page_header(
+      "Your Profile",
+      Some("Update your personal information and change password"),
+    )
+  let content = case model.profile_user {
+    NotInitialized -> [ui.loading_state("Loading profile", None, ui.ColorTeal)]
+    Optimistic(_) -> [ui.loading_state("Loading profile", None, ui.ColorTeal)]
+    Pending -> [ui.loading_state("Loading profile", None, ui.ColorTeal)]
+    Errored(_err) -> [
+      ui.error_state(
+        ui.ErrorGeneric,
+        "Failed to load profile",
+        "Please try again",
+        Some(UserNavigatedTo(routes.to_uri(routes.Profile))),
+      ),
+    ]
+    Loaded(_user_full) -> [
+      ui.card([
+        html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
+          html.text("Profile Information"),
+        ]),
+        html.div([attr.class("space-y-4 max-w-xl")], [
+          ui.form_input(
+            "Username",
+            model.profile_form_username,
+            "Your username",
+            "text",
+            True,
+            None,
+            ProfileFormUsernameUpdated,
+          ),
+          ui.form_input(
+            "Email",
+            model.profile_form_email,
+            "you@example.com",
+            "email",
+            True,
+            None,
+            ProfileFormEmailUpdated,
+          ),
+          html.div([attr.class("flex gap-3")], [
+            ui.button(
+              case model.profile_saving {
+                True -> "Saving..."
+                False -> "Save Changes"
+              },
+              ui.ColorTeal,
+              case model.profile_saving {
+                True -> ui.ButtonStatePending
+                False -> ui.ButtonStateNormal
+              },
+              ProfileSaveClicked,
+            ),
+          ]),
+        ]),
+      ]),
+      ui.card([
+        html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
+          html.text("Change Password"),
+        ]),
+        html.div([attr.class("space-y-4 max-w-xl")], [
+          ui.form_input(
+            "Current Password",
+            model.profile_form_old_password,
+            "Current password",
+            "password",
+            True,
+            None,
+            ProfileFormOldPasswordUpdated,
+          ),
+          ui.form_input(
+            "New Password",
+            model.profile_form_new_password,
+            "New password",
+            "password",
+            False,
+            None,
+            ProfileFormNewPasswordUpdated,
+          ),
+          ui.form_input(
+            "Confirm Password",
+            model.profile_form_confirm_password,
+            "Confirm new password",
+            "password",
+            False,
+            case
+              model.profile_form_new_password,
+              model.profile_form_confirm_password
+            {
+              "", _ -> None
+              _, "" -> None
+              new_pw, confirm_pw ->
+                case new_pw == confirm_pw {
+                  True -> None
+                  False -> Some("Passwords do not match")
+                }
+            },
+            ProfileFormConfirmPasswordUpdated,
+          ),
+          html.div([attr.class("text-sm text-zinc-400")], [
+            html.text("Leave blank to keep your current password."),
+          ]),
+          html.div([attr.class("flex gap-3")], [
+            ui.button(
+              case model.password_saving {
+                True -> "Changing..."
+                False -> "Change Password"
+              },
+              ui.ColorTeal,
+              case model.password_saving {
+                True -> ui.ButtonStatePending
+                False -> {
+                  let invalid =
+                    model.profile_form_old_password == ""
+                    || model.profile_form_new_password == ""
+                    || model.profile_form_confirm_password == ""
+                    || model.profile_form_new_password
+                    != model.profile_form_confirm_password
+                  case invalid {
+                    True -> ui.ButtonStateDisabled
+                    False -> ui.ButtonStateNormal
+                  }
+                }
+              },
+              ProfileChangePasswordClicked,
+            ),
+          ]),
+        ]),
+      ]),
+    ]
+  }
+  [header, ..content]
+}
+
 fn page_from_model(model: Model) -> pages.Page {
   case model.route {
     routes.Index -> pages.PageIndex
@@ -1847,6 +2177,12 @@ fn page_from_model(model: Model) -> pages.Page {
           pages.PageNotifications(session_auth)
         _ ->
           pages.PageError(pages.AuthenticationRequired("access notifications"))
+      }
+    }
+    routes.Profile -> {
+      case model.session {
+        session.Authenticated(session_auth) -> pages.PageProfile(session_auth)
+        _ -> pages.PageError(pages.AuthenticationRequired("access profile"))
       }
     }
     routes.NotFound(uri) -> pages.PageNotFound(uri)
@@ -2105,6 +2441,18 @@ fn view_header(model: Model) -> Element(Msg) {
                               ui.ButtonStateNormal,
                               ProfileMenuAction(AuthLogoutClicked),
                             )
+                        },
+                        case model.session {
+                          session.Authenticated(_) ->
+                            ui.button_menu(
+                              "Profile",
+                              ui.ColorTeal,
+                              ui.ButtonStateNormal,
+                              ProfileMenuAction(
+                                UserNavigatedTo(routes.to_uri(routes.Profile)),
+                              ),
+                            )
+                          _ -> html.text("")
                         },
                         case model.debug_use_local_storage {
                           True ->
@@ -4515,34 +4863,49 @@ fn view_ui_components() -> List(Element(Msg)) {
 fn view_notifications(model: Model) -> List(Element(Msg)) {
   [
     view_title("Send Notification", "notifications"),
-    view_simple_paragraph("Send push notifications to your devices via ntfy.sh. Configure your ntfy topic to receive notifications on your mobile device or desktop."),
+    view_simple_paragraph(
+      "Send push notifications to your devices via ntfy.sh. Configure your ntfy topic to receive notifications on your mobile device or desktop.",
+    ),
     view_notification_help(),
     view_notification_form(model),
   ]
 }
 
 fn view_notification_help() -> Element(Msg) {
-  html.div([attr.class("mt-6 p-4 bg-teal-900/30 border border-teal-600/40 rounded-lg")], [
-    html.h4([attr.class("text-teal-400 font-medium mb-2")], [html.text("How to use:")]),
-    html.ul([attr.class("text-sm text-zinc-300 space-y-1")], [
-      html.li([attr.class("flex items-start")], [
-        html.span([attr.class("text-teal-400 mr-2")], [html.text("•")]),
-        html.text("Download the ntfy app on your phone or subscribe to a topic on ntfy.sh"),
+  html.div(
+    [attr.class("mt-6 p-4 bg-teal-900/30 border border-teal-600/40 rounded-lg")],
+    [
+      html.h4([attr.class("text-teal-400 font-medium mb-2")], [
+        html.text("How to use:"),
       ]),
-      html.li([attr.class("flex items-start")], [
-        html.span([attr.class("text-teal-400 mr-2")], [html.text("•")]),
-        html.text("Enter your custom topic or leave empty to use your default user topic"),
+      html.ul([attr.class("text-sm text-zinc-300 space-y-1")], [
+        html.li([attr.class("flex items-start")], [
+          html.span([attr.class("text-teal-400 mr-2")], [html.text("•")]),
+          html.text(
+            "Download the ntfy app on your phone or subscribe to a topic on ntfy.sh",
+          ),
+        ]),
+        html.li([attr.class("flex items-start")], [
+          html.span([attr.class("text-teal-400 mr-2")], [html.text("•")]),
+          html.text(
+            "Enter your custom topic or leave empty to use your default user topic",
+          ),
+        ]),
+        html.li([attr.class("flex items-start")], [
+          html.span([attr.class("text-teal-400 mr-2")], [html.text("•")]),
+          html.text(
+            "Choose priority: Low (silent), Normal (default sound), High (louder), Urgent (critical alert)",
+          ),
+        ]),
+        html.li([attr.class("flex items-start")], [
+          html.span([attr.class("text-teal-400 mr-2")], [html.text("•")]),
+          html.text(
+            "Categories help organize your notifications (e.g., 'system', 'alerts', 'reminders')",
+          ),
+        ]),
       ]),
-      html.li([attr.class("flex items-start")], [
-        html.span([attr.class("text-teal-400 mr-2")], [html.text("•")]),
-        html.text("Choose priority: Low (silent), Normal (default sound), High (louder), Urgent (critical alert)"),
-      ]),
-      html.li([attr.class("flex items-start")], [
-        html.span([attr.class("text-teal-400 mr-2")], [html.text("•")]),
-        html.text("Categories help organize your notifications (e.g., 'system', 'alerts', 'reminders')"),
-      ]),
-    ]),
-  ])
+    ],
+  )
 }
 
 fn view_notification_form(model: Model) -> Element(Msg) {
@@ -4640,7 +5003,9 @@ fn view_notification_form(model: Model) -> Element(Msg) {
           ui.ColorTeal,
           case
             model.notification_sending,
-            model.notification_form_title == "" || model.notification_form_message == "" || model.notification_form_category == ""
+            model.notification_form_title == ""
+            || model.notification_form_message == ""
+            || model.notification_form_category == ""
           {
             True, _ -> ui.ButtonStatePending
             False, True -> ui.ButtonStateDisabled

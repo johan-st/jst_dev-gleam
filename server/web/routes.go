@@ -44,6 +44,10 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 	mux.Handle("GET /api/auth/logout", handleAuthLogout(l, nc))
 	mux.Handle("GET /api/auth", handleAuthCheck(l, nc, jwtSecret))
 
+	// user profile by id (use JWT subject to authorize)
+	mux.Handle("GET /api/users/{id}", handleUserGetByID(l, nc))
+	mux.Handle("PUT /api/users/{id}", handleUserUpdateByID(l, nc))
+
 	// short urls
 	mux.Handle("GET /api/url", handleShortUrlList(l, nc))
 	mux.Handle("POST /api/url", handleShortUrlCreate(l, nc))
@@ -388,6 +392,133 @@ func handleAuthCheck(l *jst_log.Logger, _ *nats.Conn, _ string) http.Handler {
 			ExpiresAt:   time.Now().Add(30 * time.Minute).Unix(), // Unix seconds
 			Permissions: user.Permissions,
 		}, http.StatusOK)
+	})
+}
+
+// - user (me)
+
+func handleUserGetByID(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+	type Resp whoApi.UserFullResponse
+
+	logger := l.WithBreadcrumb("user").WithBreadcrumb("get")
+	logger.Debug("ready")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var (
+			msg    *nats.Msg
+			err    error
+			whoReq whoApi.UserGetRequest
+			whoRes Resp
+		)
+
+		authUser, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		if !ok || authUser.ID == "" {
+			http.Error(w, "not authorized", http.StatusUnauthorized)
+			return
+		}
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		if authUser.ID != id {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+
+		whoReq = whoApi.UserGetRequest{ID: id}
+		reqBytes, err := json.Marshal(whoReq)
+		if err != nil {
+			logger.Error("failed to marshal who request: %v", err)
+			http.Error(w, "server error", http.StatusInternalServerError)
+			return
+		}
+
+		msg, err = nc.Request(whoApi.Subj.UserGroup+"."+whoApi.Subj.UserGet, reqBytes, 5*time.Second)
+		if err != nil {
+			logger.Error("failed to request who: %v", err)
+			http.Error(w, "server error", http.StatusInternalServerError)
+			return
+		}
+		if err := json.Unmarshal(msg.Data, &whoRes); err != nil {
+			logger.Error("failed to unmarshal who response: %v", err)
+			http.Error(w, "server error", http.StatusInternalServerError)
+			return
+		}
+
+		respJson(w, whoRes, http.StatusOK)
+	})
+}
+
+func handleUserUpdateByID(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+	type Req struct {
+		Username    string `json:"username,omitempty"`
+		Email       string `json:"email,omitempty"`
+		Password    string `json:"password,omitempty"`
+		OldPassword string `json:"oldPassword,omitempty"`
+	}
+	type Resp whoApi.UserUpdateResponse
+
+	logger := l.WithBreadcrumb("user").WithBreadcrumb("update")
+	logger.Debug("ready")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var (
+			req    Req
+			err    error
+			msg    *nats.Msg
+			whoReq whoApi.UserUpdateRequest
+			whoRes Resp
+		)
+
+		authUser, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		if !ok || authUser.ID == "" {
+			http.Error(w, "not authorized", http.StatusUnauthorized)
+			return
+		}
+		id := r.PathValue("id")
+		if id == "" {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		if authUser.ID != id {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+
+		if err = json.NewDecoder(r.Body).Decode(&req); err != nil {
+			logger.Warn("failed to decode request: %v", err)
+			http.Error(w, "invalid request", http.StatusBadRequest)
+			return
+		}
+
+		whoReq = whoApi.UserUpdateRequest{
+			ID:          id,
+			Username:    req.Username,
+			Email:       req.Email,
+			Password:    req.Password,
+			OldPassword: req.OldPassword,
+		}
+		reqBytes, err := json.Marshal(whoReq)
+		if err != nil {
+			logger.Error("failed to marshal who request: %v", err)
+			http.Error(w, "server error", http.StatusInternalServerError)
+			return
+		}
+
+		msg, err = nc.Request(whoApi.Subj.UserGroup+"."+whoApi.Subj.UserUpdate, reqBytes, 5*time.Second)
+		if err != nil {
+			logger.Error("failed to request who: %v", err)
+			http.Error(w, "server error", http.StatusInternalServerError)
+			return
+		}
+		if err := json.Unmarshal(msg.Data, &whoRes); err != nil {
+			logger.Error("failed to unmarshal who response: %v", err)
+			http.Error(w, "server error", http.StatusInternalServerError)
+			return
+		}
+
+		respJson(w, whoRes, http.StatusOK)
 	})
 }
 

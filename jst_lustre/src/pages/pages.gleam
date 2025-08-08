@@ -1,13 +1,11 @@
 import article/article.{type Article}
 import gleam/list
 import gleam/option.{None, Some}
-import gleam/set.{type Set}
 import gleam/uri.{type Uri}
 import routes.{type Route}
 import session.{type Session}
 import utils/http.{type HttpError}
 import utils/remote_data.{type RemoteData}
-import utils/short_url.{type ShortUrl}
 
 // Improved Page type with better state management
 pub type Page {
@@ -37,6 +35,9 @@ pub type Page {
 
   // Notifications
   PageNotifications(session_authenticated: session.SessionAuthenticated)
+
+  // Profile
+  PageProfile(session_authenticated: session.SessionAuthenticated)
 
   // Error states  
   PageError(error: PageError)
@@ -85,7 +86,7 @@ pub fn to_uri(page: Page) -> Uri {
       let assert Ok(uri) = uri.parse("/url/")
       uri
     }
-    PageUrlShortInfo(short, _) -> {
+    PageUrlShortInfo(_short, _) -> {
       let assert Ok(uri) = uri.parse("/url/")
       uri
     }
@@ -95,6 +96,10 @@ pub fn to_uri(page: Page) -> Uri {
     }
     PageNotifications(_) -> {
       let assert Ok(uri) = uri.parse("/notifications")
+      uri
+    }
+    PageProfile(_) -> {
+      let assert Ok(uri) = uri.parse("/profile")
       uri
     }
 
@@ -275,6 +280,15 @@ pub fn from_route(
               PageError(AuthenticationRequired("access notifications"))
             session.Pending ->
               PageError(AuthenticationRequired("access notifications"))
+          }
+        }
+        routes.Profile -> {
+          case session {
+            session.Authenticated(session_auth) -> PageProfile(session_auth)
+            session.Unauthenticated ->
+              PageError(AuthenticationRequired("access profile"))
+            session.Pending ->
+              PageError(AuthenticationRequired("access profile"))
           }
         }
         routes.NotFound(uri) -> PageNotFound(uri)

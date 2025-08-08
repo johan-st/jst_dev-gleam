@@ -31,7 +31,7 @@ var PermissionsAll = []api.Permission{
 }
 
 type Who struct {
-	users   []User
+	users   []userStorage
 	l       *jst_log.Logger
 	nc      *nats.Conn
 	hash    hash.Hash
@@ -40,12 +40,12 @@ type Who struct {
 	ctx     context.Context
 }
 
-type User struct {
+// userStorage is the JSON representation persisted in KV. It mirrors User but
+// uses exported fields so encoding/json includes them.
+type userStorage struct {
 	api.User
-
-	// private
-	passwordHash string
-	revision     uint64
+	PasswordHash string `json:"passwordHash"`
+	Revision     uint64 `json:"revision"`
 }
 
 type Conf struct {
@@ -80,7 +80,7 @@ func New(ctx context.Context, c *Conf) (*Who, error) {
 		nc:      c.NatsConn,
 		ctx:     ctx,
 		hash:    hash,
-		users:   []User{},
+		users:   []userStorage{},
 		secret:  c.JwtSecret,
 		usersKv: nil,
 	}
@@ -176,15 +176,13 @@ func (w *Who) Start(ctx context.Context) error {
 func (w *Who) userWatcher() error {
 	var (
 		watcher jetstream.KeyWatcher
-		err     error
 		kv      jetstream.KeyValueEntry
-		user    User
 	)
 
 	// Store the context in the Who struct
 	w.ctx = context.Background()
 
-	watcher, err = w.usersKv.WatchAll(w.ctx)
+	watcher, err := w.usersKv.WatchAll(w.ctx)
 	if err != nil {
 		return fmt.Errorf("failed to watch users: %w", err)
 	}
@@ -199,11 +197,13 @@ func (w *Who) userWatcher() error {
 				}
 				switch kv.Operation() {
 				case jetstream.KeyValuePut:
-					err = json.Unmarshal(kv.Value(), &user)
+					var store userStorage
+					err = json.Unmarshal(kv.Value(), &store)
 					if err != nil {
 						w.l.Error("failed to unmarshal user: %s", err.Error())
 						continue
 					}
+					user := userStorage{User: store.User, PasswordHash: store.PasswordHash, Revision: store.Revision}
 					found := false
 					for i, existingUser := range w.users {
 						if existingUser.ID == user.ID {
@@ -246,7 +246,7 @@ func (w *Who) handleUserCreate() micro.HandlerFunc {
 	return func(req micro.Request) {
 		var (
 			err      error
-			user     *User
+			user     *userStorage
 			reqData  api.UserCreateRequest
 			respData api.UserFullResponse
 		)
@@ -328,7 +328,7 @@ func (w *Who) handleUserGet() micro.HandlerFunc {
 			reqData  api.UserGetRequest
 			respData api.UserFullResponse
 			err      error
-			user     *User
+			user     *userStorage
 		)
 		l.Debug("got request")
 		err = json.Unmarshal(req.Data(), &reqData)
@@ -399,12 +399,11 @@ func (w *Who) handleUserUpdate() micro.HandlerFunc {
 	return func(req micro.Request) {
 		var (
 			err             error
-			user            *User
+			user            *userStorage
 			reqData         api.UserUpdateRequest
 			respData        api.UserUpdateResponse
 			passwordChanged bool = false
 			passwordHash    []byte
-			userBytes       []byte
 			rev             uint64
 		)
 
@@ -434,20 +433,30 @@ func (w *Who) handleUserUpdate() micro.HandlerFunc {
 			user.Email = reqData.Email
 		}
 		if reqData.Password != "" {
+			// Require old password to be provided and correct
+			if reqData.OldPassword == "" {
+				l.Warn("password update denied: missing old password")
+				if err := req.Error("FORBIDDEN", "old password required", nil); err != nil {
+					l.Error("failed to respond to user update request: %v", err)
+				}
+				return
+			}
+			// Verify old password
+			oldHash := w.hash.Sum([]byte(reqData.OldPassword))
+			if user.PasswordHash != hex.EncodeToString(oldHash) {
+				l.Warn("password update denied: old password mismatch")
+				if err := req.Error("FORBIDDEN", "old password incorrect", nil); err != nil {
+					l.Error("failed to respond to user update request: %v", err)
+				}
+				return
+			}
+
 			passwordChanged = true
 			passwordHash = w.hash.Sum([]byte(reqData.Password))
-			user.passwordHash = hex.EncodeToString(passwordHash)
+			user.PasswordHash = hex.EncodeToString(passwordHash)
 		}
 
-		userBytes, err = json.Marshal(user)
-		if err != nil {
-			l.Warn(fmt.Sprintf("failed to marshal user: %s", err.Error()))
-			if err := req.Error("SERVER_ERROR", "server error while updating user", []byte(err.Error())); err != nil {
-				l.Error("failed to respond to user update request: %v", err)
-			}
-			return
-		}
-		rev, err = w.usersKv.Put(w.ctx, user.ID, userBytes)
+		err = w.userUpdate(user)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to update user: %s", err.Error()))
 			if err := req.Error("SERVER_ERROR", "server error while updating user", []byte(err.Error())); err != nil {
@@ -455,7 +464,7 @@ func (w *Who) handleUserUpdate() micro.HandlerFunc {
 			}
 			return
 		}
-		user.revision = rev
+		user.Revision = rev
 		respData = api.UserUpdateResponse{
 			ID:              user.ID,
 			Username:        user.Username,
@@ -473,7 +482,7 @@ func (w *Who) handleUserDelete() micro.HandlerFunc {
 	return func(req micro.Request) {
 		var (
 			err      error
-			user     *User
+			user     *userStorage
 			reqData  api.UserDeleteRequest
 			respData api.UserDeleteResponse
 		)
@@ -537,7 +546,7 @@ func (w *Who) handlePermissionsGrant() micro.HandlerFunc {
 	return func(req micro.Request) {
 		var (
 			err         error
-			user        *User
+			user        *userStorage
 			reqData     api.PermissionsGrantRequest
 			respData    api.PermissionsGrantResponse
 			permAdded   = []api.Permission{}
@@ -591,7 +600,7 @@ func (w *Who) handlePermissionsRevoke() micro.HandlerFunc {
 	return func(req micro.Request) {
 		var (
 			err         error
-			user        *User
+			user        *userStorage
 			reqData     api.PermissionsRevokeRequest
 			respData    api.PermissionsRevokeResponse
 			permRemoved = []api.Permission{}
@@ -647,7 +656,7 @@ func (w *Who) handlePermissionsCheck() micro.HandlerFunc {
 			err         error
 			reqData     api.PermissionsCheckRequest
 			respData    api.PermissionsCheckResponse
-			user        *User
+			user        *userStorage
 			permGranted = []api.Permission{}
 			permMissing = []api.Permission{}
 		)
@@ -696,7 +705,7 @@ func (w *Who) handleAuth() micro.HandlerFunc {
 	return func(req micro.Request) {
 		var (
 			err      error
-			user     *User
+			user     *userStorage
 			token    string
 			reqData  api.AuthRequest
 			respData api.AuthResponse
@@ -732,6 +741,23 @@ func (w *Who) handleAuth() micro.HandlerFunc {
 			}
 			return
 		}
+		// Verify password
+		if reqData.Password == "" {
+			l.Warn("password empty for user %s", user.Email)
+			if err := req.Error("INVALID_REQUEST", "password required", nil); err != nil {
+				l.Error("failed to respond to auth request: %v", err)
+			}
+			return
+		}
+
+		providedHash := w.hash.Sum([]byte(reqData.Password))
+		if user.PasswordHash != hex.EncodeToString(providedHash) {
+			l.Warn("invalid credentials for user %s", user.Email)
+			if err := req.Error("UNAUTHORIZED", "invalid credentials", nil); err != nil {
+				l.Error("failed to respond to auth request: %v", err)
+			}
+			return
+		}
 
 		token, err = w.userJwt(user)
 		if err != nil {
@@ -759,7 +785,7 @@ func (w *Who) handleAuthRefresh() micro.HandlerFunc {
 	return func(req micro.Request) {
 		var (
 			err      error
-			user     *User
+			user     *userStorage
 			token    string
 			reqData  api.AuthRefreshRequest
 			respData api.AuthResponse
@@ -812,10 +838,10 @@ func (w *Who) handleAuthRefresh() micro.HandlerFunc {
 
 // ----------- Helper Functions -----------
 
-func (w *Who) userCreate(username, email, password string) (*User, error) {
+func (w *Who) userCreate(username, email, password string) (*userStorage, error) {
 	var (
 		err          error
-		user         *User
+		user         *userStorage
 		userBytes    []byte
 		passwordHash []byte
 		rev          uint64
@@ -826,7 +852,7 @@ func (w *Who) userCreate(username, email, password string) (*User, error) {
 	}
 
 	passwordHash = w.hash.Sum([]byte(password))
-	user = &User{
+	user = &userStorage{
 		User: api.User{
 			Version:     1,
 			ID:          uuid.New().String(),
@@ -834,7 +860,7 @@ func (w *Who) userCreate(username, email, password string) (*User, error) {
 			Email:       email,
 			Permissions: []api.Permission{},
 		},
-		passwordHash: hex.EncodeToString(passwordHash),
+		PasswordHash: hex.EncodeToString(passwordHash),
 	}
 	userBytes, err = json.Marshal(user)
 	if err != nil {
@@ -848,7 +874,23 @@ func (w *Who) userCreate(username, email, password string) (*User, error) {
 	return user, nil
 }
 
-func (w *Who) userGet(id string) *User {
+func (w *Who) userUpdate(user *userStorage) error {
+	userBytes, err := json.Marshal(user)
+	if err != nil {
+		return fmt.Errorf("failed to marshal user: %w", err)
+	}
+	fmt.Println("\n\nuserBytes", string(userBytes))
+	fmt.Println("\n\nuser", user)
+	_, err = w.usersKv.Put(w.ctx, user.ID, userBytes)
+	if err != nil {
+		return fmt.Errorf("failed to put user in kv: %w", err)
+	}
+	w.l.Debug("user updated %s", user.Email)
+	w.l.Debug("hash %s", user.PasswordHash)
+	return nil
+}
+
+func (w *Who) userGet(id string) *userStorage {
 	for _, user := range w.users {
 		if user.ID == id {
 			return &user
@@ -856,7 +898,7 @@ func (w *Who) userGet(id string) *User {
 	}
 	return nil
 }
-func (w *Who) userByUsername(username string) *User {
+func (w *Who) userByUsername(username string) *userStorage {
 	for _, user := range w.users {
 		if user.Username == username {
 			return &user
@@ -864,7 +906,7 @@ func (w *Who) userByUsername(username string) *User {
 	}
 	return nil
 }
-func (w *Who) userByEmail(email string) *User {
+func (w *Who) userByEmail(email string) *userStorage {
 	for _, user := range w.users {
 		if user.Email == email {
 			return &user
@@ -873,7 +915,7 @@ func (w *Who) userByEmail(email string) *User {
 	return nil
 }
 
-func (w *Who) permGranted(user *User, perms []api.Permission) bool {
+func (w *Who) permGranted(user *userStorage, perms []api.Permission) bool {
 	for _, perm := range perms {
 		if !slices.Contains(user.Permissions, perm) {
 			return false
@@ -882,7 +924,7 @@ func (w *Who) permGranted(user *User, perms []api.Permission) bool {
 	return true
 }
 
-func (w *Who) userAddPermission(user *User, perm api.Permission) (bool, error) {
+func (w *Who) userAddPermission(user *userStorage, perm api.Permission) (bool, error) {
 	var (
 		err       error
 		userBytes []byte
@@ -906,12 +948,12 @@ func (w *Who) userAddPermission(user *User, perm api.Permission) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("failed to update user in KV store: %w", err)
 	}
-	user.revision = rev
+	user.Revision = rev
 
 	return true, nil
 }
 
-func (w *Who) userRemovePermission(user *User, perm api.Permission) (bool, error) {
+func (w *Who) userRemovePermission(user *userStorage, perm api.Permission) (bool, error) {
 	var (
 		err       error
 		userBytes []byte
@@ -938,14 +980,14 @@ func (w *Who) userRemovePermission(user *User, perm api.Permission) (bool, error
 	if err != nil {
 		return false, fmt.Errorf("failed to update user in KV store: %w", err)
 	}
-	user.revision = rev
+	user.Revision = rev
 
 	return true, nil
 }
 
 // ----------- JWT -----------
 
-func (w *Who) userJwt(user *User) (string, error) {
+func (w *Who) userJwt(user *userStorage) (string, error) {
 	var (
 		err          error
 		token        *jwt.Token
