@@ -1,4 +1,3 @@
-import gleam/dynamic as dyn
 import gleam/dynamic/decode as dec
 import gleam/result
 import lustre/attribute.{type Attribute}

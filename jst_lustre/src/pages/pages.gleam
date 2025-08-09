@@ -6,6 +6,7 @@ import routes.{type Route}
 import session.{type Session}
 import utils/http.{type HttpError}
 import utils/remote_data as rd
+// no view imports here; this module defines only the Page ADT and routing helpers
 
 // Improved Page type with better state management
 pub type Page {
@@ -143,6 +144,8 @@ pub fn to_uri(page: Page) -> Uri {
     }
   }
 }
+
+// Note: Rendering for pages lives under `pages/*_view.gleam` modules
 
 pub fn from_route(
   loading: Bool,

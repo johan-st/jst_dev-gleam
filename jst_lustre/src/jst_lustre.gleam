@@ -7,7 +7,7 @@ import components/ui
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/order
+// removed unused order import (sorting moved to page modules)
 import gleam/set.{type Set}
 import gleam/string
 import gleam/uri.{type Uri}
@@ -22,6 +22,13 @@ import lustre/element/html
 import lustre/event
 import modem
 import pages/pages
+import pages/index_view as index_view
+import pages/about_view as about_view
+import pages/article_list_view as article_list_view
+import pages/article_view as article_view
+import pages/url_index_view as url_index_view
+import pages/url_list_view as url_list_view
+import plinth/browser/event as p_event
 import routes.{type Route}
 import session.{type Session}
 import utils/dom_utils
@@ -47,6 +54,279 @@ fn set_timeout(callback: fn() -> Nil, delay: Int) -> Nil
 
 // MODEL -----------------------------------------------------------------------
 
+// Keyboard chord bindings ------------------------------------------------------
+pub type ChordGroup {
+  Nav
+  Cmd
+}
+
+pub type ChordBinding {
+  ChordBinding(
+    chord: key.Chord,
+    msg: Msg,
+    group: ChordGroup,
+    label: String,
+    block_default: Bool,
+  )
+}
+
+fn chord_from_keys(keys: List(key.Key)) -> key.Chord {
+  key.Chord(set.from_list(keys))
+}
+
+fn bindings_for(page: pages.Page) -> List(ChordBinding) {
+  let alt = key.Captured(key.Alt)
+  let ctrl = key.Captured(key.Ctrl)
+
+  let global_nav = []
+    |> filter_nav_by_session(page)
+
+  let page_cmd =
+    case page {
+      pages.PageArticleList(_, session) -> {
+        case session {
+          session.Authenticated(_) -> [
+            // Ctrl+N → New article
+            ChordBinding(
+              chord: chord_from_keys([ctrl, key.Captured(key.N)]),
+              msg: ArticleCreateClicked,
+              group: Cmd,
+              label: "New article",
+              block_default: True,
+            ),
+          ]
+          _ -> []
+        }
+      }
+      pages.PageArticle(article, session) -> {
+        case article.can_edit(article, session) {
+          True -> [
+            // Ctrl+E → Start editing
+            ChordBinding(
+              chord: chord_from_keys([ctrl, key.Captured(key.E)]),
+              msg: UserMouseDownNavigation(routes.to_uri(routes.ArticleEdit(article.id))),
+              group: Cmd,
+              label: "Edit",
+              block_default: True,
+            ),
+          ]
+          False -> []
+        }
+      }
+      pages.PageArticleEdit(article, _) -> [
+        // Ctrl+S → Save draft
+        ChordBinding(
+          chord: chord_from_keys([ctrl, key.Captured(key.S)]),
+          msg: ArticleDraftSaveClicked(article),
+          group: Cmd,
+          label: "Save draft",
+          block_default: True,
+        ),
+        // Alt+Space → Toggle preview/edit
+        ChordBinding(
+          chord: chord_from_keys([alt, key.Captured(key.Space)]),
+          msg: EditViewModeToggled,
+          group: Nav,
+          label: "Toggle preview/edit",
+          block_default: True,
+        ),
+      ]
+      _ -> []
+    }
+
+  let global_cmd = [
+    // Ctrl+N → prevent browser new-window globally (no-op here)
+    ChordBinding(
+      chord: chord_from_keys([ctrl, key.Captured(key.N)]),
+      msg: NoOp,
+      group: Cmd,
+      label: "",
+      block_default: True,
+    ),
+    // Ctrl+S → prevent browser save globally (no-op here)
+    ChordBinding(
+      chord: chord_from_keys([ctrl, key.Captured(key.S)]),
+      msg: NoOp,
+      group: Cmd,
+      label: "",
+      block_default: True,
+    ),
+    // Alt+Space → prevent OS menu globally (no-op here when not in edit)
+    ChordBinding(
+      chord: chord_from_keys([alt, key.Captured(key.Space)]),
+      msg: NoOp,
+      group: Nav,
+      label: "",
+      block_default: True,
+    ),
+  ]
+
+  global_nav
+  |> list.append(page_cmd)
+  |> list.append(global_cmd)
+}
+
+fn filter_nav_by_session(bindings: List(ChordBinding), page: pages.Page) -> List(ChordBinding) {
+  let session =
+    case page {
+      pages.PageArticleList(_, sess) -> sess
+      pages.PageArticle(_, sess) -> sess
+      pages.PageArticleEdit(_, sess) -> session.Authenticated(sess)
+      pages.PageUrlShortIndex(sess) -> session.Authenticated(sess)
+      pages.PageUrlShortInfo(_, sess) -> session.Authenticated(sess)
+      pages.PageUiComponents(sess) -> session.Authenticated(sess)
+      pages.PageNotifications(sess) -> session.Authenticated(sess)
+      pages.PageProfile(sess) -> session.Authenticated(sess)
+      pages.PageDjotDemo(sess, _) -> session.Authenticated(sess)
+      _ -> session.Unauthenticated
+    }
+
+  let alt = key.Captured(key.Alt)
+  let numbers_common = [
+    // Alt+1 → Home
+    ChordBinding(
+      chord: chord_from_keys([alt, key.Captured(key.Digit1)]),
+      msg: UserMouseDownNavigation(routes.to_uri(routes.Index)),
+      group: Nav,
+      label: "Home",
+      block_default: False,
+    ),
+    // Alt+2 → Articles
+    ChordBinding(
+      chord: chord_from_keys([alt, key.Captured(key.Digit2)]),
+      msg: UserMouseDownNavigation(routes.to_uri(routes.Articles)),
+      group: Nav,
+      label: "Articles",
+      block_default: False,
+    ),
+    // Alt+3 → About
+    ChordBinding(
+      chord: chord_from_keys([alt, key.Captured(key.Digit3)]),
+      msg: UserMouseDownNavigation(routes.to_uri(routes.About)),
+      group: Nav,
+      label: "About",
+      block_default: False,
+    ),
+  ]
+
+  let numbers_more = [
+    // Alt+4 → Djot Demo
+    ChordBinding(
+      chord: chord_from_keys([alt, key.Captured(key.Digit4)]),
+      msg: UserMouseDownNavigation(routes.to_uri(routes.DjotDemo)),
+      group: Nav,
+      label: "Djot Demo",
+      block_default: False,
+    ),
+    // Alt+5 → URL Shortener
+    ChordBinding(
+      chord: chord_from_keys([alt, key.Captured(key.Digit5)]),
+      msg: UserMouseDownNavigation(routes.to_uri(routes.UrlShortIndex)),
+      group: Nav,
+      label: "URL Shortener",
+      block_default: False,
+    ),
+    // Alt+6 → UI Components
+    ChordBinding(
+      chord: chord_from_keys([alt, key.Captured(key.Digit6)]),
+      msg: UserMouseDownNavigation(routes.to_uri(routes.UiComponents)),
+      group: Nav,
+      label: "UI Components",
+      block_default: False,
+    ),
+    // Alt+7 → Notifications
+    ChordBinding(
+      chord: chord_from_keys([alt, key.Captured(key.Digit7)]),
+      msg: UserMouseDownNavigation(routes.to_uri(routes.Notifications)),
+      group: Nav,
+      label: "Notifications",
+      block_default: False,
+    ),
+  ]
+
+  let auth_based = case session {
+    session.Authenticated(_) -> [
+      // Alt+P → Profile (only when authenticated)
+      ChordBinding(
+        chord: chord_from_keys([key.Captured(key.Alt), key.Captured(key.P)]),
+        msg: UserMouseDownNavigation(routes.to_uri(routes.Profile)),
+        group: Nav,
+        label: "Profile",
+        block_default: False,
+      ),
+      ..numbers_more
+    ]
+    session.Unauthenticated | session.Pending -> [
+      // Alt+L → Login (toggle login form)
+      ChordBinding(
+        chord: chord_from_keys([key.Captured(key.Alt), key.Captured(key.L)]),
+        msg: LoginFormToggled,
+        group: Nav,
+        label: "Login",
+        block_default: False,
+      ),
+    ]
+  }
+
+  bindings
+  |> list.append(numbers_common)
+  |> list.append(auth_based)
+}
+
+fn recompute_bindings_for_current_page(model: Model) -> Model {
+  let page = pages.from_route(False, model.route, model.session, model.articles)
+  let new_bindings = bindings_for(page)
+  let new_chords = new_bindings |> list.map(fn(b) { b.chord }) |> set.from_list
+  Model(..model, chord_bindings: new_bindings, chords_available: new_chords)
+}
+
+fn chord_equals(a: key.Chord, b: key.Chord) -> Bool {
+  case a, b {
+    key.Chord(ak), key.Chord(bk) -> set.is_subset(ak, bk) && set.is_subset(bk, ak)
+  }
+}
+
+fn should_prevent_keydown(active_chords: Set(key.Chord)) -> fn(p_event.Event(p_event.UIEvent(p_event.KeyboardEvent))) -> Bool {
+  fn(ev) {
+    let parsed = key.parse_key(p_event.code(ev), p_event.key(ev))
+    let keys = set.from_list([parsed])
+    // If the single key contains Ctrl or Alt with sensitive keys, prevent default immediately
+    // We simulate a quick check for our critical combos by looking for the base keys in the event flags
+    let is_ctrl = p_event.ctrl_key(ev)
+    let is_alt = p_event.alt_key(ev)
+    let code = p_event.code(ev)
+
+    let ctrl_sensitive = case code {
+      "KeyN" -> True
+      "KeyS" -> True
+      "KeyE" -> True
+      _ -> False
+    }
+    let alt_sensitive = case code {
+      "Space" -> True
+      _ -> False
+    }
+    let sensitive = case is_ctrl {
+      True -> ctrl_sensitive
+      False -> case is_alt {
+        True -> alt_sensitive
+        False -> False
+      }
+    }
+
+    case sensitive {
+      True -> True
+      False -> {
+        // Also consult active chords in case a full chord would match using subset logic
+        case key.triggered_chord(keys, active_chords) {
+          Some(_) -> True
+          None -> False
+        }
+      }
+    }
+  }
+}
+
 type Model {
   Model(
     base_uri: Uri,
@@ -70,6 +350,8 @@ type Model {
     login_loading: Bool,
     // Keyboard
     keys_down: Set(key.Key),
+    chords_available: Set(key.Chord),
+    chord_bindings: List(ChordBinding),
     // Notification form fields
     notification_form_title: String,
     notification_form_message: String,
@@ -153,8 +435,8 @@ pub type Msg {
   LoginFormSubmitted
 
   // Keyboard events
-  KeyboardDown(key.Key)
-  KeyboardUp(key.Key)
+  KeyboardDown(p_event.Event(p_event.UIEvent(p_event.KeyboardEvent)))
+  KeyboardUp(p_event.Event(p_event.UIEvent(p_event.KeyboardEvent)))
 
   // Other events
   WindowUnfocused
@@ -306,13 +588,16 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
 
     // Keyboard events
-    KeyboardDown(key) -> {
-      let model = Model(..model, keys_down: set.insert(model.keys_down, key))
-      #(model, effect.none())
+    KeyboardDown(ev) -> {
+      update_chord(ev, model)
     }
 
     KeyboardUp(key) -> {
-      let model = Model(..model, keys_down: set.delete(model.keys_down, key))
+      let code = p_event.code(key)
+      let key = p_event.key(key)
+      let key_parsed = key.parse_key(code, key)
+      let model =
+        Model(..model, keys_down: set.delete(model.keys_down, key_parsed))
       #(model, effect.none())
     }
 
@@ -401,10 +686,11 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           article.article_get(ArticleGot(id, _), id, model.base_uri),
         )
 
-        Ok(articles), _ -> #(
-          Model(..model, articles: model.articles |> rd.to_loaded(articles)),
-          effect.none(),
-        )
+        Ok(articles), _ -> {
+          let model = Model(..model, articles: model.articles |> rd.to_loaded(articles))
+          |> recompute_bindings_for_current_page
+          #(model, effect.none())
+        }
         Error(err), _ -> #(
           Model(..model, articles: model.articles |> rd.to_errored(err)),
           effect.none(),
@@ -425,7 +711,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                 }
               }),
             )
-          #(Model(..model, articles: updated_articles), effect.none())
+          let model = Model(..model, articles: updated_articles)
+          |> recompute_bindings_for_current_page
+          #(model, effect.none())
         }
         Error(err) -> {
           let updated_articles =
@@ -442,7 +730,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                 }
               }),
             )
-          #(Model(..model, articles: updated_articles), effect.none())
+          let model = Model(..model, articles: updated_articles)
+          |> recompute_bindings_for_current_page
+          #(model, effect.none())
         }
       }
     }
@@ -705,41 +995,40 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               )
             None -> effect.none()
           }
-          #(
-            Model(
-              ..model,
-              session: sess,
-              notice: "Successfully logged in",
-              login_form_open: False,
-              login_loading: False,
-              login_username: "",
-              login_password: "",
-            ),
-            schedule_effect,
+          let model = Model(
+            ..model,
+            session: sess,
+            notice: "Successfully logged in",
+            login_form_open: False,
+            login_loading: False,
+            login_username: "",
+            login_password: "",
           )
+          |> recompute_bindings_for_current_page
+          #(model, schedule_effect)
         }
         Error(err) -> {
           echo err
-          #(
-            Model(
-              ..model,
-              session: session.Unauthenticated,
-              notice: "Login failed. Please check your credentials.",
-              login_loading: False,
-            ),
-            effect.none(),
+          let model = Model(
+            ..model,
+            session: session.Unauthenticated,
+            notice: "Login failed. Please check your credentials.",
+            login_loading: False,
           )
+          |> recompute_bindings_for_current_page
+          #(model, effect.none())
         }
       }
     }
     AuthLogoutClicked -> {
-      #(
-        Model(..model, session: session.Unauthenticated),
-        session.auth_logout(AuthLogoutResponse, model.base_uri),
-      )
+      let model = Model(..model, session: session.Unauthenticated)
+      |> recompute_bindings_for_current_page
+      #(model, session.auth_logout(AuthLogoutResponse, model.base_uri))
     }
     AuthLogoutResponse(_result) -> {
-      #(Model(..model, session: session.Unauthenticated), effect.none())
+      let model = Model(..model, session: session.Unauthenticated)
+      |> recompute_bindings_for_current_page
+      #(model, effect.none())
     }
     AuthCheckClicked -> {
       #(
@@ -759,22 +1048,20 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               )
             None -> effect.none()
           }
-          #(
-            Model(..model, session: sess, notice: "auth check, OK"),
-            schedule_effect,
-          )
+          let model = Model(..model, session: sess, notice: "auth check, OK")
+          |> recompute_bindings_for_current_page
+          #(model, schedule_effect)
         }
         Error(err) -> {
           echo "session check response error"
           echo err
-          #(
-            Model(
-              ..model,
-              session: session.Unauthenticated,
-              notice: "auth check, ERROR",
-            ),
-            effect.none(),
+          let model = Model(
+            ..model,
+            session: session.Unauthenticated,
+            notice: "auth check, ERROR",
           )
+          |> recompute_bindings_for_current_page
+          #(model, effect.none())
         }
       }
     }
@@ -793,7 +1080,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               )
             None -> effect.none()
           }
-          #(Model(..model, session: sess), schedule_effect)
+          let model = Model(..model, session: sess)
+          |> recompute_bindings_for_current_page
+          #(model, schedule_effect)
         }
         Error(_err) -> #(model, effect.none())
       }
@@ -1150,7 +1439,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     NotificationSendResponse(result) -> {
       case result {
-        Ok(response) -> {
+        Ok(_response) -> {
           #(
             Model(
               ..model,
@@ -1368,7 +1657,10 @@ fn fetch_articles_model(model_effect_touple) -> #(Model, Effect(Msg)) {
 fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
   let route = routes.from_uri(uri)
   case route {
-    routes.About -> #(Model(..model, route:), effect.none())
+    routes.About -> {
+      let model = recompute_bindings_for_current_page(Model(..model, route:))
+      #(model, effect.none())
+    }
     routes.Article(slug) -> {
       case model.articles {
         NotInitialized -> #(
@@ -1404,16 +1696,18 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
                 }
               },
             )
-          #(
-            Model(
-              ..model,
-              route:,
-              articles: model.articles |> rd.to_loaded(articles_updated),
-            ),
-            effect,
+          let model = Model(
+            ..model,
+            route:,
+            articles: model.articles |> rd.to_loaded(articles_updated),
           )
+          |> recompute_bindings_for_current_page
+          #(model, effect)
         }
-        _ -> #(Model(..model, route:), effect.none())
+        _ -> {
+          let model = recompute_bindings_for_current_page(Model(..model, route:))
+          #(model, effect.none())
+        }
       }
     }
     routes.ArticleEdit(id) ->
@@ -1457,16 +1751,18 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
               },
             )
           echo routes.to_string(route)
-          #(
-            Model(
-              ..model,
-              route:,
-              articles: model.articles |> rd.to_loaded(articles_updated),
-            ),
-            effect,
+          let model = Model(
+            ..model,
+            route:,
+            articles: model.articles |> rd.to_loaded(articles_updated),
           )
+          |> recompute_bindings_for_current_page
+          #(model, effect)
         }
-        _ -> #(Model(..model, route:), effect.none())
+        _ -> {
+          let model = recompute_bindings_for_current_page(Model(..model, route:))
+          #(model, effect.none())
+        }
       }
     routes.Articles -> {
       case model.articles {
@@ -1478,10 +1774,16 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
           ),
           article.article_metadata_get(ArticleMetaGot, model.base_uri),
         )
-        _ -> #(Model(..model, route:), effect.none())
+        _ -> {
+          let model = recompute_bindings_for_current_page(Model(..model, route:))
+          #(model, effect.none())
+        }
       }
     }
-    routes.Index -> #(Model(..model, route:), effect.none())
+    routes.Index -> {
+      let model = recompute_bindings_for_current_page(Model(..model, route:))
+      #(model, effect.none())
+    }
     routes.UrlShortIndex -> {
       case model.short_urls {
         NotInitialized -> #(
@@ -1492,13 +1794,28 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
           ),
           short_url.list_short_urls(ShortUrlListGot, model.base_uri, 10, 0),
         )
-        _ -> #(Model(..model, route:), effect.none())
+        _ -> {
+          let model = recompute_bindings_for_current_page(Model(..model, route:))
+          #(model, effect.none())
+        }
       }
     }
-    routes.UrlShortInfo(short_code) -> #(Model(..model, route:), effect.none())
-    routes.DjotDemo -> #(Model(..model, route:), effect.none())
-    routes.UiComponents -> #(Model(..model, route:), effect.none())
-    routes.Notifications -> #(Model(..model, route:), effect.none())
+    routes.UrlShortInfo(_short_code) -> {
+      let model = recompute_bindings_for_current_page(Model(..model, route:))
+      #(model, effect.none())
+    }
+    routes.DjotDemo -> {
+      let model = recompute_bindings_for_current_page(Model(..model, route:))
+      #(model, effect.none())
+    }
+    routes.UiComponents -> {
+      let model = recompute_bindings_for_current_page(Model(..model, route:))
+      #(model, effect.none())
+    }
+    routes.Notifications -> {
+      let model = recompute_bindings_for_current_page(Model(..model, route:))
+      #(model, effect.none())
+    }
     routes.Profile -> {
       case session.subject(model.session) {
         Some(subject) -> #(
@@ -1509,10 +1826,45 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
           ),
           user.user_get(ProfileMeGot, model.base_uri, subject),
         )
-        None -> #(Model(..model, route:), effect.none())
+        None -> {
+          let model = recompute_bindings_for_current_page(Model(..model, route:))
+          #(model, effect.none())
+        }
       }
     }
-    routes.NotFound(_uri) -> #(Model(..model, route:), effect.none())
+    routes.NotFound(_uri) -> {
+      let model = recompute_bindings_for_current_page(Model(..model, route:))
+      #(model, effect.none())
+    }
+  }
+}
+
+fn update_chord(
+  ev: p_event.Event(p_event.UIEvent(p_event.KeyboardEvent)),
+  model: Model,
+) -> #(Model, Effect(Msg)) {
+  let key_parsed = key.parse_key(p_event.code(ev), p_event.key(ev))
+  let model = Model(..model, keys_down: set.insert(model.keys_down, key_parsed))
+
+  case key.triggered_chord(model.keys_down, model.chords_available) {
+    None -> #(model, effect.none())
+    Some(chord) -> {
+      let binding_opt = list.find(model.chord_bindings, fn(b) { chord_equals(b.chord, chord) })
+      case binding_opt {
+        Error(_) -> #(model, effect.none())
+        Ok(binding) -> {
+          // Prevent default if requested
+          case binding.block_default { True -> p_event.prevent_default(ev) False -> Nil }
+
+          // Clear pressed chord keys
+          let keys = case chord { key.Chord(keys) -> keys }
+          let model = Model(..model, keys_down: set.difference(model.keys_down, keys))
+
+          // Dispatch the bound message through the regular update
+          update(model, binding.msg)
+        }
+      }
+    }
   }
 }
 
@@ -1520,18 +1872,18 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
 
 fn view(model: Model) -> Element(Msg) {
   let page = page_from_model(model)
-  let content = case page {
+  let content: List(Element(Msg)) = case page {
     pages.Loading(_) -> view_loading()
-    pages.PageIndex -> view_index()
-    pages.PageArticleList(articles, session) ->
-      view_article_listing(articles, session)
+    pages.PageIndex -> index_view.view(UserMouseDownNavigation)
+    pages.PageArticleList(articles, _session) ->
+      article_list_view.view(articles, model.session)
     pages.PageArticleListLoading -> view_article_listing_loading()
-    pages.PageArticle(article, session) -> view_article(article, session)
+    pages.PageArticle(article, session) -> article_view.view_article_page(article, session)
     pages.PageArticleEdit(article, _) -> view_article_edit(model, article)
     pages.PageError(error) -> {
       case error {
         pages.ArticleNotFound(slug, _) ->
-          view_article_not_found(model.articles, slug)
+          article_view.view_article_not_found(slug)
         pages.ArticleEditNotFound(id) ->
           view_article_edit_not_found(model.articles, id)
         pages.HttpError(error, _) -> [
@@ -1543,8 +1895,21 @@ fn view(model: Model) -> Element(Msg) {
         pages.Other(msg) -> [view_error(msg)]
       }
     }
-    pages.PageAbout -> view_about()
-    pages.PageUrlShortIndex(_) -> view_url_index(model)
+    pages.PageAbout -> about_view.view()
+    pages.PageUrlShortIndex(_) -> url_index_view.view(url_list_view.list(
+      model.short_urls,
+      model.expanded_urls,
+      model.delete_confirmation,
+      model.copy_feedback,
+      url_list_view.Callbacks(
+        ShortUrlCopyClicked,
+        ShortUrlToggleActiveClicked,
+        ShortUrlToggleExpanded,
+        ShortUrlDeleteClicked,
+        ShortUrlDeleteConfirmClicked,
+        fn() { ShortUrlDeleteCancelClicked },
+      ),
+    ))
     pages.PageUrlShortInfo(short, _) -> view_url_info_page(model, short)
     pages.PageDjotDemo(_, content) -> view_djot_demo(content)
     pages.PageUiComponents(_) -> view_ui_components()
@@ -1552,10 +1917,8 @@ fn view(model: Model) -> Element(Msg) {
     pages.PageProfile(_) -> view_profile(model)
     pages.PageNotFound(uri) -> view_not_found(uri)
   }
-  let nav_hints_overlay = case
-    set.contains(model.keys_down, key.Captured(key.Alt))
-  {
-    True -> view_nav_hints(model.session)
+  let nav_hints_overlay = case set.contains(model.keys_down, key.Captured(key.Alt)) {
+    True -> view_nav_hints_from_bindings(model)
     False -> element.none()
   }
   let layout = case page {
@@ -1611,38 +1974,26 @@ fn view(model: Model) -> Element(Msg) {
   html.div([], [
     nav_hints_overlay,
     layout(content),
-    view_status_bar(model.keys_down, model.session),
+    view_status_bar_with_cmds(model),
   ])
 }
 
-fn view_nav_hints(session: session.Session) -> Element(Msg) {
-  // Determine which navigation items to show based on authentication
-  let nav_items = case session {
-    session.Authenticated(_) -> [
-      // All users can access these
-      #("Home", "Alt+1"),
-      #("Articles", "Alt+2"),
-      #("About", "Alt+3"),
-      // Only authenticated users can access these
-      #("Djot Demo", "Alt+4"),
-      #("URL Shortener", "Alt+5"),
-      #("UI Components", "Alt+6"),
-      #("Notifications", "Alt+7"),
-    ]
-    session.Unauthenticated -> [
-      // Unauthenticated users can only access these
-      #("Home", "Alt+1"),
-      #("Articles", "Alt+2"),
-      #("About", "Alt+3"),
-      #("Login", "Alt+L"),
-    ]
-    session.Pending -> [
-      // Show minimal navigation while session is loading
-      #("Home", "Alt+1"),
-      #("Articles", "Alt+2"),
-      #("About", "Alt+3"),
-    ]
-  }
+fn view_nav_hints_from_bindings(model: Model) -> Element(Msg) {
+  let shift = set.contains(model.keys_down, key.Captured(key.Shift))
+  let nav_items =
+    model.chord_bindings
+    |> list.filter(fn(b) { b.group == Nav && b.label != "" })
+    |> list.map(fn(b) {
+      let combo = case b.chord { key.Chord(keys_set) ->
+        keys_set
+        |> set.to_list
+        |> list.map(fn(k) {
+          case k { key.Captured(c) -> key.to_string(c, shift) key.Unhandled(code) -> code }
+        })
+        |> string.join("+")
+      }
+      #(b.label, combo)
+    })
 
   html.div([attr.class("fixed inset-0 z-50 flex items-center justify-center")], [
     // Dark overlay background
@@ -1667,12 +2018,7 @@ fn view_nav_hints(session: session.Session) -> Element(Msg) {
           [html.text("Quick Navigation")],
         ),
         html.div([attr.class("text-base text-zinc-400 mb-6 text-center")], [
-          html.text(case session {
-            session.Authenticated(_) -> "Use Alt+1 through Alt+6 for navigation"
-            session.Unauthenticated ->
-              "Use Alt+1 through Alt+3 and Alt+L for login"
-            session.Pending -> "Use Alt+1 through Alt+3 for navigation"
-          }),
+          html.text("Hold Alt and press highlighted keys to navigate"),
         ]),
         html.ul(
           [attr.class("space-y-4")],
@@ -1708,8 +2054,33 @@ fn view_nav_hints(session: session.Session) -> Element(Msg) {
   ])
 }
 
-fn view_status_bar(keys: Set(key.Key), session: session.Session) -> Element(Msg) {
-  case session {
+fn view_status_bar_with_cmds(model: Model) -> Element(Msg) {
+  let keys = model.keys_down
+  let session_ = model.session
+  let shift = set.contains(keys, key.Captured(key.Shift))
+  let ctrl = set.contains(keys, key.Captured(key.Ctrl))
+  let alt = set.contains(keys, key.Captured(key.Alt))
+
+  let cmd_hints = case ctrl {
+    True -> {
+      model.chord_bindings
+      |> list.filter(fn(b) { b.group == Cmd && b.label != "" })
+      |> list.map(fn(b) {
+        let key_names = case b.chord { key.Chord(keys_set) ->
+          keys_set
+          |> set.to_list
+          |> list.map(fn(k) {
+            case k { key.Captured(c) -> key.to_string(c, shift) key.Unhandled(code) -> code }
+          })
+          |> string.join("+")
+        }
+        #(b.label, key_names)
+      })
+    }
+    False -> []
+  }
+
+  case session_ {
     session.Authenticated(_) -> {
       let key_list = set.to_list(keys)
       html.div(
@@ -1725,7 +2096,7 @@ fn view_status_bar(keys: Set(key.Key), session: session.Session) -> Element(Msg)
                 html.span([], [html.text("Ctrl")]),
                 html.div(
                   [
-                    attr.class(case set.contains(keys, key.Captured(key.Ctrl)) {
+                    attr.class(case ctrl {
                       True -> "w-3 h-3 bg-green-500 rounded-full"
                       False -> "w-3 h-3 bg-gray-500 rounded-full"
                     }),
@@ -1736,7 +2107,7 @@ fn view_status_bar(keys: Set(key.Key), session: session.Session) -> Element(Msg)
               html.span([], [html.text("Alt")]),
               html.div(
                 [
-                  attr.class(case set.contains(keys, key.Captured(key.Alt)) {
+                  attr.class(case alt {
                     True -> "w-3 h-3 bg-green-500 rounded-full"
                     False -> "w-3 h-3 bg-gray-500 rounded-full"
                   }),
@@ -1745,13 +2116,25 @@ fn view_status_bar(keys: Set(key.Key), session: session.Session) -> Element(Msg)
               ),
               ..list.map(key_list, fn(key) {
                 let text = case key {
-                  key.Captured(key) -> key.to_string(key)
-                  key.Unhandled(code, key) -> "(" <> code <> ": " <> key <> ")"
+                  key.Captured(key) -> key.to_string(key, shift)
+                  key.Unhandled(code) -> "(" <> code <> ")"
                 }
                 html.span([], [html.text(text)])
               })
             ]),
-            html.div([attr.class("text-gray-400")], [html.text("JST Lustre")]),
+            html.div([attr.class("flex items-center space-x-6")], [
+              html.div([attr.class("text-gray-400")], [html.text("JST Lustre")]),
+              case cmd_hints {
+                [] -> element.none()
+                _ -> html.div([attr.class("flex items-center space-x-4 text-xs text-zinc-300")],
+                  list.map(cmd_hints, fn(tuple) {
+                    case tuple { #(label, combo) ->
+                      html.span([], [html.text(label <> ": " <> combo)])
+                    }
+                  }),
+                )
+              }
+            ]),
           ]),
         ],
       )
@@ -1769,7 +2152,7 @@ fn view_profile(model: Model) -> List(Element(Msg)) {
     )
   let content = case model.profile_user {
     NotInitialized -> [ui.loading_state("Loading profile", None, ui.ColorTeal)]
-    Pending(Some(user), _) -> [
+    Pending(Some(_user), _) -> [
       ui.loading_state(
         "Loading profile (could have been optimistic)",
         None,
@@ -2362,204 +2745,11 @@ fn view_header_link(
   )
 }
 
-// VIEW PAGES ------------------------------------------------------------------
-
-fn view_index() -> List(Element(Msg)) {
-  let assert Ok(nats_uri) = uri.parse("/article/nats-all-the-way-down")
-  [
-    ui.page_header(
-      "Welcome to jst.dev!",
-      Some(
-        "...or, A lesson on overengineering for fun and... well just for fun.",
-      ),
-    ),
-    ui.content_container([
-      html.div([attr.class("prose prose-lg text-zinc-300 max-w-none")], [
-        html.p([attr.class("text-xl leading-relaxed mb-8")], [
-          html.text(
-            "This site and its underlying IT infrastructure is the primary 
-            place for me to experiment with technologies and topologies. I 
-            also share some of my thoughts and learnings here.",
-          ),
-        ]),
-        html.p([attr.class("mb-6")], [
-          html.text(
-            "This site and its underlying IT infrastructure is the primary 
-            place for me to experiment with technologies and topologies. I 
-            also share some of my thoughts and learnings here. Feel free to 
-            check out my overview: ",
-          ),
-          ui.link_primary(
-            "NATS all the way down →",
-            UserMouseDownNavigation(nats_uri),
-          ),
-        ]),
-        html.p([attr.class("mb-6")], [
-          html.text(
-            "It too is a work in progress and I mostly keep it here for my own reference.",
-          ),
-        ]),
-        html.p([attr.class("mb-6")], [
-          html.text(
-            "I'm a software developer and writer, exploring modern technologies 
-            and sharing insights from my experiments. This space serves as both 
-            a playground for new ideas and a platform for documenting the journey.",
-          ),
-        ]),
-      ]),
-    ]),
-  ]
-}
-
 fn view_loading() -> List(Element(Msg)) {
   [ui.loading_state("Loading page...", None, ui.ColorNeutral)]
 }
 
-fn view_article_listing(
-  articles: List(Article),
-  session: session.Session,
-) -> List(Element(Msg)) {
-  let filtered_articles = case session {
-    session.Unauthenticated ->
-      articles
-      |> list.filter(fn(article) {
-        case article.published_at {
-          Some(_) -> True
-          None -> False
-        }
-      })
-    _ -> articles
-  }
-
-  let articles_elements =
-    filtered_articles
-    |> list.sort(fn(a, b) {
-      case a.published_at, b.published_at {
-        // Both unpublished - sort by slug
-        None, None -> string.compare(a.slug, b.slug)
-        // A is unpublished, B is published - A comes first
-        None, Some(_) -> order.Lt
-        // A is published, B is unpublished - B comes first  
-        Some(_), None -> order.Gt
-        // Both published - sort by date (most recent first)
-        Some(date_a), Some(date_b) -> birl.compare(date_b, date_a)
-      }
-    })
-    |> list.map(fn(article) {
-      case article {
-        ArticleV1(
-          id: _,
-          slug:,
-          author: _,
-          title: _,
-          leading: _,
-          subtitle: _,
-          content: _,
-          draft: _,
-          published_at: _,
-          revision: _,
-          tags:,
-        ) -> {
-          let article_uri = routes.Article(slug) |> routes.to_uri
-          html.article([attr.class("mt-6 group")], [
-            html.a(
-              [
-                attr.class(
-                  "relative group block border-l border-zinc-700 pl-4 hover:border-pink-700 transition-colors duration-150",
-                ),
-                attr.href(uri.to_string(article_uri)),
-                event.on_mouse_enter(ArticleHovered(article)),
-                mouse.on_mouse_down_no_right(UserMouseDownNavigation(
-                  article_uri,
-                )),
-              ],
-              [
-                // static corner accents on the left side
-                html.span(
-                  [
-                    attr.class(
-                      "pointer-events-none absolute top-0 left-0 w-6 h-6 border-t border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
-                    ),
-                  ],
-                  [],
-                ),
-                html.span(
-                  [
-                    attr.class(
-                      "pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
-                    ),
-                  ],
-                  [],
-                ),
-                html.div([attr.class("flex justify-between gap-4")], [
-                  html.div([attr.class("flex flex-col")], [
-                    html.h3(
-                      [
-                        attr.id("article-title-" <> slug),
-                        attr.class("article-title"),
-                        attr.class("text-xl text-pink-700 font-light pt-4"),
-                      ],
-                      [html.text(article.title)],
-                    ),
-                    view_subtitle(article.subtitle, slug),
-                  ]),
-                  html.div([attr.class("flex flex-col items-end")], [
-                    view_publication_status(article),
-                    view_author(article.author),
-                  ]),
-                ]),
-                view_simple_paragraph(article.leading),
-                html.div([attr.class("flex justify-end mt-2")], [
-                  view_article_tags(tags),
-                ]),
-              ],
-            ),
-          ])
-        }
-      }
-    })
-
-  let header_section = [
-    ui.flex_between(ui.page_title("Articles"), case session {
-      session.Authenticated(_) ->
-        ui.button(
-          "New Article",
-          ui.ColorTeal,
-          ui.ButtonStateNormal,
-          ArticleCreateClicked,
-        )
-      _ -> element.none()
-    }),
-  ]
-
-  // Show helpful message when no articles are available
-  let content_section = case articles_elements {
-    [] -> [
-      ui.empty_state(
-        "No articles yet",
-        case session {
-          session.Authenticated(_) ->
-            "Ready to share your thoughts? Create your first article to get started."
-          _ ->
-            "No published articles are available yet. Check back later for new content!"
-        },
-        case session {
-          session.Authenticated(_) ->
-            Some(ui.button(
-              "Create Your First Article",
-              ui.ColorTeal,
-              ui.ButtonStateNormal,
-              ArticleCreateClicked,
-            ))
-          _ -> None
-        },
-      ),
-    ]
-    _ -> articles_elements
-  }
-
-  list.append(header_section, content_section)
-}
+// removed unused old view function; replaced by pages/article_list_view.gleam
 
 fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
   case article.draft {
@@ -2583,7 +2773,7 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
           slug: draft.slug(draft),
           subtitle: draft.subtitle(draft),
         )
-      let preview = view_article(draft_article, session.Unauthenticated)
+      let preview = article_view.view_article_page(draft_article, session.Unauthenticated)
 
       [
         // Toggle button for mobile
@@ -2896,138 +3086,10 @@ fn view_article_edit_input(
   ])
 }
 
-fn view_article(
-  article: Article,
-  session: session.Session,
-) -> List(Element(Msg)) {
-  let content: List(Element(Msg)) = case article.content {
-    NotInitialized -> [view_error("content not initialized")]
-    Pending(_, _) -> [
-      ui.loading_bar(ui.ColorTeal),
-      ui.loading("Loading article...", ui.ColorNeutral),
-    ]
-    Loaded(content_string, _, _) -> jot_to_lustre.to_lustre(content_string)
-    Errored(error, _) -> [view_error(error_string.http_error(error))]
-  }
-  [
-    html.article([], [
-      html.div([attr.class("flex flex-col justify-between group")], [
-        view_article_actions(article, session),
-        html.div([attr.class("flex gap-2 justify-between")], [
-          html.div([attr.class("flex flex-col justify-between")], [
-            view_title(article.title, article.slug),
-            view_subtitle(article.subtitle, article.slug),
-          ]),
-          html.div([attr.class("flex flex-col items-end ")], [
-            view_publication_status(article),
-            view_author(article.author),
-          ]),
-        ]),
-        html.div([attr.class("flex justify-between mt-2")], [
-          view_article_tags(article.tags),
-        ]),
-      ]),
-      view_leading(article.leading, article.slug),
-      ..content
-    ]),
-  ]
-}
 
-fn view_article_not_found(
-  available_articles: RemoteData(List(Article), HttpError),
-  slug: String,
-) -> List(Element(Msg)) {
-  case available_articles {
-    Loaded(_articles, _, _) -> [
-      view_title("Article not found", slug),
-      view_simple_paragraph("The article you are looking for does not exist."),
-    ]
-    Errored(error, _) -> [
-      view_title("There was an error loading the article", slug),
-      view_simple_paragraph(error_string.http_error(error)),
-    ]
-    Pending(_, _) -> [
-      view_title("Loading article", slug),
-      view_simple_paragraph("Loading article..."),
-    ]
-    NotInitialized -> [
-      view_title("Loading article", slug),
-      view_simple_paragraph("Loading article..."),
-    ]
-  }
-}
 
-fn view_about() -> List(Element(Msg)) {
-  [
-    view_title("About", "about"),
-    view_simple_paragraph(
-      "I'm a software developer and a writer. I'm also a father and a husband. 
-      I'm also a software developer and a writer. I'm also a father and a 
-      husband. I'm also a software developer and a writer. I'm also a father 
-      and a husband. I'm also a software developer and a writer. I'm also a 
-      father and a husband.",
-    ),
-    view_simple_paragraph(
-      "If you enjoy these glimpses into my mind, feel free to come back
-       semi-regularly. But not too regularly, you creep.",
-    ),
-  ]
-}
 
-fn view_url_index(model: Model) -> List(Element(Msg)) {
-  [
-    view_title("URL Shortener", "url-shortener"),
-    view_simple_paragraph("Create and manage short URLs for easy sharing."),
-    view_url_create_form(model),
-    view_url_list(model),
-  ]
-}
-
-fn view_url_create_form(model: Model) -> Element(Msg) {
-  html.div(
-    [attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")],
-    [
-      html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
-        html.text("Create Short URL"),
-      ]),
-      html.div([attr.class("space-y-4")], [
-        ui.form_input(
-          "Target URL",
-          model.short_url_form_target_url,
-          "https://example.com",
-          "url",
-          True,
-          case helpers.validate_target_url(model.short_url_form_target_url) {
-            #(_, Some(error_msg)) -> Some(error_msg)
-            _ -> None
-          },
-          ShortUrlFormTargetUrlUpdated,
-        ),
-        ui.form_input(
-          "Short Code (optional)",
-          model.short_url_form_short_code,
-          "Leave empty for random code",
-          "text",
-          False,
-          None,
-          ShortUrlFormShortCodeUpdated,
-        ),
-        ui.button(
-          "Create Short URL",
-          ui.ColorTeal,
-          case helpers.validate_target_url(model.short_url_form_target_url) {
-            #(True, None) -> ui.ButtonStateNormal
-            _ -> ui.ButtonStateDisabled
-          },
-          ShortUrlCreateClicked(
-            model.short_url_form_short_code,
-            model.short_url_form_target_url,
-          ),
-        ),
-      ]),
-    ],
-  )
-}
+// removed old URL index helpers; page views now in pages/url_index_view.gleam
 
 fn view_url_list(model: Model) -> Element(Msg) {
   case model.short_urls {
@@ -3605,69 +3667,11 @@ fn view_not_found(requested_uri: Uri) -> List(Element(Msg)) {
 
 // VIEW HELPERS ----------------------------------------------------------------
 
-fn view_publication_status(article: Article) -> Element(msg) {
-  case article.published_at {
-    Some(published_time) -> {
-      let formatted_date = birl.to_naive_date_string(published_time)
-      html.span(
-        [
-          attr.class(
-            "text-xs text-zinc-500 px-4 pt-2 w-max border-t border-r border-zinc-700 group-hover:border-pink-700 transition-colors duration-25",
-          ),
-        ],
-        [html.text(formatted_date)],
-      )
-    }
-    None ->
-      html.span(
-        [
-          attr.class(
-            "text-xs text-zinc-500 px-4 pt-2 w-max italic border-t border-r border-zinc-700 group-hover:border-pink-700 transition-colors duration-25",
-          ),
-        ],
-        [html.text("not published")],
-      )
-  }
-}
+// removed: moved to partials/article_partials.gleam
 
-fn view_author(author: String) -> Element(msg) {
-  html.div(
-    [
-      attr.class(
-        "text-xs text-zinc-400 pt-0 border-r border-zinc-700 pr-4 group-hover:border-pink-700 transition-colors duration-25",
-      ),
-    ],
-    [
-      html.span([attr.class("text-zinc-500 font-light")], [html.text("by ")]),
-      html.span([attr.class("text-zinc-300")], [html.text(author)]),
-    ],
-  )
-}
+// removed: moved to partials/article_partials.gleam
 
-fn view_article_tags(tags: List(String)) -> Element(Msg) {
-  case tags {
-    [] -> element.none()
-    _ ->
-      html.div(
-        [
-          attr.class(
-            "flex justify-end align-end gap-0 ml-auto flex-wrap border-b border-r border-zinc-700 pb-1 pr-2 hover:border-pink-700 group-hover:border-pink-700 transition-colors duration-25 mt-2",
-          ),
-        ],
-        tags
-          |> list.map(fn(tag) {
-            html.span(
-              [
-                attr.class(
-                  "text-xs cursor-pointer text-zinc-500 px-2 hover:border-pink-700 hover:text-pink-700 transition-colors duration-25",
-                ),
-              ],
-              [html.text(tag)],
-            )
-          }),
-      )
-  }
-}
+// removed: moved to partials/article_partials.gleam
 
 fn view_article_actions(
   article: Article,
@@ -3756,19 +3760,9 @@ fn view_subtitle(title: String, slug: String) -> Element(msg) {
   ])
 }
 
-fn view_leading(text: String, slug: String) -> Element(msg) {
-  html.p(
-    [
-      attr.id("article-lead-" <> slug),
-      attr.class(
-        "font-medium text-zinc-300 pt-6 md:pt-8 border-b border-zinc-700 pb-4",
-      ),
-      attr.class("article-leading"),
-    ],
-    [html.text(text)],
-  )
-}
+// removed: moved to partials/article_partials.gleam
 
+// moved to partials/article_partials.gleam
 fn view_simple_paragraph(text: String) -> Element(Msg) {
   html.p([attr.class("pt-8")], [html.text(text)])
 }
@@ -4895,7 +4889,10 @@ fn init(_) -> #(Model, Effect(Msg)) {
       login_username: "",
       login_password: "",
       login_loading: False,
+      // Keyboard
       keys_down: set.new(),
+      chords_available: set.new(),
+      chord_bindings: [],
       // Notification form fields
       notification_form_title: "",
       notification_form_message: "",
@@ -4924,6 +4921,8 @@ fn init(_) -> #(Model, Effect(Msg)) {
 
   // Set up global keyboard listener
 
+  let model = recompute_bindings_for_current_page(model)
+
   #(
     model,
     effect.batch([
@@ -4931,7 +4930,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
       local_storage_effect,
       // effect_nav,
       session.auth_check(AuthCheckResponse, model.base_uri),
-      key.setup(KeyboardDown, KeyboardUp),
+      key.setup(should_prevent_keydown(model.chords_available), KeyboardDown, KeyboardUp),
       window_events.setup(WindowUnfocused),
     ]),
   )

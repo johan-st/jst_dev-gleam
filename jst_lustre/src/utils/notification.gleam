@@ -4,8 +4,6 @@ import gleam/http/request
 import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{None, Some}
-import gleam/result
-import gleam/string
 import gleam/uri.{type Uri}
 import lustre/effect.{type Effect}
 import utils/http
