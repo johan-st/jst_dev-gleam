@@ -48,11 +48,11 @@ pub fn view_article_listing(
           content: _, draft: _, published_at: _, revision: _, tags:,
         ) -> {
           let article_uri = routes.Article(slug) |> routes.to_uri
-          html.article([attr.class("mt-6 group")], [
+          html.article([attr.class("mt-6 group bg-red-500")], [
             html.a(
               [
                 attr.class(
-                  "relative group block border-l border-zinc-700 pl-4 hover:border-pink-700 transition-colors duration-150",
+                  "relative group block border-l-8 border-zinc-700 pl-4 hover:border-pink-700 transition-colors duration-150",
                 ),
                 attr.href(uri.to_string(article_uri)),
               ],

@@ -41,23 +41,23 @@ pub fn view(articles: List(Article), sess: session.Session) -> List(Element(msg)
           content: _, draft: _, published_at: _, revision: _, tags:,
         ) -> {
           let article_uri = routes.Article(slug) |> routes.to_uri
-          html.article([attr.class("mt-6 group")], [
+          html.article([attr.class("mt-6 group hover:bg-zinc-700/10")], [
             html.a(
               [
                 attr.class(
-                  "relative group block border-l border-zinc-700 pl-4 hover:border-pink-700 transition-colors duration-150",
+                  "relative group block border-l-8 border-zinc-700 pl-4 hover:border-pink-700 transition-colors duration-150",
                 ),
                 attr.href(uri.to_string(article_uri)),
               ],
               [
                 html.span([
                   attr.class(
-                    "pointer-events-none absolute top-0 left-0 w-6 h-6 border-t border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
+                    "pointer-events-none absolute top-0 left-0 w-6 h-6 border-t-2 border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
                   ),
                 ], []),
                 html.span([
                   attr.class(
-                    "pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
+                    "pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b-2 border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
                   ),
                 ], []),
                 html.div([attr.class("flex justify-between gap-4")], [

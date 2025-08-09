@@ -7,6 +7,7 @@ import components/ui
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
+
 // removed unused order import (sorting moved to page modules)
 import gleam/set.{type Set}
 import gleam/string
@@ -21,13 +22,13 @@ import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
 import modem
+import pages/about_view
+import pages/article_list_view
+import pages/article_view
+import pages/index_view
 import pages/pages
-import pages/index_view as index_view
-import pages/about_view as about_view
-import pages/article_list_view as article_list_view
-import pages/article_view as article_view
-import pages/url_index_view as url_index_view
-import pages/url_list_view as url_list_view
+import pages/url_index_view
+import pages/url_list_view
 import plinth/browser/event as p_event
 import routes.{type Route}
 import session.{type Session}
@@ -78,61 +79,63 @@ fn bindings_for(page: pages.Page) -> List(ChordBinding) {
   let alt = key.Captured(key.Alt)
   let ctrl = key.Captured(key.Ctrl)
 
-  let global_nav = []
+  let global_nav =
+    []
     |> filter_nav_by_session(page)
 
-  let page_cmd =
-    case page {
-      pages.PageArticleList(_, session) -> {
-        case session {
-          session.Authenticated(_) -> [
-            // Ctrl+N → New article
-            ChordBinding(
-              chord: chord_from_keys([ctrl, key.Captured(key.N)]),
-              msg: ArticleCreateClicked,
-              group: Cmd,
-              label: "New article",
-              block_default: True,
-            ),
-          ]
-          _ -> []
-        }
+  let page_cmd = case page {
+    pages.PageArticleList(_, session) -> {
+      case session {
+        session.Authenticated(_) -> [
+          // Ctrl+N → New article
+          ChordBinding(
+            chord: chord_from_keys([ctrl, key.Captured(key.N)]),
+            msg: ArticleCreateClicked,
+            group: Cmd,
+            label: "New article",
+            block_default: True,
+          ),
+        ]
+        _ -> []
       }
-      pages.PageArticle(article, session) -> {
-        case article.can_edit(article, session) {
-          True -> [
-            // Ctrl+E → Start editing
-            ChordBinding(
-              chord: chord_from_keys([ctrl, key.Captured(key.E)]),
-              msg: UserMouseDownNavigation(routes.to_uri(routes.ArticleEdit(article.id))),
-              group: Cmd,
-              label: "Edit",
-              block_default: True,
-            ),
-          ]
-          False -> []
-        }
-      }
-      pages.PageArticleEdit(article, _) -> [
-        // Ctrl+S → Save draft
-        ChordBinding(
-          chord: chord_from_keys([ctrl, key.Captured(key.S)]),
-          msg: ArticleDraftSaveClicked(article),
-          group: Cmd,
-          label: "Save draft",
-          block_default: True,
-        ),
-        // Alt+Space → Toggle preview/edit
-        ChordBinding(
-          chord: chord_from_keys([alt, key.Captured(key.Space)]),
-          msg: EditViewModeToggled,
-          group: Nav,
-          label: "Toggle preview/edit",
-          block_default: True,
-        ),
-      ]
-      _ -> []
     }
+    pages.PageArticle(article, session) -> {
+      case article.can_edit(article, session) {
+        True -> [
+          // Ctrl+E → Start editing
+          ChordBinding(
+            chord: chord_from_keys([ctrl, key.Captured(key.E)]),
+            msg: UserMouseDownNavigation(
+              routes.to_uri(routes.ArticleEdit(article.id)),
+            ),
+            group: Cmd,
+            label: "Edit",
+            block_default: True,
+          ),
+        ]
+        False -> []
+      }
+    }
+    pages.PageArticleEdit(article, _) -> [
+      // Ctrl+S → Save draft
+      ChordBinding(
+        chord: chord_from_keys([ctrl, key.Captured(key.S)]),
+        msg: ArticleDraftSaveClicked(article),
+        group: Cmd,
+        label: "Save draft",
+        block_default: True,
+      ),
+      // Alt+Space → Toggle preview/edit
+      ChordBinding(
+        chord: chord_from_keys([alt, key.Captured(key.Space)]),
+        msg: EditViewModeToggled,
+        group: Nav,
+        label: "Toggle preview/edit",
+        block_default: True,
+      ),
+    ]
+    _ -> []
+  }
 
   let global_cmd = [
     // Ctrl+N → prevent browser new-window globally (no-op here)
@@ -166,20 +169,22 @@ fn bindings_for(page: pages.Page) -> List(ChordBinding) {
   |> list.append(global_cmd)
 }
 
-fn filter_nav_by_session(bindings: List(ChordBinding), page: pages.Page) -> List(ChordBinding) {
-  let session =
-    case page {
-      pages.PageArticleList(_, sess) -> sess
-      pages.PageArticle(_, sess) -> sess
-      pages.PageArticleEdit(_, sess) -> session.Authenticated(sess)
-      pages.PageUrlShortIndex(sess) -> session.Authenticated(sess)
-      pages.PageUrlShortInfo(_, sess) -> session.Authenticated(sess)
-      pages.PageUiComponents(sess) -> session.Authenticated(sess)
-      pages.PageNotifications(sess) -> session.Authenticated(sess)
-      pages.PageProfile(sess) -> session.Authenticated(sess)
-      pages.PageDjotDemo(sess, _) -> session.Authenticated(sess)
-      _ -> session.Unauthenticated
-    }
+fn filter_nav_by_session(
+  bindings: List(ChordBinding),
+  page: pages.Page,
+) -> List(ChordBinding) {
+  let session = case page {
+    pages.PageArticleList(_, sess) -> sess
+    pages.PageArticle(_, sess) -> sess
+    pages.PageArticleEdit(_, sess) -> session.Authenticated(sess)
+    pages.PageUrlShortIndex(sess) -> session.Authenticated(sess)
+    pages.PageUrlShortInfo(_, sess) -> session.Authenticated(sess)
+    pages.PageUiComponents(sess) -> session.Authenticated(sess)
+    pages.PageNotifications(sess) -> session.Authenticated(sess)
+    pages.PageProfile(sess) -> session.Authenticated(sess)
+    pages.PageDjotDemo(sess, _) -> session.Authenticated(sess)
+    _ -> session.Unauthenticated
+  }
 
   let alt = key.Captured(key.Alt)
   let numbers_common = [
@@ -282,11 +287,14 @@ fn recompute_bindings_for_current_page(model: Model) -> Model {
 
 fn chord_equals(a: key.Chord, b: key.Chord) -> Bool {
   case a, b {
-    key.Chord(ak), key.Chord(bk) -> set.is_subset(ak, bk) && set.is_subset(bk, ak)
+    key.Chord(ak), key.Chord(bk) ->
+      set.is_subset(ak, bk) && set.is_subset(bk, ak)
   }
 }
 
-fn should_prevent_keydown(active_chords: Set(key.Chord)) -> fn(p_event.Event(p_event.UIEvent(p_event.KeyboardEvent))) -> Bool {
+fn should_prevent_keydown(
+  active_chords: Set(key.Chord),
+) -> fn(p_event.Event(p_event.UIEvent(p_event.KeyboardEvent))) -> Bool {
   fn(ev) {
     let parsed = key.parse_key(p_event.code(ev), p_event.key(ev))
     let keys = set.from_list([parsed])
@@ -308,10 +316,11 @@ fn should_prevent_keydown(active_chords: Set(key.Chord)) -> fn(p_event.Event(p_e
     }
     let sensitive = case is_ctrl {
       True -> ctrl_sensitive
-      False -> case is_alt {
-        True -> alt_sensitive
-        False -> False
-      }
+      False ->
+        case is_alt {
+          True -> alt_sensitive
+          False -> False
+        }
     }
 
     case sensitive {
@@ -687,8 +696,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         )
 
         Ok(articles), _ -> {
-          let model = Model(..model, articles: model.articles |> rd.to_loaded(articles))
-          |> recompute_bindings_for_current_page
+          let model =
+            Model(..model, articles: model.articles |> rd.to_loaded(articles))
+            |> recompute_bindings_for_current_page
           #(model, effect.none())
         }
         Error(err), _ -> #(
@@ -711,8 +721,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                 }
               }),
             )
-          let model = Model(..model, articles: updated_articles)
-          |> recompute_bindings_for_current_page
+          let model =
+            Model(..model, articles: updated_articles)
+            |> recompute_bindings_for_current_page
           #(model, effect.none())
         }
         Error(err) -> {
@@ -730,8 +741,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                 }
               }),
             )
-          let model = Model(..model, articles: updated_articles)
-          |> recompute_bindings_for_current_page
+          let model =
+            Model(..model, articles: updated_articles)
+            |> recompute_bindings_for_current_page
           #(model, effect.none())
         }
       }
@@ -995,39 +1007,43 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               )
             None -> effect.none()
           }
-          let model = Model(
-            ..model,
-            session: sess,
-            notice: "Successfully logged in",
-            login_form_open: False,
-            login_loading: False,
-            login_username: "",
-            login_password: "",
-          )
-          |> recompute_bindings_for_current_page
+          let model =
+            Model(
+              ..model,
+              session: sess,
+              notice: "Successfully logged in",
+              login_form_open: False,
+              login_loading: False,
+              login_username: "",
+              login_password: "",
+            )
+            |> recompute_bindings_for_current_page
           #(model, schedule_effect)
         }
         Error(err) -> {
           echo err
-          let model = Model(
-            ..model,
-            session: session.Unauthenticated,
-            notice: "Login failed. Please check your credentials.",
-            login_loading: False,
-          )
-          |> recompute_bindings_for_current_page
+          let model =
+            Model(
+              ..model,
+              session: session.Unauthenticated,
+              notice: "Login failed. Please check your credentials.",
+              login_loading: False,
+            )
+            |> recompute_bindings_for_current_page
           #(model, effect.none())
         }
       }
     }
     AuthLogoutClicked -> {
-      let model = Model(..model, session: session.Unauthenticated)
-      |> recompute_bindings_for_current_page
+      let model =
+        Model(..model, session: session.Unauthenticated)
+        |> recompute_bindings_for_current_page
       #(model, session.auth_logout(AuthLogoutResponse, model.base_uri))
     }
     AuthLogoutResponse(_result) -> {
-      let model = Model(..model, session: session.Unauthenticated)
-      |> recompute_bindings_for_current_page
+      let model =
+        Model(..model, session: session.Unauthenticated)
+        |> recompute_bindings_for_current_page
       #(model, effect.none())
     }
     AuthCheckClicked -> {
@@ -1048,19 +1064,21 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               )
             None -> effect.none()
           }
-          let model = Model(..model, session: sess, notice: "auth check, OK")
-          |> recompute_bindings_for_current_page
+          let model =
+            Model(..model, session: sess, notice: "auth check, OK")
+            |> recompute_bindings_for_current_page
           #(model, schedule_effect)
         }
         Error(err) -> {
           echo "session check response error"
           echo err
-          let model = Model(
-            ..model,
-            session: session.Unauthenticated,
-            notice: "auth check, ERROR",
-          )
-          |> recompute_bindings_for_current_page
+          let model =
+            Model(
+              ..model,
+              session: session.Unauthenticated,
+              notice: "auth check, ERROR",
+            )
+            |> recompute_bindings_for_current_page
           #(model, effect.none())
         }
       }
@@ -1080,8 +1098,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               )
             None -> effect.none()
           }
-          let model = Model(..model, session: sess)
-          |> recompute_bindings_for_current_page
+          let model =
+            Model(..model, session: sess)
+            |> recompute_bindings_for_current_page
           #(model, schedule_effect)
         }
         Error(_err) -> #(model, effect.none())
@@ -1696,16 +1715,18 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
                 }
               },
             )
-          let model = Model(
-            ..model,
-            route:,
-            articles: model.articles |> rd.to_loaded(articles_updated),
-          )
-          |> recompute_bindings_for_current_page
+          let model =
+            Model(
+              ..model,
+              route:,
+              articles: model.articles |> rd.to_loaded(articles_updated),
+            )
+            |> recompute_bindings_for_current_page
           #(model, effect)
         }
         _ -> {
-          let model = recompute_bindings_for_current_page(Model(..model, route:))
+          let model =
+            recompute_bindings_for_current_page(Model(..model, route:))
           #(model, effect.none())
         }
       }
@@ -1751,16 +1772,18 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
               },
             )
           echo routes.to_string(route)
-          let model = Model(
-            ..model,
-            route:,
-            articles: model.articles |> rd.to_loaded(articles_updated),
-          )
-          |> recompute_bindings_for_current_page
+          let model =
+            Model(
+              ..model,
+              route:,
+              articles: model.articles |> rd.to_loaded(articles_updated),
+            )
+            |> recompute_bindings_for_current_page
           #(model, effect)
         }
         _ -> {
-          let model = recompute_bindings_for_current_page(Model(..model, route:))
+          let model =
+            recompute_bindings_for_current_page(Model(..model, route:))
           #(model, effect.none())
         }
       }
@@ -1775,7 +1798,8 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
           article.article_metadata_get(ArticleMetaGot, model.base_uri),
         )
         _ -> {
-          let model = recompute_bindings_for_current_page(Model(..model, route:))
+          let model =
+            recompute_bindings_for_current_page(Model(..model, route:))
           #(model, effect.none())
         }
       }
@@ -1795,7 +1819,8 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
           short_url.list_short_urls(ShortUrlListGot, model.base_uri, 10, 0),
         )
         _ -> {
-          let model = recompute_bindings_for_current_page(Model(..model, route:))
+          let model =
+            recompute_bindings_for_current_page(Model(..model, route:))
           #(model, effect.none())
         }
       }
@@ -1827,7 +1852,8 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
           user.user_get(ProfileMeGot, model.base_uri, subject),
         )
         None -> {
-          let model = recompute_bindings_for_current_page(Model(..model, route:))
+          let model =
+            recompute_bindings_for_current_page(Model(..model, route:))
           #(model, effect.none())
         }
       }
@@ -1849,16 +1875,23 @@ fn update_chord(
   case key.triggered_chord(model.keys_down, model.chords_available) {
     None -> #(model, effect.none())
     Some(chord) -> {
-      let binding_opt = list.find(model.chord_bindings, fn(b) { chord_equals(b.chord, chord) })
+      let binding_opt =
+        list.find(model.chord_bindings, fn(b) { chord_equals(b.chord, chord) })
       case binding_opt {
         Error(_) -> #(model, effect.none())
         Ok(binding) -> {
           // Prevent default if requested
-          case binding.block_default { True -> p_event.prevent_default(ev) False -> Nil }
+          case binding.block_default {
+            True -> p_event.prevent_default(ev)
+            False -> Nil
+          }
 
           // Clear pressed chord keys
-          let keys = case chord { key.Chord(keys) -> keys }
-          let model = Model(..model, keys_down: set.difference(model.keys_down, keys))
+          let keys = case chord {
+            key.Chord(keys) -> keys
+          }
+          let model =
+            Model(..model, keys_down: set.difference(model.keys_down, keys))
 
           // Dispatch the bound message through the regular update
           update(model, binding.msg)
@@ -1878,7 +1911,8 @@ fn view(model: Model) -> Element(Msg) {
     pages.PageArticleList(articles, _session) ->
       article_list_view.view(articles, model.session)
     pages.PageArticleListLoading -> view_article_listing_loading()
-    pages.PageArticle(article, session) -> article_view.view_article_page(article, session)
+    pages.PageArticle(article, session) ->
+      article_view.view_article_page(article, session)
     pages.PageArticleEdit(article, _) -> view_article_edit(model, article)
     pages.PageError(error) -> {
       case error {
@@ -1896,20 +1930,21 @@ fn view(model: Model) -> Element(Msg) {
       }
     }
     pages.PageAbout -> about_view.view()
-    pages.PageUrlShortIndex(_) -> url_index_view.view(url_list_view.list(
-      model.short_urls,
-      model.expanded_urls,
-      model.delete_confirmation,
-      model.copy_feedback,
-      url_list_view.Callbacks(
-        ShortUrlCopyClicked,
-        ShortUrlToggleActiveClicked,
-        ShortUrlToggleExpanded,
-        ShortUrlDeleteClicked,
-        ShortUrlDeleteConfirmClicked,
-        fn() { ShortUrlDeleteCancelClicked },
-      ),
-    ))
+    pages.PageUrlShortIndex(_) ->
+      url_index_view.view(url_list_view.list(
+        model.short_urls,
+        model.expanded_urls,
+        model.delete_confirmation,
+        model.copy_feedback,
+        url_list_view.Callbacks(
+          ShortUrlCopyClicked,
+          ShortUrlToggleActiveClicked,
+          ShortUrlToggleExpanded,
+          ShortUrlDeleteClicked,
+          ShortUrlDeleteConfirmClicked,
+          fn() { ShortUrlDeleteCancelClicked },
+        ),
+      ))
     pages.PageUrlShortInfo(short, _) -> view_url_info_page(model, short)
     pages.PageDjotDemo(_, content) -> view_djot_demo(content)
     pages.PageUiComponents(_) -> view_ui_components()
@@ -1917,7 +1952,9 @@ fn view(model: Model) -> Element(Msg) {
     pages.PageProfile(_) -> view_profile(model)
     pages.PageNotFound(uri) -> view_not_found(uri)
   }
-  let nav_hints_overlay = case set.contains(model.keys_down, key.Captured(key.Alt)) {
+  let nav_hints_overlay = case
+    set.contains(model.keys_down, key.Captured(key.Alt))
+  {
     True -> view_nav_hints_from_bindings(model)
     False -> element.none()
   }
@@ -1984,13 +2021,17 @@ fn view_nav_hints_from_bindings(model: Model) -> Element(Msg) {
     model.chord_bindings
     |> list.filter(fn(b) { b.group == Nav && b.label != "" })
     |> list.map(fn(b) {
-      let combo = case b.chord { key.Chord(keys_set) ->
-        keys_set
-        |> set.to_list
-        |> list.map(fn(k) {
-          case k { key.Captured(c) -> key.to_string(c, shift) key.Unhandled(code) -> code }
-        })
-        |> string.join("+")
+      let combo = case b.chord {
+        key.Chord(keys_set) ->
+          keys_set
+          |> set.to_list
+          |> list.map(fn(k) {
+            case k {
+              key.Captured(c) -> key.to_string(c, shift)
+              key.Unhandled(code) -> code
+            }
+          })
+          |> string.join("+")
       }
       #(b.label, combo)
     })
@@ -2066,13 +2107,17 @@ fn view_status_bar_with_cmds(model: Model) -> Element(Msg) {
       model.chord_bindings
       |> list.filter(fn(b) { b.group == Cmd && b.label != "" })
       |> list.map(fn(b) {
-        let key_names = case b.chord { key.Chord(keys_set) ->
-          keys_set
-          |> set.to_list
-          |> list.map(fn(k) {
-            case k { key.Captured(c) -> key.to_string(c, shift) key.Unhandled(code) -> code }
-          })
-          |> string.join("+")
+        let key_names = case b.chord {
+          key.Chord(keys_set) ->
+            keys_set
+            |> set.to_list
+            |> list.map(fn(k) {
+              case k {
+                key.Captured(c) -> key.to_string(c, shift)
+                key.Unhandled(code) -> code
+              }
+            })
+            |> string.join("+")
         }
         #(b.label, key_names)
       })
@@ -2126,14 +2171,21 @@ fn view_status_bar_with_cmds(model: Model) -> Element(Msg) {
               html.div([attr.class("text-gray-400")], [html.text("JST Lustre")]),
               case cmd_hints {
                 [] -> element.none()
-                _ -> html.div([attr.class("flex items-center space-x-4 text-xs text-zinc-300")],
-                  list.map(cmd_hints, fn(tuple) {
-                    case tuple { #(label, combo) ->
-                      html.span([], [html.text(label <> ": " <> combo)])
-                    }
-                  }),
-                )
-              }
+                _ ->
+                  html.div(
+                    [
+                      attr.class(
+                        "flex items-center space-x-4 text-xs text-zinc-300",
+                      ),
+                    ],
+                    list.map(cmd_hints, fn(tuple) {
+                      case tuple {
+                        #(label, combo) ->
+                          html.span([], [html.text(label <> ": " <> combo)])
+                      }
+                    }),
+                  )
+              },
             ]),
           ]),
         ],
@@ -2171,7 +2223,7 @@ fn view_profile(model: Model) -> List(Element(Msg)) {
       ),
     ]
     Loaded(_user_full, _, _) -> [
-      ui.card([
+      ui.card("profile", [
         html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
           html.text("Profile Information"),
         ]),
@@ -2210,7 +2262,7 @@ fn view_profile(model: Model) -> List(Element(Msg)) {
           ]),
         ]),
       ]),
-      ui.card([
+      ui.card("password", [
         html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
           html.text("Change Password"),
         ]),
@@ -2773,7 +2825,8 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
           slug: draft.slug(draft),
           subtitle: draft.subtitle(draft),
         )
-      let preview = article_view.view_article_page(draft_article, session.Unauthenticated)
+      let preview =
+        article_view.view_article_page(draft_article, session.Unauthenticated)
 
       [
         // Toggle button for mobile
@@ -3085,9 +3138,6 @@ fn view_article_edit_input(
     ]),
   ])
 }
-
-
-
 
 // removed old URL index helpers; page views now in pages/url_index_view.gleam
 
@@ -4176,7 +4226,7 @@ fn view_ui_components() -> List(Element(Msg)) {
     ),
     // Loading States Section
     html.section([attr.class("space-y-6")], [
-      ui.card_with_title("Loading States", [
+      ui.card_with_title("loading-states", "Loading States", [
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
           html.text("Loading Indicators"),
         ]),
@@ -4221,7 +4271,7 @@ fn view_ui_components() -> List(Element(Msg)) {
     ]),
     // Buttons Section
     html.section([attr.class("space-y-6")], [
-      ui.card_with_title("Buttons", [
+      ui.card_with_title("buttons", "Buttons", [
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
           html.text("Button Variants"),
         ]),
@@ -4429,7 +4479,7 @@ fn view_ui_components() -> List(Element(Msg)) {
     ]),
     // Form Components Section
     html.section([attr.class("space-y-6")], [
-      ui.card_with_title("Form Components", [
+      ui.card_with_title("form-components", "Form Components", [
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
           html.text("Input Fields"),
         ]),
@@ -4466,7 +4516,7 @@ fn view_ui_components() -> List(Element(Msg)) {
     ]),
     // Status & Feedback Section
     html.section([attr.class("space-y-6")], [
-      ui.card_with_title("Status & Feedback", [
+      ui.card_with_title("status-feedback", "Status & Feedback", [
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
           html.text("Status Badges"),
         ]),
@@ -4518,7 +4568,7 @@ fn view_ui_components() -> List(Element(Msg)) {
     ]),
     // Error States Section
     html.section([attr.class("space-y-6")], [
-      ui.card_with_title("Error States", [
+      ui.card_with_title("error-states", "Error States", [
         html.div([attr.class("space-y-8")], [
           ui.error_state(
             ui.ErrorNetwork,
@@ -4549,7 +4599,7 @@ fn view_ui_components() -> List(Element(Msg)) {
     ]),
     // Modal Section
     html.section([attr.class("space-y-6")], [
-      ui.card_with_title("Modals", [
+      ui.card_with_title("modals", "Modals", [
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
           html.text("Modal Example"),
         ]),
@@ -4568,12 +4618,12 @@ fn view_ui_components() -> List(Element(Msg)) {
     ]),
     // Layout Components Section  
     html.section([attr.class("space-y-6")], [
-      ui.card_with_title("Layout Components", [
+      ui.card_with_title("layout-components", "Layout Components", [
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
           html.text("Cards"),
         ]),
         html.div([attr.class("space-y-0")], [
-          ui.card_with_title("Card with Title", [
+          ui.card_with_title("card-with-title", "Card with Title", [
             html.p([attr.class("text-zinc-300")], [
               html.text("This is a card with a title section."),
             ]),
@@ -4604,7 +4654,7 @@ fn view_ui_components() -> List(Element(Msg)) {
     ]),
     // Skeleton Loaders Section
     html.section([attr.class("space-y-6")], [
-      ui.card_with_title("Skeleton Loaders", [
+      ui.card_with_title("skeleton-loaders", "Skeleton Loaders", [
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
           html.text("Loading Placeholders"),
         ]),
@@ -4626,7 +4676,7 @@ fn view_ui_components() -> List(Element(Msg)) {
     ]),
     // Page Headers Section
     html.section([attr.class("space-y-6")], [
-      ui.card_with_title("Page Headers", [
+      ui.card_with_title("page-headers", "Page Headers", [
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
           html.text("Page Header with Subtitle"),
         ]),
@@ -4642,7 +4692,7 @@ fn view_ui_components() -> List(Element(Msg)) {
     ]),
     // Typography & Links Section
     html.section([attr.class("space-y-6")], [
-      ui.card_with_title("Typography & Links", [
+      ui.card_with_title("typography-links", "Typography & Links", [
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
           html.text("Text Styles"),
         ]),
@@ -4660,7 +4710,7 @@ fn view_ui_components() -> List(Element(Msg)) {
     ]),
     // Layout Helpers Section
     html.section([attr.class("space-y-6")], [
-      ui.card_with_title("Layout Helpers", [
+      ui.card_with_title("layout-helpers", "Layout Helpers", [
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4")], [
           html.text("Flex Between Layout"),
         ]),
@@ -4930,7 +4980,11 @@ fn init(_) -> #(Model, Effect(Msg)) {
       local_storage_effect,
       // effect_nav,
       session.auth_check(AuthCheckResponse, model.base_uri),
-      key.setup(should_prevent_keydown(model.chords_available), KeyboardDown, KeyboardUp),
+      key.setup(
+        should_prevent_keydown(model.chords_available),
+        KeyboardDown,
+        KeyboardUp,
+      ),
       window_events.setup(WindowUnfocused),
     ]),
   )

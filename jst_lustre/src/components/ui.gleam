@@ -354,7 +354,7 @@ pub fn button(
   html.button(
     [
       attr.class(
-        "px-4 py-3 sm:py-2 border-r border-l transition-colors duration-200 min-w-24 min-h-[44px] "
+        "px-4 py-3 sm:py-2 border-l-4 transition-colors duration-200 min-w-24 min-h-[44px] "
         <> tailwind_classes,
       ),
       attr.disabled(case state {
@@ -498,7 +498,10 @@ pub fn form_textarea(
 
 pub fn modal_backdrop(onclose: msg) -> Element(msg) {
   html.div(
-    [attr.class("fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"), event.on_click(onclose)],
+    [
+      attr.class("fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"),
+      event.on_click(onclose),
+    ],
     [],
   )
 }
@@ -510,11 +513,7 @@ pub fn modal(
   onclose: msg,
 ) -> Element(msg) {
   html.div(
-    [
-      attr.class(
-        "fixed inset-0 z-50 flex items-center justify-center p-4",
-      ),
-    ],
+    [attr.class("fixed inset-0 z-50 flex items-center justify-center p-4")],
     [
       html.div(
         [
@@ -616,7 +615,14 @@ pub fn flex_between(left: Element(msg), right: Element(msg)) -> Element(msg) {
 // MODERN UTILITIES -----------------------------------------------------------
 
 pub fn glass_panel(content: List(Element(msg))) -> Element(msg) {
-  html.div([attr.class("bg-zinc-800/80 backdrop-blur-md px-4 py-6 border border-white/10")], content)
+  html.div(
+    [
+      attr.class(
+        "bg-zinc-800/80 backdrop-blur-md px-4 py-6 border border-white/10",
+      ),
+    ],
+    content,
+  )
 }
 
 /// Status badge component for displaying state (active/inactive, etc.)
@@ -642,11 +648,13 @@ pub fn status_badge(text: String, variant: Color) -> Element(msg) {
 }
 
 /// Card component with consistent styling
-pub fn card(content: List(Element(msg))) -> Element(msg) {
+pub fn card(key: String, content: List(Element(msg))) -> Element(msg) {
   html.div(
     [
       attr.class(
-        "group relative block border-l border-zinc-700 px-4 py-6 my-4 hover:border-pink-700 transition-colors duration-150",
+        "card group/"
+        <> key
+        <> " relative hover:bg-zinc-700/10  block border-l-8 border-zinc-700 px-4 py-6 my-4 hover:border-pink-700 transition-colors duration-150",
       ),
     ],
     [
@@ -654,7 +662,7 @@ pub fn card(content: List(Element(msg))) -> Element(msg) {
       html.span(
         [
           attr.class(
-            "pointer-events-none absolute top-0 right-0 w-6 h-6 border-t border-r border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
+            "card-corner pointer-events-none absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-zinc-700",
           ),
         ],
         [],
@@ -662,7 +670,7 @@ pub fn card(content: List(Element(msg))) -> Element(msg) {
       html.span(
         [
           attr.class(
-            "pointer-events-none absolute top-0 left-0 w-6 h-6 border-t border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
+            "card-corner pointer-events-none absolute top-0 left-0 w-6 h-6 border-t-2 border-zinc-700",
           ),
         ],
         [],
@@ -670,7 +678,7 @@ pub fn card(content: List(Element(msg))) -> Element(msg) {
       html.span(
         [
           attr.class(
-            "pointer-events-none absolute bottom-0 right-0 w-6 h-6 border-b border-r border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
+            "card-corner pointer-events-none absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-zinc-700",
           ),
         ],
         [],
@@ -678,11 +686,11 @@ pub fn card(content: List(Element(msg))) -> Element(msg) {
       html.span(
         [
           attr.class(
-            "pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
+            "card-corner pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b-2 border-zinc-700",
           ),
         ],
         [],
-      ),
+      ),  
       ..content
     ],
   )
@@ -690,13 +698,14 @@ pub fn card(content: List(Element(msg))) -> Element(msg) {
 
 /// Card with custom title
 pub fn card_with_title(
+  _key: String,
   title: String,
   content: List(Element(msg)),
 ) -> Element(msg) {
   html.div(
     [
       attr.class(
-        "group relative block border-l border-zinc-700 px-4 py-6 my-4 hover:border-pink-700 transition-colors duration-150",
+        "card relative transition-colors duration-150 hover:bg-zinc-700/10 block border-l-8 border-zinc-700 px-4 py-6 my-4 hover:border-pink-700",
       ),
     ],
     [
@@ -704,7 +713,7 @@ pub fn card_with_title(
       html.span(
         [
           attr.class(
-            "pointer-events-none absolute top-0 right-0 w-6 h-6 border-t border-r border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
+            "card-corner pointer-events-none absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-zinc-700",
           ),
         ],
         [],
@@ -712,7 +721,7 @@ pub fn card_with_title(
       html.span(
         [
           attr.class(
-            "pointer-events-none absolute top-0 left-0 w-6 h-6 border-t border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
+            "card-corner pointer-events-none absolute top-0 left-0 w-6 h-6 border-t-2 border-zinc-700",
           ),
         ],
         [],
@@ -720,7 +729,7 @@ pub fn card_with_title(
       html.span(
         [
           attr.class(
-            "pointer-events-none absolute bottom-0 right-0 w-6 h-6 border-b border-r border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
+            "card-corner pointer-events-none absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-zinc-700",
           ),
         ],
         [],
@@ -728,7 +737,7 @@ pub fn card_with_title(
       html.span(
         [
           attr.class(
-            "pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
+            "card-corner pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b-2 border-zinc-700",
           ),
         ],
         [],

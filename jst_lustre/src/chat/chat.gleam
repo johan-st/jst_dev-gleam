@@ -356,7 +356,7 @@ fn view_drawer(msg, model: Model) -> Element(msg) {
                   html.div(
                     [
                       attribute.class(
-                        "flex h-full flex-col overflow-y-scroll border-l border-zinc-700 bg-zinc-800 shadow-xl",
+                        "flex h-full flex-col overflow-y-scroll border-l-8 border-zinc-700 bg-zinc-800 shadow-xl",
                       ),
                     ],
                     [

@@ -26,6 +26,19 @@
 
 @layer components {
   
+  /* Card hover accent scoped with CSS variables to avoid ancestor hover leaks */
+  .card {
+    --card-accent: theme(colors.zinc.700);
+  }
+  .card:hover {
+    --card-accent: theme(colors.pink.700);
+  }
+  .card .card-corner {
+    border-color: var(--card-accent);
+    transition-property: color, border-color;
+    transition-duration: 150ms;
+  }
+
   .sheen-teal::before,
   .sheen-orange::before,
   .sheen-red::before,

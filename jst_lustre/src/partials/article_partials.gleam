@@ -15,7 +15,7 @@ pub fn view_publication_status(article: Article) -> Element(msg) {
       html.span(
         [
           attr.class(
-            "text-xs text-zinc-500 px-4 pt-2 w-max border-t border-r border-zinc-700 group-hover:border-pink-700 transition-colors duration-25",
+            "text-xs text-zinc-500 px-4 pt-2 w-max border-t-2 border-r-2 border-zinc-700 group-hover:border-pink-700 transition-colors duration-25",
           ),
         ],
         [html.text(formatted_date)],
@@ -25,7 +25,7 @@ pub fn view_publication_status(article: Article) -> Element(msg) {
       html.span(
         [
           attr.class(
-            "text-xs text-zinc-500 px-4 pt-2 w-max italic border-t border-r border-zinc-700 group-hover:border-pink-700 transition-colors duration-25",
+            "text-xs text-zinc-500 px-4 pt-2 w-max italic border-t-2 border-r-2 border-zinc-700 group-hover:border-pink-700 transition-colors duration-25",
           ),
         ],
         [html.text("not published")],
@@ -37,7 +37,7 @@ pub fn view_author(author: String) -> Element(msg) {
   html.div(
     [
       attr.class(
-        "text-xs text-zinc-400 pt-0 border-r border-zinc-700 pr-4 group-hover:border-pink-700 transition-colors duration-25",
+        "text-xs text-zinc-400 pt-0 border-r-2 border-zinc-700 pr-4 group-hover:border-pink-700 transition-colors duration-25",
       ),
     ],
     [
@@ -54,7 +54,7 @@ pub fn view_article_tags(tags: List(String)) -> Element(msg) {
       html.div(
         [
           attr.class(
-            "flex justify-end align-end gap-0 ml-auto flex-wrap border-b border-r border-zinc-700 pb-1 pr-2 hover:border-pink-700 group-hover:border-pink-700 transition-colors duration-25 mt-2",
+            "flex justify-end align-end gap-0 ml-auto flex-wrap border-b-2 border-r-2 border-zinc-700 pb-1 pr-2 hover:border-pink-700 group-hover:border-pink-700 transition-colors duration-25 mt-2",
           ),
         ],
         list.map(tags, fn(tag) {
