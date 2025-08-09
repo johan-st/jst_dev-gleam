@@ -1,11 +1,20 @@
+import components/ui
+import gleam/option.{None}
+import lustre/attribute as attr
 import lustre/element.{type Element}
-import partials/article_partials as parts
+import lustre/element/html
 
 pub fn view(list: Element(msg)) -> List(Element(msg)) {
   [
-    parts.view_title("URL Shortener", "url-shortener"),
-    parts.view_simple_paragraph("Create and manage short URLs for easy sharing."),
-    list,
+    ui.page_header("URL Shortener", None),
+    ui.content_container([
+      ui.card("url-intro", [
+        html.p([attr.class("text-zinc-300")], [
+          html.text("Create and manage short URLs for easy sharing."),
+        ]),
+      ]),
+      list,
+    ]),
   ]
 }
 

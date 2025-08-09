@@ -34,31 +34,25 @@ pub fn list(
 ) -> Element(msg) {
   case urls {
     NotInitialized | Pending(_, _) ->
-      html.div(
-        [attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")],
-        [
-          html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
-            html.text("URLs"),
-          ]),
-          ui.loading("Loading URLs...", ui.ColorNeutral),
-        ],
-      )
+      ui.card("urls", [
+        html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
+          html.text("URLs"),
+        ]),
+        ui.loading("Loading URLs...", ui.ColorNeutral),
+      ])
     Loaded(short_urls, _, _) -> {
       case short_urls {
         [] ->
-          html.div(
-            [attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")],
-            [
-              html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
-                html.text("URLs"),
-              ]),
-              ui.empty_state(
-                "No short URLs created yet",
-                "Create your first short URL using the form above.",
-                None,
-              ),
-            ],
-          )
+          ui.card("urls", [
+            html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
+              html.text("URLs"),
+            ]),
+            ui.empty_state(
+              "No short URLs created yet",
+              "Create your first short URL using the form above.",
+              None,
+            ),
+          ])
         _ -> {
           let url_elements =
             list.map(short_urls, fn(url) {
@@ -68,39 +62,33 @@ pub fn list(
                 False -> compact_url_card(copy_feedback, cbs, url)
               }
             })
-          html.div(
-            [attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")],
-            [
-              html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
-                html.text("URLs"),
-              ]),
-              html.ul([attr.class("space-y-2"), attr.role("list")], url_elements),
-              case delete_confirmation {
-                Some(delete_id) -> delete_confirmation_modal(delete_id, short_urls, cbs)
-                None -> html.div([], [])
-              },
-            ],
-          )
+          ui.card("urls", [
+            html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
+              html.text("URLs"),
+            ]),
+            html.ul([attr.class("space-y-2"), attr.role("list")], url_elements),
+            case delete_confirmation {
+              Some(delete_id) -> delete_confirmation_modal(delete_id, short_urls, cbs)
+              None -> html.div([], [])
+            },
+          ])
         }
       }
     }
     Errored(error, _) ->
-      html.div(
-        [attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")],
-        [
-          html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
-            html.text("URLs"),
+      ui.card("urls", [
+        html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
+          html.text("URLs"),
+        ]),
+        html.div([attr.class("text-center py-12")], [
+          html.div([attr.class("text-red-400 text-lg mb-2")], [
+            html.text("Error loading short URLs"),
           ]),
-          html.div([attr.class("text-center py-12")], [
-            html.div([attr.class("text-red-400 text-lg mb-2")], [
-              html.text("Error loading short URLs"),
-            ]),
-            html.div([attr.class("text-zinc-500 text-sm")], [
-              html.text(http_error_to_string(error)),
-            ]),
+          html.div([attr.class("text-zinc-500 text-sm")], [
+            html.text(http_error_to_string(error)),
           ]),
-        ],
-      )
+        ]),
+      ])
   }
 }
 
@@ -141,14 +129,16 @@ fn compact_url_card(
           ),
           html.button(
             [
-              attr.class(case url.is_active {
-                True -> "inline-flex shrink-0 items-center rounded-full bg-green-600/20 px-2 py-1 text-xs font-medium text-green-400 ring-1 ring-inset ring-green-600/30 cursor-pointer hover:bg-green-600/30 transition-colors"
-                False -> "inline-flex shrink-0 items-center rounded-full bg-red-600/20 px-2 py-1 text-xs font-medium text-red-400 ring-1 ring-inset ring-red-600/30 cursor-pointer hover:bg-red-600/30 transition-colors"
-              }),
+              attr.class("cursor-pointer"),
               mouse.on_mouse_down_no_right(cbs.toggle_active_clicked(url.id, url.is_active)),
               attr.title("Toggle active/inactive"),
             ],
-            [html.text(case url.is_active { True -> "Active" False -> "Inactive" })],
+            [
+              case url.is_active {
+                True -> ui.status_badge("Active", ui.ColorGreen)
+                False -> ui.status_badge("Inactive", ui.ColorRed)
+              }
+            ],
           ),
         ]),
         html.div(
@@ -235,33 +225,23 @@ fn expanded_url_card(
           meta_row("Updated:", birl.from_unix_milli(url.updated_at * 1000) |> birl.to_naive_date_string),
         ]),
         html.div([attr.class("space-y-2")], [
-          html.button(
-            [
-              attr.class(
-                "w-full px-4 py-3 text-sm font-medium text-teal-400 border border-teal-600 bg-teal-500/10 hover:bg-teal-950/50 hover:text-teal-300 hover:border-teal-400 cursor-pointer transition-colors duration-200 rounded",
-              ),
-              mouse.on_mouse_down_no_right(cbs.copy_clicked(url.short_code)),
-            ],
-            [html.text(case copy_feedback == Some(url.short_code) { True -> "Copied!" False -> "Copy URL" })],
+          ui.button(
+            case copy_feedback == Some(url.short_code) { True -> "Copied!" False -> "Copy URL" },
+            ui.ColorTeal,
+            ui.ButtonStateNormal,
+            cbs.copy_clicked(url.short_code),
           ),
-          html.button(
-            [
-              attr.class(case url.is_active {
-                True -> "w-full px-4 py-3 text-sm font-medium text-orange-400 border border-orange-600 bg-orange-500/10 hover:bg-orange-950/50 hover:text-orange-300 hover:border-orange-400 cursor-pointer transition-colors duration-200 rounded"
-                False -> "w-full px-4 py-3 text-sm font-medium text-teal-400 border border-teal-600 bg-teal-500/10 hover:bg-teal-950/50 hover:text-teal-300 hover:border-teal-400 cursor-pointer transition-colors duration-200 rounded"
-              }),
-               mouse.on_mouse_down_no_right(cbs.toggle_active_clicked(url.id, url.is_active)),
-            ],
-            [html.text(case url.is_active { True -> "Deactivate" False -> "Activate" })],
+          ui.button(
+            case url.is_active { True -> "Deactivate" False -> "Activate" },
+            case url.is_active { True -> ui.ColorOrange False -> ui.ColorTeal },
+            ui.ButtonStateNormal,
+            cbs.toggle_active_clicked(url.id, url.is_active),
           ),
-          html.button(
-            [
-              attr.class(
-                "w-full px-4 py-3 text-sm font-medium text-red-400 border border-red-600 bg-red-500/10 hover:bg-red-950/50 hover:text-red-300 hover:border-red-400 cursor-pointer transition-colors duration-200 rounded",
-              ),
-              mouse.on_mouse_down_no_right(cbs.delete_clicked(url.id)),
-            ],
-            [html.text("Delete")],
+          ui.button(
+            "Delete",
+            ui.ColorRed,
+            ui.ButtonStateNormal,
+            cbs.delete_clicked(url.id),
           ),
         ]),
       ]),

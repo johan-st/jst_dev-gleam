@@ -2,9 +2,11 @@ import article/article.{type Article}
 import gleam/list
 import birl
 import gleam/option.{None, Some}
+import gleam/uri
 import lustre/attribute as attr
 import lustre/element.{type Element} as element
 import lustre/element/html
+import routes
 
 // Generic, message-agnostic partials for article-related UI bits
 
@@ -112,5 +114,57 @@ pub fn view_error(error_string: String) -> Element(msg) {
     [attr.class("text-red-400 border border-red-700 rounded p-4")],
     [html.text(error_string)],
   )
+}
+
+/// Dedicated article card with bespoke structure/styling
+pub fn view_article_card(article: Article) -> Element(msg) {
+  case article {
+    article.ArticleV1(
+      id: _, slug:, author:, title:, leading:, subtitle:,
+      content: _, draft: _, published_at: _, revision: _, tags:,
+    ) -> {
+      let article_uri = routes.Article(slug) |> routes.to_uri
+      html.article([attr.class("mt-6 group hover:bg-zinc-700/10")], [
+        html.a(
+          [
+            attr.class(
+              "relative group block border-l-8 border-zinc-700 pl-4 hover:border-pink-700 transition-colors duration-150",
+            ),
+            attr.href(uri.to_string(article_uri)),
+          ],
+          [
+            html.span([
+              attr.class(
+                "pointer-events-none absolute top-0 left-0 w-6 h-6 border-t-2 border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
+              ),
+            ], []),
+            html.span([
+              attr.class(
+                "pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b-2 border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
+              ),
+            ], []),
+            html.div([attr.class("flex justify-between gap-4")], [
+              html.div([attr.class("flex flex-col")], [
+                html.h3([
+                  attr.id("article-title-" <> slug),
+                  attr.class("article-title"),
+                  attr.class("text-xl text-pink-700 font-light pt-4"),
+                ], [html.text(title)]),
+                view_subtitle(subtitle, slug),
+              ]),
+              html.div([attr.class("flex flex-col items-end")], [
+                view_publication_status(article),
+                view_author(author),
+              ]),
+            ]),
+            view_simple_paragraph(leading),
+            html.div([attr.class("flex justify-end mt-2")], [
+              view_article_tags(tags),
+            ]),
+          ],
+        ),
+      ])
+    }
+  }
 }
 

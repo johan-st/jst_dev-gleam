@@ -48,7 +48,7 @@ pub fn view_article_listing(
           content: _, draft: _, published_at: _, revision: _, tags:,
         ) -> {
           let article_uri = routes.Article(slug) |> routes.to_uri
-          html.article([attr.class("mt-6 group bg-red-500")], [
+          html.article([attr.class("mt-6 group hover:bg-zinc-700/10")], [
             html.a(
               [
                 attr.class(
