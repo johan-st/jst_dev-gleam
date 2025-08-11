@@ -275,3 +275,66 @@ Create `src/realtime.gleam` as a small infrastructure module and wire it into th
 - At-least-once delivery with explicit acks and retry loops
 - Protocol versioning in envelope to allow incremental evolution
 - Heartbeat ops (`ping/pong`) at the protocol level for fast dead-connection detection
+
+---
+
+## Design rationale (why these choices)
+
+- Evan Czaplicki’s “Life of a File”
+  - Keep infra in one place (`realtime.gleam`) and let each domain own its state machine (data + logic + view) to avoid premature fragmentation. This reduces cross-file hops and makes updates localized.
+
+- modem + plinth
+  - Routing and SPA boot are handled by dedicated libraries so the realtime layer remains orthogonal. Domains consume `Event`s from `realtime` and render; routing stays pure.
+
+- Unified envelope (op/target/inbox/data)
+  - A single shape across sub/unsub/kv_sub/js_sub/cmd/reply/msg avoids ad-hoc handlers and makes client/server evolvable. `inbox` is client-side correlation only; never used as a NATS subject.
+
+- Capabilities as patterns
+  - Subjects, KV keys, and JS filter subjects are governed by NATS-style wildcards (`*`, `>`). This gives least-privilege control without enumerating every resource.
+  - Example check (Go):
+
+```go
+func matchPattern(pattern, subject string) bool {
+  ok, err := nats.Match(pattern, subject)
+  return err == nil && ok
+}
+```
+
+- Auth change handling via Auth KV watch
+  - Watching `auth.users/<user_id>` ensures revocation and grants apply mid-connection. On change, we diff, revoke live subs, and push `cap_update` to the client.
+
+- KV as projections (WatchAll/WatchKeys)
+  - KV provides full-state hydration plus incremental updates. `WatchKeys(pattern)` reduces noise and bandwidth when only a subset is needed.
+
+- JetStream resumeability and pagination
+  - Default to sequence-based resume so domains can reliably “pick up where we left off”. Store `last_seq` in domain models.
+  - Optional filter subjects let consumers focus on a slice of the stream (e.g., `chat.room.123`).
+  - Time-based resume is a pragmatic fallback when `last_seq` is 0.
+
+- Command correlation with client-generated inbox
+  - The client sets `inbox` for correlation over WebSocket; server echoes it in `reply`. Server uses `nats.RequestWithContext` internally; the client token is never used as a NATS subject.
+
+```go
+// reply with echoed inbox
+c.send(ServerMsg{ Op: "reply", Target: target, Inbox: inbox, Data: payload })
+```
+
+- Backpressure policy
+  - A bounded `sendCh` with a 250 ms enqueue timeout guards server resources and prevents head-of-line blocking. If blocked, we send a terminal error frame and close.
+
+```go
+select {
+case c.sendCh <- msg:
+case <-time.After(250 * time.Millisecond):
+  c.closeWithError("backpressure timeout")
+}
+```
+
+- Context propagation and cleanup
+  - All goroutines (KV watchers, JS subs, command requests) are tied to `Client.ctx`. Disconnect cancels context to ensure drains and resource release.
+
+- Domain-responsible sequence tracking (frontend)
+  - Domains persist `last_seq` and use `js_resume(stream, last_seq, batch, filter)` after reconnects so history gaps are avoided without server-side state.
+
+- Simplicity first, durability as needed
+  - Start with ephemeral subs and client-held resume; add durable consumers for long-lived or mission-critical feeds where pagination/rewind is required.
