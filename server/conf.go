@@ -70,7 +70,7 @@ func loadConf() (*GlobalConfig, error) {
 	// NTFY_TOKEN is optional
 	envNtfyToken := os.Getenv("NTFY_TOKEN")
 	if envNtfyToken == "" {
-		log.Fatalf("missing env-var: NTFY_TOKEN")
+		log.Printf("warning: NTFY_TOKEN not set; notifications will be disabled")
 	}
 
 	conf := &GlobalConfig{
