@@ -388,6 +388,8 @@ type Model {
     debug_targets: Set(String),
     debug_latest: Dict(String, String),
     debug_expanded: Set(String),
+    debug_ws_retries: Int,
+    debug_ws_status: String,
   )
 }
 
@@ -489,6 +491,10 @@ pub type Msg {
   DebugWsIncoming(String)
   DebugWsOpen(ws.WebSocket)
   DebugToggleExpanded(String)
+  DebugWsClosed
+  DebugWsReconnect
+  DebugWsDoConnect
+  DebugStatus(String)
 }
 
 fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -1673,12 +1679,49 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     NoOp -> #(model, effect.none())
     // Debug realtime messages
     DebugWsOpen(sock) -> {
-      #(Model(..model, debug_connected: True),
-        ws.send(sock, json.to_string(json.object([
-          #("op", json.string("sub")),
-          #("target", json.string("time.seconds")),
-        ]))))
+      #(
+        Model(..model, debug_connected: True, debug_ws_retries: 0, debug_ws_status: "Connected"),
+        effect.batch([
+          ws.send(sock, json.to_string(json.object([
+            #("op", json.string("sub")),
+            #("target", json.string("time.seconds")),
+          ]))),
+          ws.send(sock, json.to_string(json.object([
+            #("op", json.string("kv_sub")),
+            #("target", json.string("article")),
+          ]))),
+        ]),
+      )
     }
+    DebugWsClosed -> #(Model(..model, debug_connected: False, debug_ws_status: "Disconnected"), effect.from(fn(dispatch) { dispatch(DebugWsReconnect) }))
+    DebugWsReconnect -> {
+      // attempt reconnection with backoff, reset retries on success (handled in DebugWsOpen)
+      let retries = model.debug_ws_retries + 1
+      let delay_ms = case retries {
+        1 -> 500
+        2 -> 1000
+        3 -> 2000
+        _ -> 5000
+      }
+      let model = Model(..model, debug_ws_retries: retries, debug_ws_status: "Reconnecting...")
+      #(
+        model,
+        effect.from(fn(dispatch) { set_timeout(fn() { dispatch(DebugWsDoConnect) }, delay_ms) })
+      )
+    }
+    DebugStatus(s) -> #(Model(..model, debug_ws_status: s), effect.none())
+    DebugWsDoConnect -> #(
+      Model(..model, debug_ws_status: "Connecting..."),
+      ws.init("/ws", fn(ev) {
+        case ev {
+          ws.InvalidUrl -> DebugStatus("Invalid WS URL")
+          ws.OnOpen(sock) -> DebugWsOpen(sock)
+          ws.OnTextMessage(text) -> DebugWsIncoming(text)
+          ws.OnBinaryMessage(_) -> NoOp
+          ws.OnClose(_) -> DebugWsClosed
+        }
+      }),
+    )
     DebugToggleExpanded(tgt) -> {
       let expanded = case set.contains(model.debug_expanded, tgt) {
         True -> set.delete(model.debug_expanded, tgt)
@@ -5039,15 +5082,17 @@ fn init(_) -> #(Model, Effect(Msg)) {
       debug_targets: set.new(),
       debug_latest: dict.new(),
       debug_expanded: set.new(),
+      debug_ws_retries: 0,
+      debug_ws_status: "Disconnected",
     )
   // Connect debug websocket
   let effect_ws = ws.init("/ws", fn(ev) {
     case ev {
-      ws.InvalidUrl -> NoOp
+      ws.InvalidUrl -> DebugStatus("Invalid WS URL")
       ws.OnOpen(sock) -> DebugWsOpen(sock)
       ws.OnTextMessage(text) -> DebugWsIncoming(text)
       ws.OnBinaryMessage(_) -> NoOp
-      ws.OnClose(_) -> NoOp
+      ws.OnClose(_) -> DebugWsClosed
     }
   })
   let effect_modem =
@@ -5081,10 +5126,6 @@ fn init(_) -> #(Model, Effect(Msg)) {
 }
 
 fn view_debug_realtime(model: Model) -> List(Element(Msg)) {
-  let status = case model.debug_connected {
-    True -> "Connected"
-    False -> "Disconnected"
-  }
   let targets =
     model.debug_targets
     |> set.to_list
@@ -5101,7 +5142,7 @@ fn view_debug_realtime(model: Model) -> List(Element(Msg)) {
               False -> "text-red-400"
             }),
           ],
-          [html.text(status)],
+          [html.text(model.debug_ws_status)],
         ),
       ]),
       html.div([], [

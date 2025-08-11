@@ -116,7 +116,7 @@ func userIDFromRequest(r *http.Request) string {
 func authorizeInitial(l *jst_log.Logger, s *server, userID string) capabilities {
 	caps := capabilities{
     Subjects: []string{"time.>"},
-		Buckets:  map[string][]string{},
+    Buckets:  map[string][]string{"article": {">"}},
 		Commands: nil,
 		Streams:  map[string][]string{},
 	}
@@ -298,13 +298,25 @@ func (c *rtClient) handleKVSub(bucket, pattern string) {
 		for {
 			select {
 			case <-c.ctx.Done(): watcher.Stop(); return
-			case entry := <-watcher.Updates():
+            case entry := <-watcher.Updates():
 				if entry == nil { continue }
 				// If we had to fallback to WatchAll, filter by pattern here
 				if pattern != "" && !subjectMatch(pattern, entry.Key()) { continue }
-				c.send(serverMsg{Op: "msg", Target: bucket, Data: map[string]interface{}{
-					"key": entry.Key(), "value": string(entry.Value()), "rev": entry.Revision(),
-				}})
+                opStr := "put"
+                switch entry.Operation() {
+                case nats.KeyValueDelete:
+                    opStr = "delete"
+                case nats.KeyValuePurge:
+                    opStr = "purge"
+                default:
+                    opStr = "put"
+                }
+                c.send(serverMsg{Op: "msg", Target: bucket, Data: map[string]interface{}{
+                    "key": entry.Key(),
+                    "value": string(entry.Value()),
+                    "rev": entry.Revision(),
+                    "op": opStr,
+                }})
 			}
 		}
 	}()
