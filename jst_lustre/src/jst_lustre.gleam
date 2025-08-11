@@ -5,6 +5,10 @@ import article/draft
 import birl
 import components/ui
 import gleam/int
+import gleam/json
+import gleam/dynamic/decode
+import gleam/dict.{type Dict}
+import gleam/result
 import gleam/list
 import gleam/option.{type Option, None, Some}
 
@@ -21,6 +25,7 @@ import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
+import lustre_websocket as ws
 import modem
 import pages/about_view
 import pages/article_list_view
@@ -378,6 +383,11 @@ type Model {
     profile_form_old_password: String,
     profile_saving: Bool,
     password_saving: Bool,
+    // Debug realtime state
+    debug_connected: Bool,
+    debug_targets: Set(String),
+    debug_latest: Dict(String, String),
+    debug_expanded: Set(String),
   )
 }
 
@@ -474,6 +484,11 @@ pub type Msg {
   ProfileSaveResponse(Result(user.UserUpdateResponse, HttpError))
   ProfileChangePasswordClicked
   ProfileChangePasswordResponse(Result(user.UserUpdateResponse, HttpError))
+
+  // Debug realtime
+  DebugWsIncoming(String)
+  DebugWsOpen(ws.WebSocket)
+  DebugToggleExpanded(String)
 }
 
 fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -1656,6 +1671,48 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       )
     }
     NoOp -> #(model, effect.none())
+    // Debug realtime messages
+    DebugWsOpen(sock) -> {
+      #(Model(..model, debug_connected: True),
+        ws.send(sock, json.to_string(json.object([
+          #("op", json.string("sub")),
+          #("target", json.string("time.seconds")),
+        ]))))
+    }
+    DebugToggleExpanded(tgt) -> {
+      let expanded = case set.contains(model.debug_expanded, tgt) {
+        True -> set.delete(model.debug_expanded, tgt)
+        False -> set.insert(model.debug_expanded, tgt)
+      }
+      #(Model(..model, debug_expanded: expanded), effect.none())
+    }
+    DebugWsIncoming(raw) -> {
+      // Only decode the target; store raw JSON as latest message for display
+      let decoder = {
+        use target <- decode.field("target", decode.string)
+        decode.success(target)
+      }
+      let parsed = json.parse(from: raw, using: decoder)
+      case parsed {
+        Ok(target) -> {
+          let latest = dict.insert(model.debug_latest, target, raw)
+          let targets = set.insert(model.debug_targets, target)
+          let was_expanded = set.contains(model.debug_expanded, target)
+          let expanded = case was_expanded { True -> set.insert(model.debug_expanded, target) False -> model.debug_expanded }
+          #(
+            Model(
+              ..model,
+              debug_latest: latest,
+              debug_targets: targets,
+              debug_connected: True,
+              debug_expanded: expanded,
+            ),
+            effect.none(),
+          )
+        }
+        Error(_) -> #(model, effect.none())
+      }
+    }
   }
 }
 
@@ -1858,6 +1915,10 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
         }
       }
     }
+    routes.Debug -> {
+      let model = recompute_bindings_for_current_page(Model(..model, route:))
+      #(model, effect.none())
+    }
     routes.NotFound(_uri) -> {
       let model = recompute_bindings_for_current_page(Model(..model, route:))
       #(model, effect.none())
@@ -1950,6 +2011,7 @@ fn view(model: Model) -> Element(Msg) {
     pages.PageUiComponents(_) -> view_ui_components()
     pages.PageNotifications(_) -> view_notifications(model)
     pages.PageProfile(_) -> view_profile(model)
+    pages.PageDebug -> view_debug_realtime(model)
     pages.PageNotFound(uri) -> view_not_found(uri)
   }
   let nav_hints_overlay = case
@@ -2470,6 +2532,7 @@ fn page_from_model(model: Model) -> pages.Page {
         _ -> pages.PageError(pages.AuthenticationRequired("access profile"))
       }
     }
+    routes.Debug -> pages.PageDebug
     routes.NotFound(uri) -> pages.PageNotFound(uri)
   }
 }
@@ -2589,6 +2652,12 @@ fn view_header(model: Model) -> Element(Msg) {
                     label: "About",
                     attributes: [],
                   ),
+                  view_header_link(
+                    target: routes.Debug,
+                    current: model.route,
+                    label: "Debug",
+                    attributes: [],
+                  ),
                 ],
                 case model.session {
                   session.Authenticated(_) -> [
@@ -2613,7 +2682,6 @@ fn view_header(model: Model) -> Element(Msg) {
                   ]
                   _ -> []
                 },
-                [],
               ]),
             ),
             // Hamburger menu for auth actions
@@ -2661,6 +2729,12 @@ fn view_header(model: Model) -> Element(Msg) {
                                 target: routes.About,
                                 current: model.route,
                                 label: "About",
+                                attributes: top_nav_attributes_small,
+                              ),
+                              view_header_link(
+                                target: routes.Debug,
+                                current: model.route,
+                                label: "Debug",
                                 attributes: top_nav_attributes_small,
                               ),
                             ],
@@ -4960,7 +5034,22 @@ fn init(_) -> #(Model, Effect(Msg)) {
       profile_form_old_password: "",
       profile_saving: False,
       password_saving: False,
+      // debug realtime
+      debug_connected: False,
+      debug_targets: set.new(),
+      debug_latest: dict.new(),
+      debug_expanded: set.new(),
     )
+  // Connect debug websocket
+  let effect_ws = ws.init("/ws", fn(ev) {
+    case ev {
+      ws.InvalidUrl -> NoOp
+      ws.OnOpen(sock) -> DebugWsOpen(sock)
+      ws.OnTextMessage(text) -> DebugWsIncoming(text)
+      ws.OnBinaryMessage(_) -> NoOp
+      ws.OnClose(_) -> NoOp
+    }
+  })
   let effect_modem =
     modem.init(fn(uri) {
       uri
@@ -4977,6 +5066,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
     model,
     effect.batch([
       effect_modem,
+      effect_ws,
       local_storage_effect,
       // effect_nav,
       session.auth_check(AuthCheckResponse, model.base_uri),
@@ -4988,4 +5078,59 @@ fn init(_) -> #(Model, Effect(Msg)) {
       window_events.setup(WindowUnfocused),
     ]),
   )
+}
+
+fn view_debug_realtime(model: Model) -> List(Element(Msg)) {
+  let status = case model.debug_connected {
+    True -> "Connected"
+    False -> "Disconnected"
+  }
+  let targets =
+    model.debug_targets
+    |> set.to_list
+    |> list.sort(string.compare)
+  [
+    html.div([attr.class("max-w-3xl mx-auto p-4 space-y-4")], [
+      html.h2([attr.class("text-xl font-bold")], [html.text("Realtime Debug")]),
+      html.div([attr.class("text-sm text-zinc-300")], [
+        html.text("Connection: "),
+        html.span(
+          [
+            attr.class(case model.debug_connected {
+              True -> "text-green-400"
+              False -> "text-red-400"
+            }),
+          ],
+          [html.text(status)],
+        ),
+      ]),
+      html.div([], [
+        html.h3([attr.class("font-semibold mb-2")], [
+          html.text("Subscriptions (observed targets)"),
+        ]),
+    html.ul(
+      [attr.class("space-y-2")],
+      list.map(targets, fn(tgt) {
+        let latest = case dict.get(model.debug_latest, tgt) {
+          Ok(v) -> v
+          Error(Nil) -> ""
+        }
+        let is_open = set.contains(model.debug_expanded, tgt)
+        html.li([attr.class("border border-zinc-700 rounded p-2")], [
+          html.details([
+            attr.attribute("open", case is_open { True -> "open" False -> "" }),
+          ], [
+            html.summary([
+              event.on_click(DebugToggleExpanded(tgt)),
+            ], [html.code([], [html.text(tgt)])]),
+            html.pre([attr.class("whitespace-pre-wrap text-xs mt-2")], [
+              html.text(latest),
+            ]),
+          ]),
+        ])
+      }),
+    ),
+  ]),
+    ]),
+  ]
 }

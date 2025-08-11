@@ -177,6 +177,21 @@ func run(
 	httpServer := web.New(ctx, nc, conf.WebJwtSecret, lRoot.WithBreadcrumb("http"), articleRepo, conf.Flags.ProxyFrontend)
 	go httpServer.Run(cleanShutdown, conf.WebPort)
 
+  // - time ticker publisher (NATS core)
+  go func() {
+    ticker := time.NewTicker(1 * time.Second)
+    defer ticker.Stop()
+    for {
+      select {
+      case <-ctx.Done():
+        return
+      case t := <-ticker.C:
+        payload := fmt.Sprintf(`{"unix": %d}`, t.Unix())
+        _ = nc.Publish("time.seconds", []byte(payload))
+      }
+    }
+  }()
+
 	// ------------------------------------------------------------
 	// RUNNING
 	// ------------------------------------------------------------

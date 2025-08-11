@@ -3,464 +3,379 @@ package web
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
-	"jst_dev/server/jst_log"
-
 	"github.com/gorilla/websocket"
 	"github.com/nats-io/nats.go"
+
+	"jst_dev/server/jst_log"
+	"jst_dev/server/who"
+	whoApi "jst_dev/server/who/api"
 )
 
-// Message types for WebSocket communication
-const (
-	MsgTypeConnect     = "connect"
-	MsgTypeDisconnect  = "disconnect"
-	MsgTypeSubscribe   = "subscribe"
-	MsgTypeUnsubscribe = "unsubscribe"
-	MsgTypeData        = "data"
-	MsgTypeError       = "error"
-	MsgTypeAuth        = "auth"
-	MsgTypeSync        = "sync"
-)
+// Unified protocol messages
 
-// WebSocketMessage represents the structure of messages sent over WebSocket
-type WebSocketMessage struct {
-	Type      string      `json:"type"`
-	Topic     string      `json:"topic,omitempty"`
-	Data      interface{} `json:"data,omitempty"`
-	Error     string      `json:"error,omitempty"`
-	UserID    string      `json:"user_id,omitempty"`
-	Timestamp int64       `json:"timestamp,omitempty"`
+type clientMsg struct {
+	Op     string          `json:"op"`
+	Target string          `json:"target"`
+	Inbox  string          `json:"inbox,omitempty"`
+	Data   json.RawMessage `json:"data,omitempty"`
 }
 
-// Client represents a connected WebSocket client
-type Client struct {
-	ID     string
-	Conn   *websocket.Conn
-	UserID string
-	Topics map[string]bool
-	Send   chan []byte
-	Hub    *Hub
-	mu     sync.RWMutex
+type serverMsg struct {
+	Op     string      `json:"op"`
+	Target string      `json:"target"`
+	Inbox  string      `json:"inbox,omitempty"`
+	Data   interface{} `json:"data,omitempty"`
 }
 
-// Hub manages all WebSocket connections and NATS subscriptions
-type Hub struct {
-	clients    map[*Client]bool
-	broadcast  chan []byte
-	register   chan *Client
-	unregister chan *Client
-	nc         *nats.Conn
-	logger     *jst_log.Logger
+// Capabilities with pattern-based permissions
+
+type capabilities struct {
+	Subjects []string            `json:"subjects"`
+	Buckets  map[string][]string `json:"buckets"` // bucket pattern -> allowed key patterns
+	Commands []string            `json:"commands"`
+	Streams  map[string][]string `json:"streams"` // stream pattern -> allowed filter subject patterns
+}
+
+type server struct {
+	nc *nats.Conn
+	js nats.JetStreamContext
+}
+
+type rtClient struct {
+	id         string
+	caps       capabilities
+	conn       *websocket.Conn
+	srv        *server
+	subs       map[string]*nats.Subscription
+	kvWatchers map[string]nats.KeyWatcher
+	sendCh     chan serverMsg
+	mu         sync.Mutex
 	ctx        context.Context
-	mu         sync.RWMutex
+	cancel     context.CancelFunc
+	log        *jst_log.Logger
 }
 
-// NewHub creates a new WebSocket hub
-func NewHub(nc *nats.Conn, logger *jst_log.Logger, ctx context.Context) *Hub {
-	return &Hub{
-		clients:    make(map[*Client]bool),
-		broadcast:  make(chan []byte),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
-		nc:         nc,
-		logger:     logger,
-		ctx:        ctx,
-	}
-}
-
-// Run starts the hub's main event loop
-func (h *Hub) Run() {
-	for {
-		select {
-		case client := <-h.register:
-			h.mu.Lock()
-			h.clients[client] = true
-			h.mu.Unlock()
-			h.logger.Info("Client registered: %s", client.ID)
-
-		case client := <-h.unregister:
-			h.mu.Lock()
-			if _, ok := h.clients[client]; ok {
-				delete(h.clients, client)
-				close(client.Send)
-			}
-			h.mu.Unlock()
-			h.logger.Info("Client unregistered: %s", client.ID)
-
-		case message := <-h.broadcast:
-			h.mu.RLock()
-			for client := range h.clients {
-				select {
-				case client.Send <- message:
-				default:
-					close(client.Send)
-					delete(h.clients, client)
-				}
-			}
-			h.mu.RUnlock()
-
-		case <-h.ctx.Done():
-			h.logger.Info("Hub shutting down")
-			return
-		}
-	}
-}
-
-// Broadcast sends a message to all connected clients
-func (h *Hub) Broadcast(msg *WebSocketMessage) {
-	data, err := json.Marshal(msg)
-	if err != nil {
-		h.logger.Error("Failed to marshal broadcast message: %v", err)
-		return
-	}
-	h.broadcast <- data
-}
-
-// SendToUser sends a message to a specific user
-func (h *Hub) SendToUser(userID string, msg *WebSocketMessage) {
-	data, err := json.Marshal(msg)
-	if err != nil {
-		h.logger.Error("Failed to marshal user message: %v", err)
-		return
-	}
-
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-
-	for client := range h.clients {
-		if client.UserID == userID {
-			select {
-			case client.Send <- data:
-			default:
-				close(client.Send)
-				delete(h.clients, client)
-			}
-		}
-	}
-}
-
-// WebSocket upgrader configuration
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		// In production, implement proper origin checking
-		return true
-	},
+	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-// HandleWebSocket handles WebSocket connections
-func HandleWebSocket(hub *Hub, w http.ResponseWriter, r *http.Request) {
+// HandleRealtimeWebSocket upgrades the connection and serves the realtime bridge
+func HandleRealtimeWebSocket(l *jst_log.Logger, nc *nats.Conn, w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		hub.logger.Error("Failed to upgrade connection: %v", err)
+		l.Error("ws upgrade: %v", err)
 		return
 	}
 
-	// Extract user ID from JWT token or query parameter
-	userID := r.URL.Query().Get("user_id")
-	if userID == "" {
-		// Try to get from JWT token in headers
-		if token := r.Header.Get("Authorization"); token != "" {
-			// Parse JWT and extract user ID
-			// This would integrate with your existing JWT authentication
-			userID = "anonymous" // Placeholder
-		}
+	js, err := nc.JetStream()
+	if err != nil {
+		_ = conn.WriteJSON(serverMsg{Op: "error", Data: map[string]string{"reason": "jetstream unavailable"}})
+		_ = conn.Close()
+		return
 	}
 
-	client := &Client{
-		ID:     generateClientID(),
-		Conn:   conn,
-		UserID: userID,
-		Topics: make(map[string]bool),
-		Send:   make(chan []byte, 256),
-		Hub:    hub,
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &server{nc: nc, js: js}
+
+	userID := userIDFromRequest(r)
+	c := &rtClient{
+		id:         userID,
+		caps:       authorizeInitial(l, s, userID),
+		conn:       conn,
+		srv:        s,
+		subs:       make(map[string]*nats.Subscription),
+		kvWatchers: make(map[string]nats.KeyWatcher),
+		sendCh:     make(chan serverMsg, 256),
+		ctx:        ctx,
+		cancel:     cancel,
+		log:        l,
 	}
 
-	hub.register <- client
-
-	// Send welcome message
-	welcomeMsg := &WebSocketMessage{
-		Type:      MsgTypeConnect,
-		Data:      map[string]string{"message": "Connected to sync server"},
-		UserID:    userID,
-		Timestamp: time.Now().Unix(),
-	}
-	client.sendMessage(welcomeMsg)
-
-	// Start goroutines for reading and writing
-	go client.writePump()
-	go client.readPump()
+	go c.watchAuthKV()
+	go c.writeLoop()
+	c.readLoop()
 }
 
-// Client methods
-func (c *Client) readPump() {
-	defer func() {
-		c.Hub.unregister <- c
-		c.Conn.Close()
-	}()
-
-	c.Conn.SetReadLimit(512)
-	if err := c.Conn.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
-		c.Hub.logger.Error("Failed to set read deadline: %v", err)
+func userIDFromRequest(r *http.Request) string {
+	if u, ok := r.Context().Value(who.UserKey).(whoApi.User); ok {
+		if u.ID != "" { return u.ID }
 	}
-	c.Conn.SetPongHandler(func(string) error {
-		if err := c.Conn.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
-			c.Hub.logger.Error("Failed to set read deadline: %v", err)
-		}
-		return nil
-	})
-
-	for {
-		_, message, err := c.Conn.ReadMessage()
-		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				c.Hub.logger.Error("WebSocket read error: %v", err)
-			}
-			break
-		}
-
-		c.handleMessage(message)
-	}
+	// fallback for dev
+	if q := r.URL.Query().Get("user_id"); q != "" { return q }
+	return ""
 }
 
-func (c *Client) writePump() {
-	ticker := time.NewTicker(54 * time.Second)
-	defer func() {
-		ticker.Stop()
-		c.Conn.Close()
-	}()
+// Authorization bootstrap (loads capabilities from Auth KV); fallback to minimal caps
+func authorizeInitial(l *jst_log.Logger, s *server, userID string) capabilities {
+	caps := capabilities{
+    Subjects: []string{"time.>"},
+		Buckets:  map[string][]string{},
+		Commands: nil,
+		Streams:  map[string][]string{},
+	}
+	if userID == "" { return caps }
+	kv, err := s.js.KeyValue("auth.users")
+	if err != nil { return caps }
+	entry, err := kv.Get(userID)
+	if err != nil || entry == nil { return caps }
+	_ = json.Unmarshal(entry.Value(), &caps)
+	return caps
+}
 
+func (c *rtClient) writeLoop() {
 	for {
 		select {
-		case message, ok := <-c.Send:
-			if err := c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
-				c.Hub.logger.Error("Failed to set write deadline: %v", err)
-				return
-			}
-			if !ok {
-				if err := c.Conn.WriteMessage(websocket.CloseMessage, []byte{}); err != nil {
-					c.Hub.logger.Error("Failed to write close message: %v", err)
-					return
-				}
-				return
-			}
-
-			w, err := c.Conn.NextWriter(websocket.TextMessage)
-			if err != nil {
-				c.Hub.logger.Error("Failed to get next writer: %v", err)
-				return
-			}
-			if _, err := w.Write(message); err != nil {
-				c.Hub.logger.Error("Failed to write message: %v", err)
-				return
-			}
-
-			if err := w.Close(); err != nil {
-				c.Hub.logger.Error("Failed to close writer: %v", err)
-				return
-			}
-		case <-ticker.C:
-			if err := c.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
-				c.Hub.logger.Error("Failed to set write deadline: %v", err)
-				return
-			}
-			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				c.Hub.logger.Error("Failed to write ping message: %v", err)
+		case <-c.ctx.Done():
+			return
+		case msg := <-c.sendCh:
+			if err := c.conn.WriteJSON(msg); err != nil {
+				c.log.Error("ws write: %v", err)
+				c.closeWithError("write error")
 				return
 			}
 		}
 	}
 }
 
-func (c *Client) handleMessage(message []byte) {
-	var msg WebSocketMessage
-	if err := json.Unmarshal(message, &msg); err != nil {
-		c.sendError("Invalid message format")
-		return
-	}
-
-	switch msg.Type {
-	case MsgTypeSubscribe:
-		c.handleSubscribe(msg.Topic)
-	case MsgTypeUnsubscribe:
-		c.handleUnsubscribe(msg.Topic)
-	case MsgTypeAuth:
-		c.handleAuth(msg.UserID)
-	case MsgTypeSync:
-		c.handleSync(msg)
-	default:
-		c.sendError("Unknown message type")
-	}
-}
-
-func (c *Client) handleSubscribe(topic string) {
-	if topic == "" {
-		c.sendError("Topic is required for subscription")
-		return
-	}
-
-	c.mu.Lock()
-	c.Topics[topic] = true
-	c.mu.Unlock()
-
-	// Subscribe to NATS topic
-	_, err := c.Hub.nc.Subscribe(topic, func(natsMsg *nats.Msg) {
-		syncMsg := &WebSocketMessage{
-			Type:      MsgTypeData,
-			Topic:     topic,
-			Data:      string(natsMsg.Data),
-			Timestamp: time.Now().Unix(),
-		}
-		c.sendMessage(syncMsg)
-	})
-
-	if err != nil {
-		c.sendError("Failed to subscribe to topic")
-		return
-	}
-
-	// Store subscription for cleanup
-	// In a production system, you'd want to track subscriptions properly
-
-	response := &WebSocketMessage{
-		Type:      MsgTypeSubscribe,
-		Topic:     topic,
-		Data:      map[string]string{"status": "subscribed"},
-		Timestamp: time.Now().Unix(),
-	}
-	c.sendMessage(response)
-}
-
-func (c *Client) handleUnsubscribe(topic string) {
-	c.mu.Lock()
-	delete(c.Topics, topic)
-	c.mu.Unlock()
-
-	// Unsubscribe from NATS topic
-	// Implementation would depend on how you track subscriptions
-
-	response := &WebSocketMessage{
-		Type:      MsgTypeUnsubscribe,
-		Topic:     topic,
-		Data:      map[string]string{"status": "unsubscribed"},
-		Timestamp: time.Now().Unix(),
-	}
-	c.sendMessage(response)
-}
-
-func (c *Client) handleAuth(userID string) {
-	if userID != "" {
-		c.UserID = userID
-	}
-
-	response := &WebSocketMessage{
-		Type:      MsgTypeAuth,
-		UserID:    c.UserID,
-		Data:      map[string]string{"status": "authenticated"},
-		Timestamp: time.Now().Unix(),
-	}
-	c.sendMessage(response)
-}
-
-func (c *Client) handleSync(msg WebSocketMessage) {
-	// Handle data synchronization
-	// This could involve:
-	// 1. Publishing to NATS for other clients
-	// 2. Storing in a database
-	// 3. Triggering business logic
-
-	if msg.Topic != "" {
-		// Publish to NATS for other subscribers
-		data, _ := json.Marshal(msg.Data)
-		if err := c.Hub.nc.Publish(msg.Topic, data); err != nil {
-			c.Hub.logger.Error("Failed to publish to NATS: %v", err)
-		}
-	}
-
-	response := &WebSocketMessage{
-		Type:      MsgTypeSync,
-		Topic:     msg.Topic,
-		Data:      map[string]string{"status": "synced"},
-		Timestamp: time.Now().Unix(),
-	}
-	c.sendMessage(response)
-}
-
-func (c *Client) sendMessage(msg *WebSocketMessage) {
-	data, err := json.Marshal(msg)
-	if err != nil {
-		c.Hub.logger.Error("Failed to marshal message: %v", err)
-		return
-	}
-
+func (c *rtClient) send(msg serverMsg) {
 	select {
-	case c.Send <- data:
-	default:
-		c.Hub.unregister <- c
+	case c.sendCh <- msg:
+		return
+	case <-time.After(250 * time.Millisecond):
+		c.log.Warn("send backpressure; closing client=%s", c.id)
+		c.closeWithError("backpressure timeout")
 	}
 }
 
-func (c *Client) sendError(errorMsg string) {
-	msg := &WebSocketMessage{
-		Type:      MsgTypeError,
-		Error:     errorMsg,
-		Timestamp: time.Now().Unix(),
+func (c *rtClient) closeWithError(reason string) {
+	_ = c.conn.WriteJSON(serverMsg{Op: "error", Data: map[string]string{"reason": reason}})
+	c.cancel()
+	_ = c.conn.Close()
+	c.unsubscribeAll()
+}
+
+func (c *rtClient) readLoop() {
+	defer func() {
+		c.cancel()
+		_ = c.conn.Close()
+		c.unsubscribeAll()
+	}()
+
+	for {
+		_, data, err := c.conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		var m clientMsg
+		if err := json.Unmarshal(data, &m); err != nil {
+			c.send(serverMsg{Op: "error", Data: map[string]string{"reason": "bad json"}})
+			continue
+		}
+		switch m.Op {
+		case "sub":
+			c.handleSub(m.Target)
+		case "unsub":
+			c.handleUnsub(m.Target)
+		case "kv_sub":
+			var opts struct{ Pattern string `json:"pattern"` }
+			_ = json.Unmarshal(m.Data, &opts)
+			c.handleKVSub(m.Target, opts.Pattern)
+		case "js_sub":
+			var opts struct{
+				StartSeq uint64 `json:"start_seq"`
+				Batch    int    `json:"batch"`
+				Filter   string `json:"filter"`
+			}
+			_ = json.Unmarshal(m.Data, &opts)
+			c.handleJSSub(m.Target, opts.StartSeq, opts.Batch, opts.Filter)
+		case "cmd":
+			c.handleCommand(m.Target, m.Data, m.Inbox)
+		}
 	}
-	c.sendMessage(msg)
 }
 
-// Utility function to generate unique client IDs
-func generateClientID() string {
-	return fmt.Sprintf("client_%d", time.Now().UnixNano())
+func (c *rtClient) unsubscribeAll() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, s := range c.subs { _ = s.Unsubscribe() }
+	for _, w := range c.kvWatchers { w.Stop() }
 }
 
-// SyncService provides high-level data synchronization functionality
-type SyncService struct {
-	hub    *Hub
-	logger *jst_log.Logger
-}
+// ---- Capability checks
 
-// NewSyncService creates a new sync service
-func NewSyncService(nc *nats.Conn, logger *jst_log.Logger, ctx context.Context) *SyncService {
-	hub := NewHub(nc, logger, ctx)
-	go hub.Run()
-
-	return &SyncService{
-		hub:    hub,
-		logger: logger,
+// subjectMatch implements NATS-like matching with '*' (single token) and '>' (tail)
+func subjectMatch(pattern, subject string) bool {
+	pp := strings.Split(pattern, ".")
+	su := strings.Split(subject, ".")
+	for i, pi := range pp {
+		if pi == ">" {
+			return true
+		}
+		if i >= len(su) {
+			return false
+		}
+		si := su[i]
+		if pi == "*" { continue }
+		if pi != si { return false }
 	}
+	return len(su) == len(pp) || (len(pp) > 0 && pp[len(pp)-1] == ">")
 }
 
-// PublishData publishes data to a specific topic
-func (s *SyncService) PublishData(topic string, data interface{}) error {
-	msg := &WebSocketMessage{
-		Type:      MsgTypeData,
-		Topic:     topic,
-		Data:      data,
-		Timestamp: time.Now().Unix(),
+func containsPattern(patterns []string, subject string) bool {
+	for _, p := range patterns {
+		if subjectMatch(p, subject) { return true }
 	}
-	s.hub.Broadcast(msg)
-	return nil
+	return false
 }
 
-// PublishToUser publishes data to a specific user
-func (s *SyncService) PublishToUser(userID string, data interface{}) error {
-	msg := &WebSocketMessage{
-		Type:      MsgTypeData,
-		Data:      data,
-		UserID:    userID,
-		Timestamp: time.Now().Unix(),
+func (c *rtClient) isAllowedSubject(subject string) bool { return containsPattern(c.caps.Subjects, subject) }
+
+func (c *rtClient) isAllowedKV(bucket, keyPattern string) bool {
+	for bucketPattern, allowedKeys := range c.caps.Buckets {
+		if subjectMatch(bucketPattern, bucket) {
+			if keyPattern == "" { return containsPattern(allowedKeys, ">") }
+			return containsPattern(allowedKeys, keyPattern)
+		}
 	}
-	s.hub.SendToUser(userID, msg)
-	return nil
+	return false
 }
 
-// GetHub returns the underlying hub for direct access
-func (s *SyncService) GetHub() *Hub {
-	return s.hub
+func (c *rtClient) isAllowedStream(stream, filter string) bool {
+	for streamPattern, allowedFilters := range c.caps.Streams {
+		if subjectMatch(streamPattern, stream) {
+			if filter == "" { return containsPattern(allowedFilters, ">") }
+			return containsPattern(allowedFilters, filter)
+		}
+	}
+	return false
+}
+
+// ---- Handlers
+
+func (c *rtClient) handleSub(subject string) {
+	if !c.isAllowedSubject(subject) { return }
+	sub, err := c.srv.nc.Subscribe(subject, func(m *nats.Msg) {
+		var payload interface{}
+		if err := json.Unmarshal(m.Data, &payload); err != nil { payload = string(m.Data) }
+		c.send(serverMsg{Op: "msg", Target: subject, Data: payload})
+	})
+	if err != nil { return }
+	c.mu.Lock(); c.subs[subject] = sub; c.mu.Unlock()
+}
+
+func (c *rtClient) handleUnsub(subject string) {
+	c.mu.Lock(); defer c.mu.Unlock()
+	if s, ok := c.subs[subject]; ok { _ = s.Unsubscribe(); delete(c.subs, subject) }
+	if w, ok := c.kvWatchers[subject]; ok { w.Stop(); delete(c.kvWatchers, subject) }
+}
+
+func (c *rtClient) handleKVSub(bucket, pattern string) {
+	if !c.isAllowedKV(bucket, pattern) { return }
+	kv, err := c.srv.js.KeyValue(bucket)
+	if err != nil { return }
+	var watcher nats.KeyWatcher
+	if pattern != "" {
+		// try pattern-specific watch if supported; otherwise fallback to WatchAll and filter client-side
+		w, werr := kv.Watch(pattern)
+		if werr == nil {
+			watcher = w
+		} else {
+			watcher, _ = kv.WatchAll()
+		}
+	} else {
+		watcher, _ = kv.WatchAll()
+	}
+	if watcher == nil { return }
+	c.kvWatchers[bucket] = watcher
+	go func() {
+		for {
+			select {
+			case <-c.ctx.Done(): watcher.Stop(); return
+			case entry := <-watcher.Updates():
+				if entry == nil { continue }
+				// If we had to fallback to WatchAll, filter by pattern here
+				if pattern != "" && !subjectMatch(pattern, entry.Key()) { continue }
+				c.send(serverMsg{Op: "msg", Target: bucket, Data: map[string]interface{}{
+					"key": entry.Key(), "value": string(entry.Value()), "rev": entry.Revision(),
+				}})
+			}
+		}
+	}()
+}
+
+func (c *rtClient) handleJSSub(stream string, startSeq uint64, batch int, filter string) {
+	if !c.isAllowedStream(stream, filter) { return }
+	// Require a filter subject for JS subscribe to ensure a concrete subject
+	if filter == "" { return }
+	opts := []nats.SubOpt{ nats.StartSequence(startSeq) }
+	if batch > 0 { opts = append(opts, nats.MaxDeliver(batch)) }
+	sub, err := c.srv.js.Subscribe(filter, func(m *nats.Msg) {
+		c.send(serverMsg{Op: "msg", Target: stream, Data: json.RawMessage(m.Data)})
+	}, opts...)
+	if err != nil { return }
+	c.mu.Lock(); c.subs[stream] = sub; c.mu.Unlock()
+}
+
+func (c *rtClient) handleCommand(target string, data json.RawMessage, inbox string) {
+	if !containsPattern(c.caps.Commands, target) { return }
+	go func() {
+		ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
+		defer cancel()
+		msg, err := c.srv.nc.RequestWithContext(ctx, target, data)
+		if err != nil {
+			c.send(serverMsg{Op: "reply", Target: target, Inbox: inbox, Data: map[string]string{"error": err.Error()}})
+			return
+		}
+		var payload interface{}
+		if err := json.Unmarshal(msg.Data, &payload); err != nil { payload = string(msg.Data) }
+		c.send(serverMsg{Op: "reply", Target: target, Inbox: inbox, Data: payload})
+	}()
+}
+
+// Capability updates via Auth KV
+func (c *rtClient) watchAuthKV() {
+	kv, err := c.srv.js.KeyValue("auth.users")
+	if err != nil { return }
+	watcher, err := kv.Watch(c.id)
+	if err != nil { return }
+	go func() {
+		for {
+			select {
+			case <-c.ctx.Done(): watcher.Stop(); return
+			case entry := <-watcher.Updates():
+				if entry == nil { continue }
+				var newCaps capabilities
+				if err := json.Unmarshal(entry.Value(), &newCaps); err != nil { continue }
+				c.applyCapabilities(newCaps)
+				c.send(serverMsg{Op: "cap_update", Data: newCaps})
+			}
+		}
+	}()
+}
+
+func (c *rtClient) applyCapabilities(newCaps capabilities) {
+	c.mu.Lock(); defer c.mu.Unlock()
+	// Unsubscribe from disallowed subjects
+	for subject, sub := range c.subs {
+		if subject == "" { continue }
+		if !containsPattern(newCaps.Subjects, subject) {
+			_ = sub.Unsubscribe()
+			delete(c.subs, subject)
+		}
+	}
+	for bucket, w := range c.kvWatchers {
+		allowed := false
+		for bucketPattern := range newCaps.Buckets {
+			if subjectMatch(bucketPattern, bucket) { allowed = true; break }
+		}
+		if !allowed { w.Stop(); delete(c.kvWatchers, bucket) }
+	}
+	c.caps = newCaps
 }
