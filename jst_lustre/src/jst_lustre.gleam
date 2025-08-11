@@ -25,10 +25,16 @@ import modem
 import pages/about_view
 import pages/article_list_view
 import pages/article_view
+import pages/article_edit_view
 import pages/index_view
 import pages/pages
 import pages/url_index_view
 import pages/url_list_view
+import pages/misc_views
+import pages/profile_view
+import pages/ui_components_view
+import pages/notifications_view
+import view/layout
 import plinth/browser/event as p_event
 import routes.{type Route}
 import session.{type Session}
@@ -336,7 +342,7 @@ fn should_prevent_keydown(
   }
 }
 
-type Model {
+pub type Model {
   Model(
     base_uri: Uri,
     route: Route,
@@ -479,7 +485,7 @@ pub type Msg {
 fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case model.debug_use_local_storage {
     True -> {
-      let #(new_model, effect) = update(model, msg)
+      let #(new_model, effect) = update(msg, model)
       let persistent_model = fn(model: Model) -> PersistentModel {
         PersistentModelV1(articles: case model.articles {
           Loaded(articles, _, _) -> articles
@@ -505,11 +511,11 @@ fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       }
       #(new_model, effect)
     }
-    False -> update(model, msg)
+    False -> update(msg, model)
   }
 }
 
-fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
+pub fn update(msg: Msg, model: Model) -> #(Model, Effect(Msg)) {
   case msg {
     // LOCAL MODEL
     GotLocalModelResult(res) -> {
@@ -593,7 +599,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     ProfileMenuAction(msg) -> {
       let model = Model(..model, profile_menu_open: False)
-      update(model, msg)
+      update(msg, model)
     }
 
     // Keyboard events
@@ -1675,6 +1681,23 @@ fn fetch_articles_model(model_effect_touple) -> #(Model, Effect(Msg)) {
 
 fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
   let route = routes.from_uri(uri)
+  // Reset ephemeral (non-persistent) UI state on route change
+  let model = Model(
+    ..model,
+    route: route,
+    // Ephemeral UI state
+    profile_menu_open: False,
+    notice: "",
+    delete_confirmation: None,
+    copy_feedback: None,
+    expanded_urls: set.new(),
+    login_form_open: False,
+    // transient login fields
+    login_username: "",
+    login_password: "",
+    login_loading: False,
+    // Notification form can persist across pages if desired; keep current values
+  )
   case route {
     routes.About -> {
       let model = recompute_bindings_for_current_page(Model(..model, route:))
@@ -1894,7 +1917,7 @@ fn update_chord(
             Model(..model, keys_down: set.difference(model.keys_down, keys))
 
           // Dispatch the bound message through the regular update
-          update(model, binding.msg)
+          update(binding.msg, model)
         }
       }
     }
@@ -1903,30 +1926,41 @@ fn update_chord(
 
 // VIEW ------------------------------------------------------------------------
 
-fn view(model: Model) -> Element(Msg) {
+pub fn view(model: Model) -> Element(Msg) {
   let page = page_from_model(model)
   let content: List(Element(Msg)) = case page {
-    pages.Loading(_) -> view_loading()
+    pages.Loading(_) -> misc_views.loading_page()
     pages.PageIndex -> index_view.view(UserMouseDownNavigation)
-    pages.PageArticleList(articles, _session) ->
-      article_list_view.view(articles, model.session)
-    pages.PageArticleListLoading -> view_article_listing_loading()
-    pages.PageArticle(article, session) ->
-      article_view.view_article_page(article, session)
-    pages.PageArticleEdit(article, _) -> view_article_edit(model, article)
+    pages.PageArticleList(articles, _session) -> article_list_view.view(articles, model.session)
+    pages.PageArticleListLoading -> misc_views.article_list_loading()
+    pages.PageArticle(article, session) -> article_view.view_article_page(article, session)
+    pages.PageArticleEdit(article, _) -> {
+      case article.get_draft(article) {
+        None -> [ui.error_state(ui.ErrorGeneric, "no draft..", "", None)]
+        Some(d) -> article_edit_view.view(
+          article,
+          d,
+          model.edit_view_mode == EditViewModePreview,
+          article_edit_view.Callbacks(
+            EditViewModeToggled,
+            fn(text) { ArticleDraftUpdatedSlug(article, text) },
+            fn(text) { ArticleDraftUpdatedTitle(article, text) },
+            fn(text) { ArticleDraftUpdatedSubtitle(article, text) },
+            fn(text) { ArticleDraftUpdatedLeading(article, text) },
+            fn(text) { ArticleDraftUpdatedContent(article, text) },
+            ArticleDraftDiscardClicked(article),
+            ArticleDraftSaveClicked(article),
+          ),
+        )
+      }
+    }
     pages.PageError(error) -> {
       case error {
-        pages.ArticleNotFound(slug, _) ->
-          article_view.view_article_not_found(slug)
-        pages.ArticleEditNotFound(id) ->
-          view_article_edit_not_found(model.articles, id)
-        pages.HttpError(error, _) -> [
-          view_error(error_string.http_error(error)),
-        ]
-        pages.AuthenticationRequired(action) -> [
-          view_error("Authentication required: " <> action),
-        ]
-        pages.Other(msg) -> [view_error(msg)]
+        pages.ArticleNotFound(slug, _) -> article_view.view_article_not_found(slug)
+        pages.ArticleEditNotFound(id) -> misc_views.article_edit_not_found(id)
+        pages.HttpError(error, _) -> [misc_views.error_state(error_string.http_error(error))]
+        pages.AuthenticationRequired(action) -> [misc_views.error_state("Authentication required: " <> action)]
+        pages.Other(msg) -> [misc_views.error_state(msg)]
       }
     }
     pages.PageAbout -> about_view.view()
@@ -1945,12 +1979,56 @@ fn view(model: Model) -> Element(Msg) {
           fn() { ShortUrlDeleteCancelClicked },
         ),
       ))
-    pages.PageUrlShortInfo(short, _) -> view_url_info_page(model, short)
-    pages.PageDjotDemo(_, content) -> view_djot_demo(content)
-    pages.PageUiComponents(_) -> view_ui_components()
-    pages.PageNotifications(_) -> view_notifications(model)
-    pages.PageProfile(_) -> view_profile(model)
-    pages.PageNotFound(uri) -> view_not_found(uri)
+    pages.PageUrlShortInfo(short, _) -> misc_views.url_info(
+      model.short_urls,
+      short,
+      model.copy_feedback,
+      misc_views.UrlInfoCallbacks(
+        UserMouseDownNavigation(routes.to_uri(routes.UrlShortIndex)),
+        ShortUrlCopyClicked,
+        ShortUrlToggleActiveClicked,
+        ShortUrlDeleteClicked,
+      ),
+    )
+    pages.PageDjotDemo(_, content) -> misc_views.djot_demo(content, DjotDemoContentUpdated)
+    pages.PageUiComponents(_) -> ui_components_view.view()
+    pages.PageNotifications(_) -> notifications_view.view(
+      model.notification_form_title,
+      model.notification_form_message,
+      model.notification_form_category,
+      model.notification_form_priority,
+      model.notification_form_ntfy_topic,
+      model.notification_sending,
+      notifications_view.Callbacks(
+        NotificationFormTitleUpdated,
+        NotificationFormMessageUpdated,
+        NotificationFormCategoryUpdated,
+        NotificationFormPriorityUpdated,
+        NotificationFormNtfyTopicUpdated,
+        NotificationSendClicked,
+      ),
+    )
+    pages.PageProfile(_) -> profile_view.view(
+      model.profile_user,
+      model.profile_form_username,
+      model.profile_form_email,
+      model.profile_form_new_password,
+      model.profile_form_confirm_password,
+      model.profile_form_old_password,
+      model.profile_saving,
+      model.password_saving,
+      profile_view.Callbacks(
+        ProfileFormUsernameUpdated,
+        ProfileFormEmailUpdated,
+        ProfileFormOldPasswordUpdated,
+        ProfileFormNewPasswordUpdated,
+        ProfileFormConfirmPasswordUpdated,
+        ProfileSaveClicked,
+        ProfileChangePasswordClicked,
+        UserNavigatedTo(routes.to_uri(routes.Profile)),
+      ),
+    )
+    pages.PageNotFound(uri) -> misc_views.not_found(uri)
   }
   let nav_hints_overlay = case
     set.contains(model.keys_down, key.Captured(key.Alt))
@@ -1960,52 +2038,10 @@ fn view(model: Model) -> Element(Msg) {
   }
   let layout = case page {
     pages.PageDjotDemo(_, _) | pages.PageArticleEdit(_, _) -> {
-      fn(content) {
-        html.div(
-          [
-            attr.class(
-              "min-h-screen bg-zinc-900 text-zinc-100 selection:bg-pink-700 selection:text-zinc-100 ",
-            ),
-          ],
-          [
-            view_notice(model.notice),
-            view_header(model),
-            html.main(
-              [
-                attr.class(
-                  "max-w-screen-md mx-auto px-4 sm:px-6 md:px-10 py-6 sm:py-8 md:py-10",
-                ),
-              ],
-              content,
-            ),
-            view_modals(model),
-          ],
-        )
-      }
+      fn(content) { html.div([], [view_notice(model.notice), view_header(model), layout.view(content), view_modals(model)]) }
     }
     _ -> {
-      fn(content) {
-        html.div(
-          [
-            attr.class(
-              "min-h-screen bg-zinc-900 text-zinc-100 selection:bg-pink-700 selection:text-zinc-100 ",
-            ),
-          ],
-          [
-            view_notice(model.notice),
-            view_header(model),
-            html.main(
-              [
-                attr.class(
-                  "max-w-screen-md mx-auto px-4 sm:px-6 md:px-10 py-6 sm:py-8 md:py-10",
-                ),
-              ],
-              content,
-            ),
-            view_modals(model),
-          ],
-        )
-      }
+      fn(content) { html.div([], [view_notice(model.notice), view_header(model), layout.view(content), view_modals(model)]) }
     }
   }
   html.div([], [

@@ -654,7 +654,7 @@ pub fn card(key: String, content: List(Element(msg))) -> Element(msg) {
       attr.class(
         "card group/"
         <> key
-        <> " relative hover:bg-zinc-700/10  block border-l-8 border-zinc-700 px-4 py-6 my-4 hover:border-pink-700 transition-colors duration-150",
+        <> " relative hover:bg-zinc-700/10  block border-l-4border-zinc-700 px-4 py-6 my-4 hover:border-pink-700 transition-colors duration-150",
       ),
     ],
     [
@@ -705,7 +705,7 @@ pub fn card_with_title(
   html.div(
     [
       attr.class(
-        "card relative transition-colors duration-150 hover:bg-zinc-700/10 block border-l-8 border-zinc-700 px-4 py-6 my-4 hover:border-pink-700",
+        "card relative transition-colors duration-150 hover:bg-zinc-700/10 block border-l-4border-zinc-700 px-4 py-6 my-4 hover:border-pink-700",
       ),
     ],
     [
