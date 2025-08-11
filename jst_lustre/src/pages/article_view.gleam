@@ -108,7 +108,7 @@ pub fn view_article_listing(
 
 pub fn view_article_page(
   article: Article,
-  _sess: session.Session,
+  sess: session.Session,
 ) -> List(Element(msg)) {
   let content: List(Element(msg)) = case article.content {
     NotInitialized -> [parts.view_error("content not initialized")]
@@ -133,6 +133,29 @@ pub fn view_article_page(
         html.div([attr.class("flex justify-between mt-2")], [
           parts.view_article_tags(article.tags),
         ]),
+        // Actions
+        case article.can_edit(article, sess)
+              || article.can_publish(article, sess)
+              || article.can_delete(article, sess) {
+          True -> ui.content_container([
+            // Use existing helper in root module via actions exposed there
+            // We render minimal inline actions here to avoid cyclic deps
+            html.div([attr.class("flex gap-4 pt-4")], [
+              case article.can_edit(article, sess) {
+                True -> html.a([
+                  attr.class("text-zinc-400 hover:text-teal-300 underline cursor-pointer"),
+                  attr.href(uri.to_string(routes.to_uri(routes.ArticleEdit(article.id)))),
+                ], [html.text("Edit")])
+                False -> html.text("")
+              },
+              case article.can_publish(article, sess) && { article.published_at == None } {
+                True -> html.span([attr.class("text-zinc-400")], [html.text("Publish via keyboard: Ctrl+S in editor")])
+                False -> html.text("")
+              },
+            ])
+          ])
+          False -> html.text("")
+        },
       ]),
       parts.view_leading(article.leading, article.slug),
       ..content

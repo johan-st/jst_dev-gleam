@@ -97,11 +97,10 @@ pub fn to_draft(article: Article) -> Option(Draft) {
       leading:,
       content:,
       draft: _,
-    ) ->
-      rd.data(content)
-      |> option.unwrap("")
-      |> draft.new(slug, title, subtitle, leading)
-      |> Some
+    ) -> {
+      let content_string = rd.data(content) |> option.unwrap("")
+      Some(draft.new(slug, title, subtitle, leading, content_string))
+    }
   }
 }
 

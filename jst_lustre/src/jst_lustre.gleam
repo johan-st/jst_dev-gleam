@@ -2611,7 +2611,7 @@ fn view_login_modal(model: Model) -> Element(Msg) {
     ui.modal(
       "Sign In",
       [
-        ui.form_input_with_focus(
+        ui.form_input_with_submit(
           "Username",
           model.login_username,
           "Enter your username",
@@ -2620,8 +2620,9 @@ fn view_login_modal(model: Model) -> Element(Msg) {
           None,
           LoginUsernameUpdated,
           Some("login-username-input"),
+          None,
         ),
-        ui.form_input(
+        ui.form_input_with_submit(
           "Password",
           model.login_password,
           "Enter your password",
@@ -2629,6 +2630,8 @@ fn view_login_modal(model: Model) -> Element(Msg) {
           True,
           None,
           LoginPasswordUpdated,
+          None,
+          Some(LoginFormSubmitted),
         ),
       ],
       [
@@ -2962,7 +2965,7 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
         html.div(
           [
             attr.classes([
-              #("grid gap-4 lg:gap-8 h-screen", True),
+                                 #("grid gap-4 lg:gap-8", True),
               #("grid-cols-1 lg:grid-cols-2", True),
             ]),
           ],
@@ -2970,29 +2973,30 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
             // Editor column
             html.div(
               [
-                attr.classes([
-                  #("space-y-4", True),
-                  #("lg:block", True),
-                  #("lg:col-span-1", True),
-                  #("col-span-2", model.edit_view_mode == EditViewModeEdit),
-                  #("hidden", model.edit_view_mode == EditViewModePreview),
-                ]),
+                                  attr.classes([
+                    #("space-y-4", True),
+                    #("lg:block", True),
+                    #("lg:col-span-1", True),
+                    #("max-w-screen-lg mx-auto", True),
+                    #("col-span-2", model.edit_view_mode == EditViewModeEdit),
+                    #("hidden", model.edit_view_mode == EditViewModePreview),
+                  ]),
               ],
               view_edit_actions(draft, article),
             ),
             // Preview column
-            html.div(
-              [
-                attr.classes([
-                  #("max-w-screen-md mx-auto px-10 py-10 overflow-y-auto", True),
-                  #("lg:block", True),
-                  #("lg:col-span-1", True),
-                  #("col-span-2", model.edit_view_mode == EditViewModePreview),
-                  #("hidden", model.edit_view_mode == EditViewModeEdit),
-                ]),
-              ],
-              preview,
-            ),
+                         html.div(
+               [
+                 attr.classes([
+                   #("max-w-screen-lg mx-auto px-10 py-10", True),
+                   #("lg:block", True),
+                   #("lg:col-span-1", True),
+                   #("col-span-2", model.edit_view_mode == EditViewModePreview),
+                   #("hidden", model.edit_view_mode == EditViewModeEdit),
+                 ]),
+               ],
+               preview,
+             ),
           ],
         ),
         view_djot_quick_reference(),

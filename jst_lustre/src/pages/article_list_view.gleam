@@ -32,7 +32,22 @@ pub fn view(articles: List(Article), sess: session.Session) -> List(Element(msg)
     })
     |> list.map(parts.view_article_card)
 
-  let header_section = [ui.flex_between(ui.page_title("Articles"), element.none())]
+  let header_section = [
+    ui.flex_between(
+      ui.page_title("Articles"),
+      case sess {
+        session.Authenticated(_) ->
+          ui.button_menu(
+            "New Article",
+            ui.ColorTeal,
+            ui.ButtonStateNormal,
+            // Ctrl+N exists, but also provide a visible action
+            ArticleCreateClicked,
+          )
+        _ -> element.none()
+      },
+    ),
+  ]
 
   let content_section = case articles_elements {
     [] -> [
