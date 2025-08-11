@@ -40,6 +40,9 @@ pub type Page {
   // Profile
   PageProfile(session_authenticated: session.SessionAuthenticated)
 
+  // Debug
+  PageDebug
+
   // Error states  
   PageError(error: PageError)
 
@@ -107,6 +110,11 @@ pub fn to_uri(page: Page) -> Uri {
       uri
     }
 
+    PageDebug -> {
+      let assert Ok(uri) = uri.parse("/debug")
+      uri
+    }
+
     PageError(error) -> {
       case error {
         ArticleNotFound(slug, _) -> {
@@ -131,15 +139,14 @@ pub fn to_uri(page: Page) -> Uri {
         }
       }
     }
+
     PageAbout -> {
       let assert Ok(uri) = uri.parse("/about")
       uri
     }
-    PageDjotDemo(_session_authenticated, content) -> {
-      let assert Ok(uri) = uri.parse("/djot-demo/" <> content)
-      uri
-    }
-    PageNotFound(uri) -> {
+    PageNotFound(requested_uri) -> requested_uri
+    PageDjotDemo(_, _) -> {
+      let assert Ok(uri) = uri.parse("/djot-demo")
       uri
     }
   }
