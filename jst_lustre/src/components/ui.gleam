@@ -378,16 +378,7 @@ pub fn form_input(
   error: Option(String),
   oninput: fn(String) -> msg,
 ) -> Element(msg) {
-  form_input_with_focus(
-    label,
-    value,
-    placeholder,
-    input_type,
-    required,
-    error,
-    oninput,
-    None,
-  )
+  form_input_with_submit(label, value, placeholder, input_type, required, error, oninput, None, None)
 }
 
 pub fn form_input_with_focus(
@@ -399,6 +390,20 @@ pub fn form_input_with_focus(
   error: Option(String),
   oninput: fn(String) -> msg,
   focus_id: Option(String),
+) -> Element(msg) {
+  form_input_with_submit(label, value, placeholder, input_type, required, error, oninput, focus_id, None)
+}
+
+pub fn form_input_with_submit(
+  label: String,
+  value: String,
+  placeholder: String,
+  input_type: String,
+  required: Bool,
+  error: Option(String),
+  oninput: fn(String) -> msg,
+  focus_id: Option(String),
+  on_enter: Option(msg),
 ) -> Element(msg) {
   html.div([attr.class("mb-6")], [
     html.label([attr.class("block text-sm font-semibold text-zinc-300 mb-3")], [
@@ -423,11 +428,9 @@ pub fn form_input_with_focus(
           attr.required(required),
           event.on_input(oninput),
         ],
-        case focus_id {
-          Some(id) -> [attr.id(id)]
-          None -> []
-        },
-      ),
+        case focus_id { Some(id) -> [attr.id(id)] None -> [] },
+      )
+      |> add_enter_listener(on_enter),
     ),
     case error {
       Some(error_msg) ->
@@ -492,6 +495,21 @@ pub fn form_textarea(
       None -> element_none()
     },
   ])
+}
+
+fn add_enter_listener(attrs: List(attr.Attribute(msg)), on_enter: Option(msg)) -> List(attr.Attribute(msg)) {
+  case on_enter {
+    None -> attrs
+    Some(msg) ->
+      list.append(attrs, [
+        event.on_keydown(fn(ev) {
+          case event.key(ev) {
+            "Enter" -> msg
+            _ -> msg // never dispatched; Lustre requires consistent message type
+          }
+        }),
+      ])
+  }
 }
 
 // MODALS ---------------------------------------------------------------------
