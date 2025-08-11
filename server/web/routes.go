@@ -929,7 +929,7 @@ func handleStaticFs(l *jst_log.Logger, embeddedFS fs.FS) http.Handler {
 
 	return http.StripPrefix("/static/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger.Debug("called")
-		http.ServeFileFS(w, r, embeddedFS, "/"+r.URL.Path)
+		http.ServeFileFS(w, r, embeddedFS, r.URL.Path)
 	}))
 }
 

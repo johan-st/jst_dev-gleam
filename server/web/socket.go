@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -92,7 +93,7 @@ func (h *Hub) Run() {
 			h.logger.Info("Client unregistered: %s", client.ID)
 
 		case message := <-h.broadcast:
-			h.mu.RLock()
+			h.mu.Lock()
 			for client := range h.clients {
 				select {
 				case client.Send <- message:
@@ -101,7 +102,7 @@ func (h *Hub) Run() {
 					delete(h.clients, client)
 				}
 			}
-			h.mu.RUnlock()
+			h.mu.Unlock()
 
 		case <-h.ctx.Done():
 			h.logger.Info("Hub shutting down")
@@ -128,8 +129,8 @@ func (h *Hub) SendToUser(userID string, msg *WebSocketMessage) {
 		return
 	}
 
-	h.mu.RLock()
-	defer h.mu.RUnlock()
+	h.mu.Lock()
+	defer h.mu.Unlock()
 
 	for client := range h.clients {
 		if client.UserID == userID {
@@ -148,8 +149,24 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		// In production, implement proper origin checking
-		return true
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true
+		}
+		u, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+		allowedHosts := map[string]struct{}{
+			r.Host:                     {},
+			"localhost:1234":           {},
+			"127.0.0.1:1234":          {},
+			"localhost:8080":           {},
+			"127.0.0.1:8080":          {},
+			"server-small-dream-1266.fly.dev": {},
+		}
+		_, ok := allowedHosts[u.Host]
+		return ok
 	},
 }
 
