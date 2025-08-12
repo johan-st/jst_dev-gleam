@@ -1,18 +1,20 @@
+import birl
+import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/set.{type Set}
-import gleam/int
-import birl
 
 import lustre/attribute as attr
 import lustre/element.{type Element}
 import lustre/element/html
 
-import utils/remote_data.{type RemoteData, Loaded, Pending, NotInitialized, Errored}
-import utils/http.{type HttpError}
-import utils/short_url.{type ShortUrl}
-import utils/mouse
 import components/ui
+import utils/http.{type HttpError}
+import utils/mouse
+import utils/remote_data.{
+  type RemoteData, Errored, Loaded, NotInitialized, Pending,
+}
+import utils/short_url.{type ShortUrl}
 
 pub type Callbacks(msg) {
   Callbacks(
@@ -68,7 +70,8 @@ pub fn list(
             ]),
             html.ul([attr.class("space-y-2"), attr.role("list")], url_elements),
             case delete_confirmation {
-              Some(delete_id) -> delete_confirmation_modal(delete_id, short_urls, cbs)
+              Some(delete_id) ->
+                delete_confirmation_modal(delete_id, short_urls, cbs)
               None -> html.div([], [])
             },
           ])
@@ -98,7 +101,11 @@ fn compact_url_card(
   url: ShortUrl,
 ) -> Element(msg) {
   html.li(
-    [attr.class("bg-zinc-800 border border-zinc-700 rounded-lg transition-colors")],
+    [
+      attr.class(
+        "bg-zinc-800 border border-zinc-700 rounded-lg transition-colors",
+      ),
+    ],
     [
       html.div([attr.class("flex items-center justify-between p-4")], [
         html.div([attr.class("flex items-center space-x-4 flex-1 min-w-0")], [
@@ -112,38 +119,53 @@ fn compact_url_card(
             ],
             [
               html.span([attr.class("text-zinc-500")], [html.text("u.jst.dev/")]),
-              html.span([attr.class("text-pink-400")], [html.text(url.short_code)]),
+              html.span([attr.class("text-pink-400")], [
+                html.text(url.short_code),
+              ]),
               case copy_feedback == Some(url.short_code) {
-                True -> html.span([attr.class("ml-2 text-green-400 text-xs")], [html.text("✓ Copied!")])
+                True ->
+                  html.span([attr.class("ml-2 text-green-400 text-xs")], [
+                    html.text("✓ Copied!"),
+                  ])
                 False -> html.div([], [])
               },
             ],
           ),
           html.div(
             [
-              attr.class("text-sm text-zinc-400 truncate flex-1 cursor-pointer hover:text-zinc-300 transition-colors"),
+              attr.class(
+                "text-sm text-zinc-400 truncate flex-1 cursor-pointer hover:text-zinc-300 transition-colors",
+              ),
               attr.title(url.target_url),
               mouse.on_mouse_down_no_right(cbs.toggle_expanded(url.id)),
             ],
-            [html.span([attr.class("text-zinc-600")], [html.text("→ ")]), html.text(url.target_url)],
+            [
+              html.span([attr.class("text-zinc-600")], [html.text("→ ")]),
+              html.text(url.target_url),
+            ],
           ),
           html.button(
             [
               attr.class("cursor-pointer"),
-              mouse.on_mouse_down_no_right(cbs.toggle_active_clicked(url.id, url.is_active)),
+              mouse.on_mouse_down_no_right(cbs.toggle_active_clicked(
+                url.id,
+                url.is_active,
+              )),
               attr.title("Toggle active/inactive"),
             ],
             [
               case url.is_active {
                 True -> ui.status_badge("Active", ui.ColorGreen)
                 False -> ui.status_badge("Inactive", ui.ColorRed)
-              }
+              },
             ],
           ),
         ]),
         html.div(
           [
-            attr.class("flex items-center space-x-2 ml-4 cursor-pointer hover:text-zinc-300 transition-colors"),
+            attr.class(
+              "flex items-center space-x-2 ml-4 cursor-pointer hover:text-zinc-300 transition-colors",
+            ),
             mouse.on_mouse_down_no_right(cbs.toggle_expanded(url.id)),
           ],
           [html.div([attr.class("text-zinc-500 text-sm")], [html.text("▼")])],
@@ -159,7 +181,11 @@ fn expanded_url_card(
   url: ShortUrl,
 ) -> Element(msg) {
   html.li(
-    [attr.class("bg-zinc-800 border border-zinc-700 rounded-lg transition-colors")],
+    [
+      attr.class(
+        "bg-zinc-800 border border-zinc-700 rounded-lg transition-colors",
+      ),
+    ],
     [
       html.div([attr.class("flex items-center justify-between p-4")], [
         html.div([attr.class("flex items-center space-x-4 flex-1 min-w-0")], [
@@ -173,9 +199,14 @@ fn expanded_url_card(
             ],
             [
               html.span([attr.class("text-zinc-500")], [html.text("u.jst.dev/")]),
-              html.span([attr.class("text-pink-400")], [html.text(url.short_code)]),
+              html.span([attr.class("text-pink-400")], [
+                html.text(url.short_code),
+              ]),
               case copy_feedback == Some(url.short_code) {
-                True -> html.span([attr.class("ml-2 text-green-400 text-xs")], [html.text("✓ Copied!")])
+                True ->
+                  html.span([attr.class("ml-2 text-green-400 text-xs")], [
+                    html.text("✓ Copied!"),
+                  ])
                 False -> html.div([], [])
               },
             ],
@@ -187,26 +218,40 @@ fn expanded_url_card(
           html.button(
             [
               attr.class(case url.is_active {
-                True -> "inline-flex shrink-0 items-center rounded-full bg-green-600/20 px-2 py-1 text-xs font-medium text-green-400 ring-1 ring-inset ring-green-600/30 cursor-pointer hover:bg-green-600/30 transition-colors"
-                False -> "inline-flex shrink-0 items-center rounded-full bg-red-600/20 px-2 py-1 text-xs font-medium text-red-400 ring-1 ring-inset ring-red-600/30 cursor-pointer hover:bg-red-600/30 transition-colors"
+                True ->
+                  "inline-flex shrink-0 items-center rounded-full bg-green-600/20 px-2 py-1 text-xs font-medium text-green-400 ring-1 ring-inset ring-green-600/30 cursor-pointer hover:bg-green-600/30 transition-colors"
+                False ->
+                  "inline-flex shrink-0 items-center rounded-full bg-red-600/20 px-2 py-1 text-xs font-medium text-red-400 ring-1 ring-inset ring-red-600/30 cursor-pointer hover:bg-red-600/30 transition-colors"
               }),
-               mouse.on_mouse_down_no_right(cbs.toggle_active_clicked(url.id, url.is_active)),
+              mouse.on_mouse_down_no_right(cbs.toggle_active_clicked(
+                url.id,
+                url.is_active,
+              )),
               attr.title("Toggle active/inactive"),
             ],
-            [html.text(case url.is_active { True -> "Active" False -> "Inactive" })],
+            [
+              html.text(case url.is_active {
+                True -> "Active"
+                False -> "Inactive"
+              }),
+            ],
           ),
         ]),
         html.div(
           [
-            attr.class("flex items-center space-x-2 ml-4 cursor-pointer hover:text-zinc-300 transition-colors"),
-             mouse.on_mouse_down_no_right(cbs.toggle_expanded(url.id)),
+            attr.class(
+              "flex items-center space-x-2 ml-4 cursor-pointer hover:text-zinc-300 transition-colors",
+            ),
+            mouse.on_mouse_down_no_right(cbs.toggle_expanded(url.id)),
           ],
           [html.div([attr.class("text-zinc-500 text-sm")], [html.text("▲")])],
         ),
       ]),
       html.div([attr.class("px-4 pb-4")], [
         html.div([attr.class("mb-4 pt-2 border-t border-zinc-700")], [
-          html.div([attr.class("text-sm text-zinc-500 mb-2")], [html.text("Target URL:")]),
+          html.div([attr.class("text-sm text-zinc-500 mb-2")], [
+            html.text("Target URL:"),
+          ]),
           html.div(
             [
               attr.class(
@@ -221,19 +266,36 @@ fn expanded_url_card(
         html.div([attr.class("space-y-3 text-sm mb-4")], [
           meta_row("Created By:", url.created_by),
           meta_row("Access Count:", int.to_string(url.access_count)),
-          meta_row("Created:", birl.from_unix_milli(url.created_at * 1000) |> birl.to_naive_date_string),
-          meta_row("Updated:", birl.from_unix_milli(url.updated_at * 1000) |> birl.to_naive_date_string),
+          meta_row(
+            "Created:",
+            birl.from_unix_milli(url.created_at * 1000)
+              |> birl.to_naive_date_string,
+          ),
+          meta_row(
+            "Updated:",
+            birl.from_unix_milli(url.updated_at * 1000)
+              |> birl.to_naive_date_string,
+          ),
         ]),
         html.div([attr.class("space-y-2")], [
           ui.button(
-            case copy_feedback == Some(url.short_code) { True -> "Copied!" False -> "Copy URL" },
+            case copy_feedback == Some(url.short_code) {
+              True -> "Copied!"
+              False -> "Copy URL"
+            },
             ui.ColorTeal,
             ui.ButtonStateNormal,
             cbs.copy_clicked(url.short_code),
           ),
           ui.button(
-            case url.is_active { True -> "Deactivate" False -> "Activate" },
-            case url.is_active { True -> ui.ColorOrange False -> ui.ColorTeal },
+            case url.is_active {
+              True -> "Deactivate"
+              False -> "Activate"
+            },
+            case url.is_active {
+              True -> ui.ColorOrange
+              False -> ui.ColorTeal
+            },
             ui.ButtonStateNormal,
             cbs.toggle_active_clicked(url.id, url.is_active),
           ),
@@ -254,24 +316,39 @@ fn delete_confirmation_modal(
   short_urls: List(ShortUrl),
   cbs: Callbacks(msg),
 ) -> Element(msg) {
-  let url_to_delete =
-    case list.find(short_urls, fn(url) { url.id == delete_id }) {
-      Ok(url) -> url.short_code
-      Error(_) -> "unknown"
-    }
+  let url_to_delete = case
+    list.find(short_urls, fn(url) { url.id == delete_id })
+  {
+    Ok(url) -> url.short_code
+    Error(_) -> "unknown"
+  }
 
   html.div([], [
     ui.modal_backdrop(cbs.delete_cancel_clicked()),
     ui.modal(
       "Delete Short URL",
-      [html.p([attr.class("text-zinc-300")], [
-        html.text("Are you sure you want to delete the short URL "),
-        html.span([attr.class("font-mono text-pink-400")], [html.text("u.jst.dev/" <> url_to_delete)]),
-        html.text("? This action cannot be undone."),
-      ])],
       [
-        ui.button("Cancel", ui.ColorTeal, ui.ButtonStateNormal, cbs.delete_cancel_clicked()),
-        ui.button("Delete", ui.ColorRed, ui.ButtonStateNormal, cbs.delete_confirm_clicked(delete_id)),
+        html.p([attr.class("text-zinc-300")], [
+          html.text("Are you sure you want to delete the short URL "),
+          html.span([attr.class("font-mono text-pink-400")], [
+            html.text("u.jst.dev/" <> url_to_delete),
+          ]),
+          html.text("? This action cannot be undone."),
+        ]),
+      ],
+      [
+        ui.button(
+          "Cancel",
+          ui.ColorTeal,
+          ui.ButtonStateNormal,
+          cbs.delete_cancel_clicked(),
+        ),
+        ui.button(
+          "Delete",
+          ui.ColorRed,
+          ui.ButtonStateNormal,
+          cbs.delete_confirm_clicked(delete_id),
+        ),
       ],
       cbs.delete_cancel_clicked(),
     ),
@@ -287,6 +364,7 @@ fn meta_row(label: String, value: String) -> Element(msg) {
 
 fn http_error_to_string(error: HttpError) -> String {
   // Minimal wrapper to avoid pulling in error_string module here
-  case error { _ -> "Error" }
+  case error {
+    _ -> "Error"
+  }
 }
-

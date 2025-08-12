@@ -10,7 +10,7 @@ import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/result
+// removed unused import: import gleam/result
 
 // removed unused order import (sorting moved to page modules)
 import gleam/set.{type Set}
@@ -31,7 +31,7 @@ import pages/about_view
 import pages/article_list_view
 import pages/article_view
 import pages/index_view
-import pages/pages.{type Page}
+import pages/pages
 import pages/url_index_view
 import pages/url_list_view
 import plinth/browser/event as p_event
@@ -393,28 +393,7 @@ type Model {
   )
 }
 
-pub type Model {
-  Model(
-    base_uri: Uri,
-    page: Page,
-    route: Route,
-    session: Session,
-    
-    // realtime data
-    server_time: realtime.Data(Int, realtime.Error),
-    articles: realtime.Data(List(Article), realtime.Error),
-    short_urls: realtime.Data(List(ShortUrl), realtime.Error),
 
-    // TODO: add these domain
-    // chat_messages: realtime.Data(List(chat.Message), realtime.Error),
-    // live_notices: realtime.Data(List(Notice), realtime.Error),
-
-    // UI globals
-    notice: List(Notice),
-    modal: Option(Modal),
-    keyboard: Keyboard,
-  )
-}
 
 // TODO: implement realtime.Data
 // LiveData needs states for idle, replaying, in sync, and error.
@@ -3316,102 +3295,9 @@ fn view_article_edit_input(
 
 // removed old URL index helpers; page views now in pages/url_index_view.gleam
 
-fn view_url_list(model: Model) -> Element(Msg) {
-  case model.short_urls {
-    NotInitialized ->
-      html.div(
-        [attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")],
-        [
-          html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
-            html.text("URLs"),
-          ]),
-          ui.loading("Loading URLs...", ui.ColorNeutral),
-        ],
-      )
-    Pending(_, _) ->
-      html.div(
-        [attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")],
-        [
-          html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
-            html.text("URLs"),
-          ]),
-          ui.loading("Loading URLs...", ui.ColorNeutral),
-        ],
-      )
-    Loaded(short_urls, _, _) -> {
-      case short_urls {
-        [] ->
-          html.div(
-            [
-              attr.class(
-                "mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700",
-              ),
-            ],
-            [
-              html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
-                html.text("URLs"),
-              ]),
-              ui.empty_state(
-                "No short URLs created yet",
-                "Create your first short URL using the form above.",
-                None,
-              ),
-            ],
-          )
-        _ -> {
-          let url_elements =
-            list.map(short_urls, fn(url) {
-              let is_expanded = set.contains(model.expanded_urls, url.id)
+// legacy URL list view helpers removed
 
-              case is_expanded {
-                True -> view_expanded_url_card(model, url)
-                False -> view_compact_url_card(model, url)
-              }
-            })
-          html.div(
-            [
-              attr.class(
-                "mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700",
-              ),
-            ],
-            [
-              html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
-                html.text("URLs"),
-              ]),
-              html.ul(
-                [attr.class("space-y-2"), attr.role("list")],
-                url_elements,
-              ),
-              case model.delete_confirmation {
-                Some(delete_id) ->
-                  view_delete_confirmation(delete_id, short_urls)
-                None -> element.none()
-              },
-            ],
-          )
-        }
-      }
-    }
-    Errored(error, _) ->
-      html.div(
-        [attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")],
-        [
-          html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
-            html.text("URLs"),
-          ]),
-          html.div([attr.class("text-center py-12")], [
-            html.div([attr.class("text-red-400 text-lg mb-2")], [
-              html.text("Error loading short URLs"),
-            ]),
-            html.div([attr.class("text-zinc-500 text-sm")], [
-              html.text(error_string.http_error(error)),
-            ]),
-          ]),
-        ],
-      )
-  }
-}
-
+// legacy URL list view kept during refactor - now unused
 fn view_compact_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
   html.li(
     [
@@ -3508,6 +3394,7 @@ fn view_compact_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
   )
 }
 
+// legacy URL list view kept during refactor - now unused
 fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
   html.li(
     [
@@ -3701,48 +3588,7 @@ fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
   )
 }
 
-fn view_delete_confirmation(
-  delete_id: String,
-  short_urls: List(ShortUrl),
-) -> Element(Msg) {
-  let url_to_delete = case
-    list.find(short_urls, fn(url) { url.id == delete_id })
-  {
-    Ok(url) -> url.short_code
-    Error(_) -> "unknown"
-  }
-
-  html.div([], [
-    ui.modal_backdrop(ShortUrlDeleteCancelClicked),
-    ui.modal(
-      "Delete Short URL",
-      [
-        html.p([attr.class("text-zinc-300")], [
-          html.text("Are you sure you want to delete the short URL "),
-          html.span([attr.class("font-mono text-pink-400")], [
-            html.text("u.jst.dev/" <> url_to_delete),
-          ]),
-          html.text("? This action cannot be undone."),
-        ]),
-      ],
-      [
-        ui.button(
-          "Cancel",
-          ui.ColorTeal,
-          ui.ButtonStateNormal,
-          ShortUrlDeleteCancelClicked,
-        ),
-        ui.button(
-          "Delete",
-          ui.ColorRed,
-          ui.ButtonStateNormal,
-          ShortUrlDeleteConfirmClicked(delete_id),
-        ),
-      ],
-      ShortUrlDeleteCancelClicked,
-    ),
-  ])
-}
+// legacy URL list view helpers removed
 
 fn view_url_info_page(model: Model, short_code: String) -> List(Element(Msg)) {
   case model.short_urls {

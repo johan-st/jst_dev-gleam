@@ -1,20 +1,26 @@
 import article/article.{type Article}
-import lustre/element.{type Element} as element
-import session
-import gleam/list
-import gleam/option.{Some, None}
 import birl
+import components/ui
+import gleam/list
+import gleam/option.{None, Some}
 import gleam/order
 import gleam/string
-import components/ui
+import lustre/element.{type Element}
+import session
 import view/partials/article_partials as parts
 
-pub fn view(articles: List(Article), sess: session.Session) -> List(Element(msg)) {
+pub fn view(
+  articles: List(Article),
+  sess: session.Session,
+) -> List(Element(msg)) {
   let filtered_articles = case sess {
     session.Unauthenticated ->
       articles
       |> list.filter(fn(article) {
-        case article.published_at { Some(_) -> True None -> False }
+        case article.published_at {
+          Some(_) -> True
+          None -> False
+        }
       })
     _ -> articles
   }
@@ -31,13 +37,20 @@ pub fn view(articles: List(Article), sess: session.Session) -> List(Element(msg)
     })
     |> list.map(parts.view_article_card)
 
-  let header_section = [ui.flex_between(ui.page_title("Articles"), element.none())]
+  let header_section = [
+    ui.flex_between(ui.page_title("Articles"), element.none()),
+  ]
 
   let content_section = case articles_elements {
     [] -> [
       ui.empty_state(
         "No articles yet",
-        case sess { session.Authenticated(_) -> "Ready to share your thoughts? Create your first article to get started." _ -> "No published articles are available yet. Check back later for new content!" },
+        case sess {
+          session.Authenticated(_) ->
+            "Ready to share your thoughts? Create your first article to get started."
+          _ ->
+            "No published articles are available yet. Check back later for new content!"
+        },
         None,
       ),
     ]
@@ -46,4 +59,3 @@ pub fn view(articles: List(Article), sess: session.Session) -> List(Element(msg)
 
   list.append(header_section, content_section)
 }
-

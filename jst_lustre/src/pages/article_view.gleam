@@ -1,20 +1,20 @@
 import article/article.{type Article}
+import birl
+import gleam/list
 import gleam/option.{None, Some}
+import gleam/order
+import gleam/string
+import gleam/uri
 import lustre/attribute as attr
 import lustre/element.{type Element}
 import lustre/element/html
-import gleam/uri
-import gleam/order
-import gleam/string
-import gleam/list
-import birl
 
 import components/ui
+import routes
 import session
-import utils/remote_data.{Loaded, Pending, NotInitialized, Errored}
 import utils/error_string
 import utils/jot_to_lustre
-import routes
+import utils/remote_data.{Errored, Loaded, NotInitialized, Pending}
 
 import view/partials/article_partials as parts
 
@@ -26,7 +26,10 @@ pub fn view_article_listing(
     session.Unauthenticated ->
       articles
       |> list.filter(fn(article) {
-        case article.published_at { Some(_) -> True None -> False }
+        case article.published_at {
+          Some(_) -> True
+          None -> False
+        }
       })
     _ -> articles
   }
@@ -44,8 +47,17 @@ pub fn view_article_listing(
     |> list.map(fn(article) {
       case article {
         article.ArticleV1(
-          id: _, slug:, author: _, title: _, leading: _, subtitle: _,
-          content: _, draft: _, published_at: _, revision: _, tags:,
+          id: _,
+          slug:,
+          author: _,
+          title: _,
+          leading: _,
+          subtitle: _,
+          content: _,
+          draft: _,
+          published_at: _,
+          revision: _,
+          tags:,
         ) -> {
           let article_uri = routes.Article(slug) |> routes.to_uri
           html.article([attr.class("mt-6 group hover:bg-zinc-700/10")], [
@@ -57,23 +69,32 @@ pub fn view_article_listing(
                 attr.href(uri.to_string(article_uri)),
               ],
               [
-                html.span([
-                  attr.class(
-                    "pointer-events-none absolute top-0 left-0 w-6 h-6 border-t border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
-                  ),
-                ], []),
-                html.span([
-                  attr.class(
-                    "pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
-                  ),
-                ], []),
+                html.span(
+                  [
+                    attr.class(
+                      "pointer-events-none absolute top-0 left-0 w-6 h-6 border-t border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
+                    ),
+                  ],
+                  [],
+                ),
+                html.span(
+                  [
+                    attr.class(
+                      "pointer-events-none absolute bottom-0 left-0 w-6 h-6 border-b border-zinc-700 transition-colors duration-150 group-hover:border-pink-700",
+                    ),
+                  ],
+                  [],
+                ),
                 html.div([attr.class("flex justify-between gap-4")], [
                   html.div([attr.class("flex flex-col")], [
-                    html.h3([
-                      attr.id("article-title-" <> slug),
-                      attr.class("article-title"),
-                      attr.class("text-xl text-pink-700 font-light pt-4"),
-                    ], [html.text(article.title)]),
+                    html.h3(
+                      [
+                        attr.id("article-title-" <> slug),
+                        attr.class("article-title"),
+                        attr.class("text-xl text-pink-700 font-light pt-4"),
+                      ],
+                      [html.text(article.title)],
+                    ),
                     parts.view_subtitle(article.subtitle, slug),
                   ]),
                   html.div([attr.class("flex flex-col items-end")], [
@@ -92,14 +113,18 @@ pub fn view_article_listing(
       }
     })
 
-  let header_section = [ui.flex_between(ui.page_title("Articles"), html.div([], []))]
+  let header_section = [
+    ui.flex_between(ui.page_title("Articles"), html.div([], [])),
+  ]
 
   let content_section = case articles_elements {
-    [] -> [ui.empty_state(
-      "No articles yet",
-      "No published articles are available yet. Check back later for new content!",
-      None,
-    )]
+    [] -> [
+      ui.empty_state(
+        "No articles yet",
+        "No published articles are available yet. Check back later for new content!",
+        None,
+      ),
+    ]
     _ -> articles_elements
   }
 
@@ -112,7 +137,10 @@ pub fn view_article_page(
 ) -> List(Element(msg)) {
   let content: List(Element(msg)) = case article.content {
     NotInitialized -> [parts.view_error("content not initialized")]
-    Pending(_, _) -> [ui.loading_bar(ui.ColorTeal), ui.loading("Loading article...", ui.ColorNeutral)]
+    Pending(_, _) -> [
+      ui.loading_bar(ui.ColorTeal),
+      ui.loading("Loading article...", ui.ColorNeutral),
+    ]
     Loaded(content_string, _, _) -> jot_to_lustre.to_lustre(content_string)
     Errored(error, _) -> [parts.view_error(error_string.http_error(error))]
   }
@@ -143,7 +171,8 @@ pub fn view_article_page(
 pub fn view_article_not_found(slug: String) -> List(Element(msg)) {
   [
     parts.view_title("Article not found", slug),
-    parts.view_simple_paragraph("The article you are looking for does not exist."),
+    parts.view_simple_paragraph(
+      "The article you are looking for does not exist.",
+    ),
   ]
 }
-

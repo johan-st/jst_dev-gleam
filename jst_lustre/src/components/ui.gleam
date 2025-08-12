@@ -690,7 +690,7 @@ pub fn card(key: String, content: List(Element(msg))) -> Element(msg) {
           ),
         ],
         [],
-      ),  
+      ),
       ..content
     ],
   )

@@ -17,4 +17,3 @@ pub fn view(list: Element(msg)) -> List(Element(msg)) {
     ]),
   ]
 }
-

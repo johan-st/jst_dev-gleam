@@ -64,7 +64,7 @@ type rtClient struct {
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool { return true },
+	CheckOrigin:     func(r *http.Request) bool { return true },
 }
 
 // HandleRealtimeWebSocket upgrades the connection and serves the realtime bridge
@@ -106,26 +106,36 @@ func HandleRealtimeWebSocket(l *jst_log.Logger, nc *nats.Conn, w http.ResponseWr
 
 func userIDFromRequest(r *http.Request) string {
 	if u, ok := r.Context().Value(who.UserKey).(whoApi.User); ok {
-		if u.ID != "" { return u.ID }
+		if u.ID != "" {
+			return u.ID
+		}
 	}
 	// fallback for dev
-	if q := r.URL.Query().Get("user_id"); q != "" { return q }
+	if q := r.URL.Query().Get("user_id"); q != "" {
+		return q
+	}
 	return ""
 }
 
 // Authorization bootstrap (loads capabilities from Auth KV); fallback to minimal caps
 func authorizeInitial(l *jst_log.Logger, s *server, userID string) capabilities {
 	caps := capabilities{
-    Subjects: []string{"time.>"},
-    Buckets:  map[string][]string{"article": {">"}},
+		Subjects: []string{"time.>"},
+		Buckets:  map[string][]string{"article": {">"}},
 		Commands: nil,
 		Streams:  map[string][]string{},
 	}
-	if userID == "" { return caps }
+	if userID == "" {
+		return caps
+	}
 	kv, err := s.js.KeyValue("auth.users")
-	if err != nil { return caps }
+	if err != nil {
+		return caps
+	}
 	entry, err := kv.Get(userID)
-	if err != nil || entry == nil { return caps }
+	if err != nil || entry == nil {
+		return caps
+	}
 	_ = json.Unmarshal(entry.Value(), &caps)
 	return caps
 }
@@ -185,11 +195,13 @@ func (c *rtClient) readLoop() {
 		case "unsub":
 			c.handleUnsub(m.Target)
 		case "kv_sub":
-			var opts struct{ Pattern string `json:"pattern"` }
+			var opts struct {
+				Pattern string `json:"pattern"`
+			}
 			_ = json.Unmarshal(m.Data, &opts)
 			c.handleKVSub(m.Target, opts.Pattern)
 		case "js_sub":
-			var opts struct{
+			var opts struct {
 				StartSeq uint64 `json:"start_seq"`
 				Batch    int    `json:"batch"`
 				Filter   string `json:"filter"`
@@ -205,8 +217,12 @@ func (c *rtClient) readLoop() {
 func (c *rtClient) unsubscribeAll() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for _, s := range c.subs { _ = s.Unsubscribe() }
-	for _, w := range c.kvWatchers { w.Stop() }
+	for _, s := range c.subs {
+		_ = s.Unsubscribe()
+	}
+	for _, w := range c.kvWatchers {
+		_ = w.Stop()
+	}
 }
 
 // ---- Capability checks
@@ -223,25 +239,35 @@ func subjectMatch(pattern, subject string) bool {
 			return false
 		}
 		si := su[i]
-		if pi == "*" { continue }
-		if pi != si { return false }
+		if pi == "*" {
+			continue
+		}
+		if pi != si {
+			return false
+		}
 	}
 	return len(su) == len(pp) || (len(pp) > 0 && pp[len(pp)-1] == ">")
 }
 
 func containsPattern(patterns []string, subject string) bool {
 	for _, p := range patterns {
-		if subjectMatch(p, subject) { return true }
+		if subjectMatch(p, subject) {
+			return true
+		}
 	}
 	return false
 }
 
-func (c *rtClient) isAllowedSubject(subject string) bool { return containsPattern(c.caps.Subjects, subject) }
+func (c *rtClient) isAllowedSubject(subject string) bool {
+	return containsPattern(c.caps.Subjects, subject)
+}
 
 func (c *rtClient) isAllowedKV(bucket, keyPattern string) bool {
 	for bucketPattern, allowedKeys := range c.caps.Buckets {
 		if subjectMatch(bucketPattern, bucket) {
-			if keyPattern == "" { return containsPattern(allowedKeys, ">") }
+			if keyPattern == "" {
+				return containsPattern(allowedKeys, ">")
+			}
 			return containsPattern(allowedKeys, keyPattern)
 		}
 	}
@@ -251,7 +277,9 @@ func (c *rtClient) isAllowedKV(bucket, keyPattern string) bool {
 func (c *rtClient) isAllowedStream(stream, filter string) bool {
 	for streamPattern, allowedFilters := range c.caps.Streams {
 		if subjectMatch(streamPattern, stream) {
-			if filter == "" { return containsPattern(allowedFilters, ">") }
+			if filter == "" {
+				return containsPattern(allowedFilters, ">")
+			}
 			return containsPattern(allowedFilters, filter)
 		}
 	}
@@ -261,26 +289,45 @@ func (c *rtClient) isAllowedStream(stream, filter string) bool {
 // ---- Handlers
 
 func (c *rtClient) handleSub(subject string) {
-	if !c.isAllowedSubject(subject) { return }
+	if !c.isAllowedSubject(subject) {
+		return
+	}
 	sub, err := c.srv.nc.Subscribe(subject, func(m *nats.Msg) {
 		var payload interface{}
-		if err := json.Unmarshal(m.Data, &payload); err != nil { payload = string(m.Data) }
+		if err := json.Unmarshal(m.Data, &payload); err != nil {
+			payload = string(m.Data)
+		}
 		c.send(serverMsg{Op: "msg", Target: subject, Data: payload})
 	})
-	if err != nil { return }
-	c.mu.Lock(); c.subs[subject] = sub; c.mu.Unlock()
+	if err != nil {
+		return
+	}
+	c.mu.Lock()
+	c.subs[subject] = sub
+	c.mu.Unlock()
 }
 
 func (c *rtClient) handleUnsub(subject string) {
-	c.mu.Lock(); defer c.mu.Unlock()
-	if s, ok := c.subs[subject]; ok { _ = s.Unsubscribe(); delete(c.subs, subject) }
-	if w, ok := c.kvWatchers[subject]; ok { w.Stop(); delete(c.kvWatchers, subject) }
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if s, ok := c.subs[subject]; ok {
+		_ = s.Unsubscribe()
+		delete(c.subs, subject)
+	}
+	if w, ok := c.kvWatchers[subject]; ok {
+		_ = w.Stop()
+		delete(c.kvWatchers, subject)
+	}
 }
 
 func (c *rtClient) handleKVSub(bucket, pattern string) {
-	if !c.isAllowedKV(bucket, pattern) { return }
+	if !c.isAllowedKV(bucket, pattern) {
+		return
+	}
 	kv, err := c.srv.js.KeyValue(bucket)
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 	var watcher nats.KeyWatcher
 	if pattern != "" {
 		// try pattern-specific watch if supported; otherwise fallback to WatchAll and filter client-side
@@ -293,56 +340,74 @@ func (c *rtClient) handleKVSub(bucket, pattern string) {
 	} else {
 		watcher, _ = kv.WatchAll()
 	}
-	if watcher == nil { return }
+	if watcher == nil {
+		return
+	}
 	c.kvWatchers[bucket] = watcher
 	go func() {
 		for {
 			select {
-			case <-c.ctx.Done(): watcher.Stop(); return
-            case entry := <-watcher.Updates():
-				if entry == nil { continue }
+			case <-c.ctx.Done():
+				_ = watcher.Stop()
+				return
+			case entry := <-watcher.Updates():
+				if entry == nil {
+					continue
+				}
 				// If we had to fallback to WatchAll, filter by pattern here
-				if pattern != "" && !subjectMatch(pattern, entry.Key()) { continue }
-                opStr := "put"
-                switch entry.Operation() {
-                case nats.KeyValueDelete:
-                    opStr = "delete"
-                case nats.KeyValuePurge:
-                    opStr = "purge"
-                default:
-                    opStr = "put"
-                }
-                c.send(serverMsg{Op: "msg", Target: bucket, Data: map[string]interface{}{
-                    "key": entry.Key(),
-                    "value": string(entry.Value()),
-                    "rev": entry.Revision(),
-                    "op": opStr,
-                }})
+				if pattern != "" && !subjectMatch(pattern, entry.Key()) {
+					continue
+				}
+				var opStr string
+				switch entry.Operation() {
+				case nats.KeyValueDelete:
+					opStr = "delete"
+				case nats.KeyValuePurge:
+					opStr = "purge"
+				default:
+					opStr = "put"
+				}
+				c.send(serverMsg{Op: "msg", Target: bucket, Data: map[string]interface{}{
+					"key":   entry.Key(),
+					"value": string(entry.Value()),
+					"rev":   entry.Revision(),
+					"op":    opStr,
+				}})
 			}
 		}
 	}()
 }
 
 func (c *rtClient) handleJSSub(stream string, startSeq uint64, batch int, filter string) {
-	if !c.isAllowedStream(stream, filter) { return }
+	if !c.isAllowedStream(stream, filter) {
+		return
+	}
 	// Require a filter subject for JS subscribe to ensure a concrete subject
-	if filter == "" { return }
+	if filter == "" {
+		return
+	}
 
-	if batch <= 0 { batch = 50 }
+	if batch <= 0 {
+		batch = 50
+	}
 
 	// Create durable name per connection/user and filter
 	durable := durableName(c.id, stream, filter)
 
 	// Create a pull consumer bound to stream with optional start sequence
-	opts := []nats.SubOpt{ nats.BindStream(stream) }
+	opts := []nats.SubOpt{nats.BindStream(stream)}
 	if startSeq > 0 {
 		opts = append(opts, nats.StartSequence(startSeq))
 	}
 
 	sub, err := c.srv.js.PullSubscribe(filter, durable, opts...)
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 
-	c.mu.Lock(); c.subs[stream] = sub; c.mu.Unlock()
+	c.mu.Lock()
+	c.subs[stream] = sub
+	c.mu.Unlock()
 
 	go func() {
 		defer func() {
@@ -356,7 +421,9 @@ func (c *rtClient) handleJSSub(stream string, startSeq uint64, batch int, filter
 				msgs, err := sub.Fetch(batch, nats.MaxWait(200*time.Millisecond))
 				if err != nil {
 					// Timeout is expected when idle; other errors exit
-					if err == nats.ErrTimeout { continue }
+					if err == nats.ErrTimeout {
+						continue
+					}
 					return
 				}
 				for _, msg := range msgs {
@@ -374,7 +441,9 @@ func (c *rtClient) handleJSSub(stream string, startSeq uint64, batch int, filter
 }
 
 func (c *rtClient) handleCommand(target string, data json.RawMessage, inbox string) {
-	if !containsPattern(c.caps.Commands, target) { return }
+	if !containsPattern(c.caps.Commands, target) {
+		return
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
 		defer cancel()
@@ -384,7 +453,9 @@ func (c *rtClient) handleCommand(target string, data json.RawMessage, inbox stri
 			return
 		}
 		var payload interface{}
-		if err := json.Unmarshal(msg.Data, &payload); err != nil { payload = string(msg.Data) }
+		if err := json.Unmarshal(msg.Data, &payload); err != nil {
+			payload = string(msg.Data)
+		}
 		c.send(serverMsg{Op: "reply", Target: target, Inbox: inbox, Data: payload})
 	}()
 }
@@ -392,17 +463,27 @@ func (c *rtClient) handleCommand(target string, data json.RawMessage, inbox stri
 // Capability updates via Auth KV
 func (c *rtClient) watchAuthKV() {
 	kv, err := c.srv.js.KeyValue("auth.users")
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 	watcher, err := kv.Watch(c.id)
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 	go func() {
 		for {
 			select {
-			case <-c.ctx.Done(): watcher.Stop(); return
+			case <-c.ctx.Done():
+				_ = watcher.Stop()
+				return
 			case entry := <-watcher.Updates():
-				if entry == nil { continue }
+				if entry == nil {
+					continue
+				}
 				var newCaps capabilities
-				if err := json.Unmarshal(entry.Value(), &newCaps); err != nil { continue }
+				if err := json.Unmarshal(entry.Value(), &newCaps); err != nil {
+					continue
+				}
 				c.applyCapabilities(newCaps)
 				c.send(serverMsg{Op: "cap_update", Data: newCaps})
 			}
@@ -411,10 +492,13 @@ func (c *rtClient) watchAuthKV() {
 }
 
 func (c *rtClient) applyCapabilities(newCaps capabilities) {
-	c.mu.Lock(); defer c.mu.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	// Unsubscribe from disallowed subjects
 	for subject, sub := range c.subs {
-		if subject == "" { continue }
+		if subject == "" {
+			continue
+		}
 		if !containsPattern(newCaps.Subjects, subject) {
 			_ = sub.Unsubscribe()
 			delete(c.subs, subject)
@@ -423,14 +507,18 @@ func (c *rtClient) applyCapabilities(newCaps capabilities) {
 	for bucket, w := range c.kvWatchers {
 		allowed := false
 		for bucketPattern := range newCaps.Buckets {
-			if subjectMatch(bucketPattern, bucket) { allowed = true; break }
+			if subjectMatch(bucketPattern, bucket) {
+				allowed = true
+				break
+			}
 		}
-		if !allowed { w.Stop(); delete(c.kvWatchers, bucket) }
+		if !allowed {
+			_ = w.Stop()
+			delete(c.kvWatchers, bucket)
+		}
 	}
 	c.caps = newCaps
 }
-<<<<<<< Current (Your changes)
-=======
 
 func durableName(userID, stream, filter string) string {
 	name := fmt.Sprintf("ws_%s_%s_%s", sanitizeName(userID), sanitizeName(stream), sanitizeName(filter))
@@ -454,4 +542,3 @@ func sanitizeName(s string) string {
 	}
 	return b.String()
 }
->>>>>>> Incoming (Background Agent changes)
