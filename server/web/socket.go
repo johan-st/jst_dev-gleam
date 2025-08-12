@@ -2,6 +2,8 @@ package web
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -64,7 +66,17 @@ type rtClient struct {
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin:     func(r *http.Request) bool { return true },
+	CheckOrigin: func(r *http.Request) bool {
+		// TODO: Configure allowed origins based on environment
+		allowedOrigins := []string{"https://jst.dev", "https://jst-dev.fly.dev", "http://localhost:8080", "https://jst-dev-preview.fly.dev"}
+		origin := r.Header.Get("Origin")
+		for _, allowed := range allowedOrigins {
+			if origin == allowed {
+				return true
+			}
+		}
+		return false
+	},
 }
 
 // HandleRealtimeWebSocket upgrades the connection and serves the realtime bridge
@@ -109,10 +121,6 @@ func userIDFromRequest(r *http.Request) string {
 		if u.ID != "" {
 			return u.ID
 		}
-	}
-	// fallback for dev
-	if q := r.URL.Query().Get("user_id"); q != "" {
-		return q
 	}
 	return ""
 }
@@ -430,7 +438,9 @@ func (c *rtClient) handleJSSub(stream string, startSeq uint64, batch int, filter
 					// Forward to client; on backpressure, send() will close the connection
 					c.send(serverMsg{Op: "msg", Target: stream, Data: json.RawMessage(msg.Data)})
 					if c.ctx.Err() != nil {
-						// connection closed due to backpressure or other error; do not ack so it can be redelivered on resume
+						// Connection closed; messages will be redelivered to next consumer with same durable name
+						// TODO: Consider implementing a resume mechanism with sequence tracking
+						c.log.Warn("Connection closed with %d unacked messages for stream=%s", len(msgs)-1, stream)
 						return
 					}
 					_ = msg.Ack()
@@ -521,11 +531,26 @@ func (c *rtClient) applyCapabilities(newCaps capabilities) {
 }
 
 func durableName(userID, stream, filter string) string {
-	name := fmt.Sprintf("ws_%s_%s_%s", sanitizeName(userID), sanitizeName(stream), sanitizeName(filter))
-	if len(name) > 200 { // JetStream durable limit is generous but keep it short
-		name = name[:200]
-	}
-	return name
+    // Create a unique, stable hash to avoid collisions between sanitized inputs
+    h := sha256.New()
+    _, _ = h.Write([]byte(fmt.Sprintf("%s:%s:%s", userID, stream, filter)))
+    hash := hex.EncodeToString(h.Sum(nil))[:16] // first 16 chars is plenty of entropy
+
+    shorten := func(s string, n int) string {
+        if len(s) > n {
+            return s[:n]
+        }
+        return s
+    }
+
+    userPart := shorten(sanitizeName(userID), 20)
+    streamPart := shorten(sanitizeName(stream), 20)
+
+    name := fmt.Sprintf("ws_%s_%s_%s", userPart, streamPart, hash)
+    if len(name) > 200 { // keep well under typical JetStream durable limits
+        name = name[:200]
+    }
+    return name
 }
 
 func sanitizeName(s string) string {
