@@ -1,5 +1,5 @@
 // In test/yourapp_test.gleam
-import article/article.{ArticleV1}
+import article.{ArticleV1}
 
 import birl
 import gleam/dynamic

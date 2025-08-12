@@ -1,4 +1,7 @@
-import article/article.{type Article}
+
+
+
+import article.{type Article}
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/uri.{type Uri}
@@ -6,16 +9,20 @@ import routes.{type Route}
 import session.{type Session}
 import utils/http.{type HttpError}
 import utils/remote_data as rd
-// no view imports here; this module defines only the Page ADT and routing helpers
 
-// Improved Page type with better state management
+/// The `Page` ADT encapsulates all views/screens in the app.
+///
+/// - Drives routing: produced by `from_route/4`, converted to URLs by `to_uri/1`.
+/// - Drives rendering: consumed by `page/*_view` modules to render UI.
+/// - Carries per-view state such as `Session`, `Article`, loading and error info.
+/// - Add new screens by introducing new `Page` constructors.
 pub type Page {
   Loading(Route)
 
-  // Home/Index pages
+  // Home/Index page
   PageIndex
 
-  // Article-related pages
+  // Article-related page
   PageArticle(article: Article, session: Session)
   PageArticleEdit(
     article: Article,
@@ -24,7 +31,7 @@ pub type Page {
   PageArticleList(articles: List(Article), session: Session)
   PageArticleListLoading
 
-  // Url Shortener pages
+  // Url Shortener page
   PageUrlShortIndex(session_authenticated: session.SessionAuthenticated)
   PageUrlShortInfo(
     short: String,
@@ -47,7 +54,7 @@ pub type Page {
   // Error states  
   PageError(error: PageError)
 
-  // Static pages
+  // Static page
   PageAbout
   PageNotFound(requested_uri: Uri)
   PageDjotDemo(
@@ -153,7 +160,7 @@ pub fn to_uri(page: Page) -> Uri {
   }
 }
 
-// Note: Rendering for pages lives under `pages/*_view.gleam` modules
+// Note: Rendering for page lives under `page/*_view.gleam` modules
 
 pub fn from_route(
   loading: Bool,

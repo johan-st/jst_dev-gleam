@@ -6,20 +6,19 @@ import lustre/element/html
 import lustre/element/svg
 import lustre/event
 
-// MODEL -----------------------------------------------------------------------
-pub opaque type Model {
+pub type Model {
   Model(messages: List(ChatMsg), is_open: Bool, contacts: List(Contact))
 }
 
-type ChatMsg {
+pub type ChatMsg {
   ChatMsg(id: Int, sender: String, content: String, image: String)
 }
 
-type Contact {
+pub type Contact {
   Contact(id: Int, name: String, status: Bool, image: String, username: String)
 }
 
-pub opaque type Msg {
+pub type Msg {
   // SendMessage(content: String)
   // SendMessageResult(result: Result(Nil, Nil))
   // GotMessage(message: ChatMsg)

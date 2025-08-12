@@ -8,7 +8,7 @@ import lustre/attribute as attr
 import lustre/element.{type Element}
 import lustre/element/html
 
-import components/ui
+import view/ui
 import utils/http.{type HttpError}
 import utils/mouse
 import utils/remote_data.{

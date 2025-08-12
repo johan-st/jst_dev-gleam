@@ -1,4 +1,4 @@
-import components/ui
+import view/ui
 import gleam/option.{Some}
 import gleam/uri
 import lustre/attribute as attr

@@ -1,4 +1,4 @@
-import article/article.{type Article}
+import article
 import gleam/dynamic/decode.{type Decoder, type Dynamic}
 import gleam/json
 import gleam/option.{type Option, None, Some}
@@ -8,7 +8,7 @@ pub const model_localstorage_key = "jst_lustre_state"
 
 pub type PersistentModel {
   PersistentModelV0
-  PersistentModelV1(articles: List(Article))
+  PersistentModelV1(articles: List(article.Article))
 }
 
 pub fn encode(model: PersistentModel) -> String {
@@ -16,7 +16,7 @@ pub fn encode(model: PersistentModel) -> String {
     PersistentModelV0 -> {
       json.object([#("version", json.int(0))])
     }
-    PersistentModelV1(articles:) -> {
+    PersistentModelV1(articles) -> {
       json.object([
         #("version", json.int(1)),
         #("articles", json.array(articles, article.article_encoder)),
@@ -35,7 +35,7 @@ pub fn decoder() -> Decoder(PersistentModel) {
         "articles",
         decode.list(article.article_decoder()),
       )
-      decode.success(PersistentModelV1(articles: articles))
+      decode.success(PersistentModelV1(articles))
     }
     _ -> decode.success(PersistentModelV0)
   }

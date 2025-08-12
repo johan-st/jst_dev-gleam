@@ -1,8 +1,8 @@
-import components/ui
 import gleam/option.{None}
 import lustre/attribute as attr
 import lustre/element.{type Element}
 import lustre/element/html
+import view/ui
 
 pub fn view() -> List(Element(msg)) {
   [

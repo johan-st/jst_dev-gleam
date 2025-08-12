@@ -1,4 +1,4 @@
-import article/article.{type Article}
+import article.{type Article}
 import birl
 import gleam/list
 import gleam/option.{None, Some}
