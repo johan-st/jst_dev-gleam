@@ -1,4 +1,3 @@
-import article/draft.{type Draft}
 import birl.{type Time}
 import gleam/dynamic/decode
 import gleam/http as gleam_http
@@ -100,7 +99,7 @@ pub fn to_draft(article: Article) -> Option(Draft) {
     ) ->
       rd.data(content)
       |> option.unwrap("")
-      |> draft.new(slug, title, subtitle, leading)
+      |> draft_new(slug, title, subtitle, leading)
       |> Some
   }
 }
@@ -366,3 +365,111 @@ pub fn loading_article() -> Article {
 //     draft: None,
 //   )
 // }
+
+
+// DRAFT -----------------------------------------------------------------------
+
+pub opaque type Draft {
+  DraftV1(
+    saving: Bool,
+    slug: String,
+    title: String,
+    subtitle: String,
+    leading: String,
+    content: String,
+  )
+}
+
+pub fn draft_new(
+  slug: String,
+  title: String,
+  subtitle: String,
+  leading: String,
+  content: String,
+) -> Draft {
+  DraftV1(saving: False, slug:, title:, subtitle:, leading:, content:)
+}
+
+pub fn draft_is_saving(draft) {
+  case draft {
+    DraftV1(saving:, slug: _, title: _, subtitle: _, leading: _, content: _) ->
+      saving
+  }
+}
+
+pub fn draft_slug(draft) {
+  case draft {
+    DraftV1(saving: _, slug:, title: _, subtitle: _, leading: _, content: _) ->
+      slug
+  }
+}
+
+pub fn draft_title(draft) {
+  case draft {
+    DraftV1(saving: _, slug: _, title:, subtitle: _, leading: _, content: _) ->
+      title
+  }
+}
+
+pub fn draft_subtitle(draft) {
+  case draft {
+    DraftV1(saving: _, slug: _, title: _, subtitle:, leading: _, content: _) ->
+      subtitle
+  }
+}
+
+pub fn draft_leading(draft) {
+  case draft {
+    DraftV1(saving: _, slug: _, title: _, subtitle: _, leading:, content: _) ->
+      leading
+  }
+}
+
+pub fn draft_content(draft) {
+  case draft {
+    DraftV1(saving: _, slug: _, title: _, subtitle: _, leading: _, content:) ->
+      content
+  }
+}
+
+pub fn draft_set_slug(draft, slug) {
+  case draft {
+    DraftV1(saving, _, title, subtitle, leading, content) ->
+      DraftV1(saving, slug, title, subtitle, leading, content)
+  }
+}
+
+pub fn draft_set_title(draft, title) {
+  case draft {
+    DraftV1(saving, slug, _, subtitle, leading, content) ->
+      DraftV1(saving, slug, title, subtitle, leading, content)
+  }
+}
+
+pub fn draft_set_subtitle(draft, subtitle) {
+  case draft {
+    DraftV1(saving, slug, title, _, leading, content) ->
+      DraftV1(saving, slug, title, subtitle, leading, content)
+  }
+}
+
+pub fn draft_set_leading(draft, leading) {
+  case draft {
+    DraftV1(saving, slug, title, subtitle, _, content) ->
+      DraftV1(saving, slug, title, subtitle, leading, content)
+  }
+}
+
+pub fn draft_set_content(draft, content) {
+  case draft {
+    DraftV1(saving, slug, title, subtitle, leading, _) ->
+      DraftV1(saving, slug, title, subtitle, leading, content)
+  }
+}
+
+pub fn draft_set_saving(draft, saving) {
+  case draft {
+    DraftV1(_, slug, title, subtitle, leading, content) ->
+      DraftV1(saving, slug, title, subtitle, leading, content)
+  }
+}

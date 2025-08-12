@@ -1,23 +1,22 @@
 // IMPORTS ---------------------------------------------------------------------
 
-import article/article.{type Article, ArticleV1}
-import article/draft
+import article.{type Article, ArticleV1}
 import birl
-import components/ui
+import gleam/dict.{type Dict}
+import gleam/dynamic/decode
 import gleam/int
 import gleam/json
-import gleam/dynamic/decode
-import gleam/dict.{type Dict}
-import gleam/result
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import view/ui
+
+// removed unused import: import gleam/result
 
 // removed unused order import (sorting moved to page modules)
 import gleam/set.{type Set}
 import gleam/string
 import gleam/uri.{type Uri}
 
-import helpers
 import keyboard as key
 import lustre
 import lustre/attribute.{type Attribute} as attr
@@ -27,20 +26,12 @@ import lustre/element/html
 import lustre/event
 import lustre_websocket as ws
 import modem
-import pages/about_view
-import pages/article_list_view
-import pages/article_view
-import pages/index_view
-import pages/pages
-import pages/url_index_view
-import pages/url_list_view
 import plinth/browser/event as p_event
 import routes.{type Route}
 import session.{type Session}
 import utils/dom_utils
 import utils/error_string
 import utils/http.{type HttpError}
-import utils/icon
 import utils/jot_to_lustre
 import utils/mouse
 import utils/notification.{type NotificationResponse}
@@ -49,8 +40,17 @@ import utils/remote_data.{
   type RemoteData, Errored, Loaded, NotInitialized, Pending,
 } as rd
 import utils/short_url.{type ShortUrl, type ShortUrlListResponse}
+import utils/url as url_utils
 import utils/user
 import utils/window_events
+import view/icon
+import view/page.{type Page}
+import view/page/about
+import view/page/article as view_article
+import view/page/article_list
+import view/page/index
+import view/page/url_index
+import view/page/url_list
 
 @external(javascript, "./app.ffi.mjs", "clipboard_copy")
 fn clipboard_copy(text: String) -> Nil
@@ -80,7 +80,7 @@ fn chord_from_keys(keys: List(key.Key)) -> key.Chord {
   key.Chord(set.from_list(keys))
 }
 
-fn bindings_for(page: pages.Page) -> List(ChordBinding) {
+fn bindings_for(page: Page) -> List(ChordBinding) {
   let alt = key.Captured(key.Alt)
   let ctrl = key.Captured(key.Ctrl)
 
@@ -89,7 +89,7 @@ fn bindings_for(page: pages.Page) -> List(ChordBinding) {
     |> filter_nav_by_session(page)
 
   let page_cmd = case page {
-    pages.PageArticleList(_, session) -> {
+    page.PageArticleList(_, session) -> {
       case session {
         session.Authenticated(_) -> [
           // Ctrl+N → New article
@@ -104,14 +104,14 @@ fn bindings_for(page: pages.Page) -> List(ChordBinding) {
         _ -> []
       }
     }
-    pages.PageArticle(article, session) -> {
-      case article.can_edit(article, session) {
+    page.PageArticle(art, session) -> {
+      case article.can_edit(art, session) {
         True -> [
           // Ctrl+E → Start editing
           ChordBinding(
             chord: chord_from_keys([ctrl, key.Captured(key.E)]),
             msg: UserMouseDownNavigation(
-              routes.to_uri(routes.ArticleEdit(article.id)),
+              routes.to_uri(routes.ArticleEdit(art.id)),
             ),
             group: Cmd,
             label: "Edit",
@@ -121,11 +121,11 @@ fn bindings_for(page: pages.Page) -> List(ChordBinding) {
         False -> []
       }
     }
-    pages.PageArticleEdit(article, _) -> [
+    page.PageArticleEdit(art, _) -> [
       // Ctrl+S → Save draft
       ChordBinding(
         chord: chord_from_keys([ctrl, key.Captured(key.S)]),
-        msg: ArticleDraftSaveClicked(article),
+        msg: ArticleDraftSaveClicked(art),
         group: Cmd,
         label: "Save draft",
         block_default: True,
@@ -176,18 +176,18 @@ fn bindings_for(page: pages.Page) -> List(ChordBinding) {
 
 fn filter_nav_by_session(
   bindings: List(ChordBinding),
-  page: pages.Page,
+  page: page.Page,
 ) -> List(ChordBinding) {
   let session = case page {
-    pages.PageArticleList(_, sess) -> sess
-    pages.PageArticle(_, sess) -> sess
-    pages.PageArticleEdit(_, sess) -> session.Authenticated(sess)
-    pages.PageUrlShortIndex(sess) -> session.Authenticated(sess)
-    pages.PageUrlShortInfo(_, sess) -> session.Authenticated(sess)
-    pages.PageUiComponents(sess) -> session.Authenticated(sess)
-    pages.PageNotifications(sess) -> session.Authenticated(sess)
-    pages.PageProfile(sess) -> session.Authenticated(sess)
-    pages.PageDjotDemo(sess, _) -> session.Authenticated(sess)
+    page.PageArticleList(_, sess) -> sess
+    page.PageArticle(_, sess) -> sess
+    page.PageArticleEdit(_, sess) -> session.Authenticated(sess)
+    page.PageUrlShortIndex(sess) -> session.Authenticated(sess)
+    page.PageUrlShortInfo(_, sess) -> session.Authenticated(sess)
+    page.PageUiComponents(sess) -> session.Authenticated(sess)
+    page.PageNotifications(sess) -> session.Authenticated(sess)
+    page.PageProfile(sess) -> session.Authenticated(sess)
+    page.PageDjotDemo(sess, _) -> session.Authenticated(sess)
     _ -> session.Unauthenticated
   }
 
@@ -284,7 +284,7 @@ fn filter_nav_by_session(
 }
 
 fn recompute_bindings_for_current_page(model: Model) -> Model {
-  let page = pages.from_route(False, model.route, model.session, model.articles)
+  let page = page.from_route(False, model.route, model.session, model.articles)
   let new_bindings = bindings_for(page)
   let new_chords = new_bindings |> list.map(fn(b) { b.chord }) |> set.from_list
   Model(..model, chord_bindings: new_bindings, chords_available: new_chords)
@@ -392,6 +392,13 @@ type Model {
     debug_ws_status: String,
   )
 }
+
+// TODO: implement realtime.Data
+// LiveData needs states for idle, replaying, in sync, and error.
+// All states might need to keep the data. Even idle states might have data that can be used (offline)
+// It needs to keep track of the last known rev (for resuming)
+// Buffering messages to be sent later should be done with CRDTs somwhere else?
+// Note on CRDTs: we have a global time subject so a LWW with a deterministic per second reesolution should be enough.
 
 pub type EditViewMode {
   EditViewModeEdit
@@ -826,7 +833,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         ) -> {
           let updated_article =
             article.draft_update(article, fn(draft) {
-              draft.set_slug(draft, text)
+              article.draft_set_slug(draft, text)
             })
           #(
             Model(
@@ -849,7 +856,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     ArticleDraftUpdatedTitle(article, text) -> {
       let updated_article =
-        article.draft_update(article, fn(draft) { draft.set_title(draft, text) })
+        article.draft_update(article, fn(draft) {
+          article.draft_set_title(draft, text)
+        })
       let updated_articles =
         rd.map(
           model.articles,
@@ -865,7 +874,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ArticleDraftUpdatedLeading(article, text) -> {
       let updated_article =
         article.draft_update(article, fn(draft) {
-          draft.set_leading(draft, text)
+          article.draft_set_leading(draft, text)
         })
       let updated_articles =
         rd.map(
@@ -882,7 +891,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ArticleDraftUpdatedSubtitle(article, text) -> {
       let updated_article =
         article.draft_update(article, fn(draft) {
-          draft.set_subtitle(draft, text)
+          article.draft_set_subtitle(draft, text)
         })
       let updated_articles =
         rd.map(
@@ -899,7 +908,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ArticleDraftUpdatedContent(article, content) -> {
       let updated_article =
         article.draft_update(article, fn(draft) {
-          draft.set_content(draft, content)
+          article.draft_set_content(draft, content)
         })
       #(
         Model(
@@ -933,7 +942,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(
         Model(..model, articles: updated_articles),
         modem.push(
-          pages.to_uri(pages.PageArticle(article, model.session))
+          page.to_uri(page.PageArticle(article, model.session))
             |> uri.to_string,
           None,
           None,
@@ -947,13 +956,13 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           let updated_article =
             ArticleV1(
               ..article,
-              slug: draft.slug(current_draft),
-              title: draft.title(current_draft),
-              leading: draft.leading(current_draft),
-              subtitle: draft.subtitle(current_draft),
+              slug: article.draft_slug(current_draft),
+              title: article.draft_title(current_draft),
+              leading: article.draft_leading(current_draft),
+              subtitle: article.draft_subtitle(current_draft),
               content: rd.to_loaded(
                 rd.NotInitialized,
-                draft.content(current_draft),
+                article.draft_content(current_draft),
               ),
               draft: Some(current_draft),
             )
@@ -976,7 +985,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                 model.base_uri,
               ),
               modem.push(
-                pages.to_uri(pages.PageArticle(updated_article, model.session))
+                page.to_uri(page.PageArticle(updated_article, model.session))
                   |> uri.to_string,
                 None,
                 None,
@@ -1264,7 +1273,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     // SHORT URLS
     ShortUrlCreateClicked(short_code, target_url) -> {
-      let #(is_valid, _) = helpers.validate_target_url(target_url)
+      let #(is_valid, _) = url_utils.validate_target_url(target_url)
       case is_valid, model.session {
         True, session.Authenticated(_session_data) -> {
           let req =
@@ -1680,20 +1689,38 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     // Debug realtime messages
     DebugWsOpen(sock) -> {
       #(
-        Model(..model, debug_connected: True, debug_ws_retries: 0, debug_ws_status: "Connected"),
+        Model(
+          ..model,
+          debug_connected: True,
+          debug_ws_retries: 0,
+          debug_ws_status: "Connected",
+        ),
         effect.batch([
-          ws.send(sock, json.to_string(json.object([
-            #("op", json.string("sub")),
-            #("target", json.string("time.seconds")),
-          ]))),
-          ws.send(sock, json.to_string(json.object([
-            #("op", json.string("kv_sub")),
-            #("target", json.string("article")),
-          ]))),
+          ws.send(
+            sock,
+            json.to_string(
+              json.object([
+                #("op", json.string("sub")),
+                #("target", json.string("time.seconds")),
+              ]),
+            ),
+          ),
+          ws.send(
+            sock,
+            json.to_string(
+              json.object([
+                #("op", json.string("kv_sub")),
+                #("target", json.string("article")),
+              ]),
+            ),
+          ),
         ]),
       )
     }
-    DebugWsClosed -> #(Model(..model, debug_connected: False, debug_ws_status: "Disconnected"), effect.from(fn(dispatch) { dispatch(DebugWsReconnect) }))
+    DebugWsClosed -> #(
+      Model(..model, debug_connected: False, debug_ws_status: "Disconnected"),
+      effect.from(fn(dispatch) { dispatch(DebugWsReconnect) }),
+    )
     DebugWsReconnect -> {
       // attempt reconnection with backoff, reset retries on success (handled in DebugWsOpen)
       let retries = model.debug_ws_retries + 1
@@ -1703,10 +1730,17 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         3 -> 2000
         _ -> 5000
       }
-      let model = Model(..model, debug_ws_retries: retries, debug_ws_status: "Reconnecting...")
+      let model =
+        Model(
+          ..model,
+          debug_ws_retries: retries,
+          debug_ws_status: "Reconnecting...",
+        )
       #(
         model,
-        effect.from(fn(dispatch) { set_timeout(fn() { dispatch(DebugWsDoConnect) }, delay_ms) })
+        effect.from(fn(dispatch) {
+          set_timeout(fn() { dispatch(DebugWsDoConnect) }, delay_ms)
+        }),
       )
     }
     DebugStatus(s) -> #(Model(..model, debug_ws_status: s), effect.none())
@@ -1741,7 +1775,10 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           let latest = dict.insert(model.debug_latest, target, raw)
           let targets = set.insert(model.debug_targets, target)
           let was_expanded = set.contains(model.debug_expanded, target)
-          let expanded = case was_expanded { True -> set.insert(model.debug_expanded, target) False -> model.debug_expanded }
+          let expanded = case was_expanded {
+            True -> set.insert(model.debug_expanded, target)
+            False -> model.debug_expanded
+          }
           #(
             Model(
               ..model,
@@ -2010,37 +2047,35 @@ fn update_chord(
 fn view(model: Model) -> Element(Msg) {
   let page = page_from_model(model)
   let content: List(Element(Msg)) = case page {
-    pages.Loading(_) -> view_loading()
-    pages.PageIndex -> index_view.view(UserMouseDownNavigation)
-    pages.PageArticleList(articles, _session) ->
-      article_list_view.view(articles, model.session)
-    pages.PageArticleListLoading -> view_article_listing_loading()
-    pages.PageArticle(article, session) ->
-      article_view.view_article_page(article, session)
-    pages.PageArticleEdit(article, _) -> view_article_edit(model, article)
-    pages.PageError(error) -> {
+    page.Loading(_) -> view_loading()
+    page.PageIndex -> index.view(UserMouseDownNavigation)
+    page.PageArticleList(articles, _session) ->
+      article_list.view(articles, model.session)
+    page.PageArticleListLoading -> view_article_listing_loading()
+    page.PageArticle(article, session) ->
+      view_article.view_article_page(article, session)
+    page.PageArticleEdit(article, _) -> view_article_edit(model, article)
+    page.PageError(error) -> {
       case error {
-        pages.ArticleNotFound(slug, _) ->
-          article_view.view_article_not_found(slug)
-        pages.ArticleEditNotFound(id) ->
+        page.ArticleNotFound(slug, _) ->
+          view_article.view_article_not_found(slug)
+        page.ArticleEditNotFound(id) ->
           view_article_edit_not_found(model.articles, id)
-        pages.HttpError(error, _) -> [
-          view_error(error_string.http_error(error)),
-        ]
-        pages.AuthenticationRequired(action) -> [
+        page.HttpError(error, _) -> [view_error(error_string.http_error(error))]
+        page.AuthenticationRequired(action) -> [
           view_error("Authentication required: " <> action),
         ]
-        pages.Other(msg) -> [view_error(msg)]
+        page.Other(msg) -> [view_error(msg)]
       }
     }
-    pages.PageAbout -> about_view.view()
-    pages.PageUrlShortIndex(_) ->
-      url_index_view.view(url_list_view.list(
+    page.PageAbout -> about.view()
+    page.PageUrlShortIndex(_) ->
+      url_index.view(url_list.list(
         model.short_urls,
         model.expanded_urls,
         model.delete_confirmation,
         model.copy_feedback,
-        url_list_view.Callbacks(
+        url_list.Callbacks(
           ShortUrlCopyClicked,
           ShortUrlToggleActiveClicked,
           ShortUrlToggleExpanded,
@@ -2049,13 +2084,13 @@ fn view(model: Model) -> Element(Msg) {
           fn() { ShortUrlDeleteCancelClicked },
         ),
       ))
-    pages.PageUrlShortInfo(short, _) -> view_url_info_page(model, short)
-    pages.PageDjotDemo(_, content) -> view_djot_demo(content)
-    pages.PageUiComponents(_) -> view_ui_components()
-    pages.PageNotifications(_) -> view_notifications(model)
-    pages.PageProfile(_) -> view_profile(model)
-    pages.PageDebug -> view_debug_realtime(model)
-    pages.PageNotFound(uri) -> view_not_found(uri)
+    page.PageUrlShortInfo(short, _) -> view_url_info_page(model, short)
+    page.PageDjotDemo(_, content) -> view_djot_demo(content)
+    page.PageUiComponents(_) -> view_ui_components()
+    page.PageNotifications(_) -> view_notifications(model)
+    page.PageProfile(_) -> view_profile(model)
+    page.PageDebug -> view_debug_realtime(model)
+    page.PageNotFound(uri) -> view_not_found(uri)
   }
   let nav_hints_overlay = case
     set.contains(model.keys_down, key.Captured(key.Alt))
@@ -2064,7 +2099,7 @@ fn view(model: Model) -> Element(Msg) {
     False -> element.none()
   }
   let layout = case page {
-    pages.PageDjotDemo(_, _) | pages.PageArticleEdit(_, _) -> {
+    page.PageDjotDemo(_, _) | page.PageArticleEdit(_, _) -> {
       fn(content) {
         html.div(
           [
@@ -2445,34 +2480,32 @@ fn view_profile(model: Model) -> List(Element(Msg)) {
   [header, ..content]
 }
 
-fn page_from_model(model: Model) -> pages.Page {
+fn page_from_model(model: Model) -> page.Page {
   case model.route {
-    routes.Index -> pages.PageIndex
+    routes.Index -> page.PageIndex
     routes.Articles -> {
       case model.articles {
-        Pending(_, _) -> pages.PageArticleListLoading
-        NotInitialized ->
-          pages.PageError(pages.Other("articles not initialized"))
+        Pending(_, _) -> page.PageArticleListLoading
+        NotInitialized -> page.PageError(page.Other("articles not initialized"))
         Errored(error, _) ->
-          pages.PageError(pages.HttpError(error, "Failed to load article list"))
+          page.PageError(page.HttpError(error, "Failed to load article list"))
         Loaded(articles_list, _, _) ->
-          pages.PageArticleList(articles_list, model.session)
+          page.PageArticleList(articles_list, model.session)
       }
     }
     routes.Article(slug) -> {
       case model.articles {
-        Pending(_, _) -> pages.PageArticleListLoading
-        NotInitialized ->
-          pages.PageError(pages.Other("articles not initialized"))
+        Pending(_, _) -> page.PageArticleListLoading
+        NotInitialized -> page.PageError(page.Other("articles not initialized"))
         Errored(error, _) ->
-          pages.PageError(pages.HttpError(error, "Failed to load articles"))
+          page.PageError(page.HttpError(error, "Failed to load articles"))
         Loaded(articles_list, _, _) -> {
           case list.find(articles_list, fn(art) { art.slug == slug }) {
-            Ok(article) -> pages.PageArticle(article, model.session)
+            Ok(article) -> page.PageArticle(article, model.session)
             Error(_) ->
-              pages.PageError(pages.ArticleNotFound(
+              page.PageError(page.ArticleNotFound(
                 slug,
-                pages.get_available_slugs(articles_list),
+                page.get_available_slugs(articles_list),
               ))
           }
         }
@@ -2480,11 +2513,10 @@ fn page_from_model(model: Model) -> pages.Page {
     }
     routes.ArticleEdit(id) -> {
       case model.articles {
-        Pending(_, _) -> pages.PageArticleListLoading
-        NotInitialized ->
-          pages.PageError(pages.Other("articles not initialized"))
+        Pending(_, _) -> page.PageArticleListLoading
+        NotInitialized -> page.PageError(page.Other("articles not initialized"))
         Errored(error, _) ->
-          pages.PageError(pages.HttpError(
+          page.PageError(page.HttpError(
             error,
             "Failed to load articles for editing",
           ))
@@ -2496,17 +2528,15 @@ fn page_from_model(model: Model) -> pages.Page {
                 True, Some(_) -> {
                   case model.session {
                     session.Authenticated(session_auth) ->
-                      pages.PageArticleEdit(article, session_auth)
+                      page.PageArticleEdit(article, session_auth)
                     _ ->
-                      pages.PageError(pages.AuthenticationRequired(
-                        "edit article",
-                      ))
+                      page.PageError(page.AuthenticationRequired("edit article"))
                   }
                 }
                 True, None -> {
                   case model.session {
                     session.Authenticated(session_auth) ->
-                      pages.PageArticleEdit(
+                      page.PageArticleEdit(
                         article.ArticleV1(
                           ..article,
                           draft: article.to_draft(article),
@@ -2514,16 +2544,14 @@ fn page_from_model(model: Model) -> pages.Page {
                         session_auth,
                       )
                     _ ->
-                      pages.PageError(pages.AuthenticationRequired(
-                        "edit article",
-                      ))
+                      page.PageError(page.AuthenticationRequired("edit article"))
                   }
                 }
                 False, _ ->
-                  pages.PageError(pages.AuthenticationRequired("edit article"))
+                  page.PageError(page.AuthenticationRequired("edit article"))
               }
             }
-            Error(_) -> pages.PageError(pages.ArticleEditNotFound(id))
+            Error(_) -> page.PageError(page.ArticleEditNotFound(id))
           }
         }
       }
@@ -2531,17 +2559,16 @@ fn page_from_model(model: Model) -> pages.Page {
     routes.UrlShortIndex -> {
       case model.session {
         session.Authenticated(session_auth) ->
-          pages.PageUrlShortIndex(session_auth)
-        _ ->
-          pages.PageError(pages.AuthenticationRequired("access URL shortener"))
+          page.PageUrlShortIndex(session_auth)
+        _ -> page.PageError(page.AuthenticationRequired("access URL shortener"))
       }
     }
     routes.UrlShortInfo(short_code) -> {
       case model.session {
         session.Authenticated(session_auth) ->
-          pages.PageUrlShortInfo(short_code, session_auth)
+          page.PageUrlShortInfo(short_code, session_auth)
         _ ->
-          pages.PageError(pages.AuthenticationRequired(
+          page.PageError(page.AuthenticationRequired(
             "access URL shortener info",
           ))
       }
@@ -2549,34 +2576,32 @@ fn page_from_model(model: Model) -> pages.Page {
     routes.DjotDemo ->
       case model.session {
         session.Authenticated(session_auth) ->
-          pages.PageDjotDemo(session_auth, model.djot_demo_content)
-        _ -> pages.PageError(pages.AuthenticationRequired("access DJOT demo"))
+          page.PageDjotDemo(session_auth, model.djot_demo_content)
+        _ -> page.PageError(page.AuthenticationRequired("access DJOT demo"))
       }
-    routes.About -> pages.PageAbout
+    routes.About -> page.PageAbout
     routes.UiComponents -> {
       case model.session {
         session.Authenticated(session_auth) ->
-          pages.PageUiComponents(session_auth)
-        _ ->
-          pages.PageError(pages.AuthenticationRequired("access UI components"))
+          page.PageUiComponents(session_auth)
+        _ -> page.PageError(page.AuthenticationRequired("access UI components"))
       }
     }
     routes.Notifications -> {
       case model.session {
         session.Authenticated(session_auth) ->
-          pages.PageNotifications(session_auth)
-        _ ->
-          pages.PageError(pages.AuthenticationRequired("access notifications"))
+          page.PageNotifications(session_auth)
+        _ -> page.PageError(page.AuthenticationRequired("access notifications"))
       }
     }
     routes.Profile -> {
       case model.session {
-        session.Authenticated(session_auth) -> pages.PageProfile(session_auth)
-        _ -> pages.PageError(pages.AuthenticationRequired("access profile"))
+        session.Authenticated(session_auth) -> page.PageProfile(session_auth)
+        _ -> page.PageError(page.AuthenticationRequired("access profile"))
       }
     }
-    routes.Debug -> pages.PageDebug
-    routes.NotFound(uri) -> pages.PageNotFound(uri)
+    routes.Debug -> page.PageDebug
+    routes.NotFound(uri) -> page.PageNotFound(uri)
   }
 }
 
@@ -2673,7 +2698,7 @@ fn view_header(model: Model) -> Element(Msg) {
         ],
         [
           html.div([], [
-            view_internal_link(pages.to_uri(pages.PageIndex), [
+            view_internal_link(page.to_uri(page.PageIndex), [
               html.text("jst.dev"),
             ]),
           ]),
@@ -2918,13 +2943,13 @@ fn view_loading() -> List(Element(Msg)) {
   [ui.loading_state("Loading page...", None, ui.ColorNeutral)]
 }
 
-// removed unused old view function; replaced by pages/article_list_view.gleam
+// removed unused old view function; replaced by page/article_list_view.gleam
 
 fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
   case article.draft {
     None -> [view_error("no draft..")]
     Some(draft) -> {
-      let preview_content = case draft.content(draft) {
+      let preview_content = case article.draft_content(draft) {
         "" -> "Start typing in the editor to see the preview here..."
         content -> content
       }
@@ -2933,17 +2958,17 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
           author: article.author,
           published_at: article.published_at,
           tags: article.tags,
-          title: draft.title(draft),
+          title: article.draft_title(draft),
           content: article.content |> rd.to_loaded(preview_content),
           draft: None,
           id: article.id,
-          leading: draft.leading(draft),
+          leading: article.draft_leading(draft),
           revision: article.revision,
-          slug: draft.slug(draft),
-          subtitle: draft.subtitle(draft),
+          slug: article.draft_slug(draft),
+          subtitle: article.draft_subtitle(draft),
         )
       let preview =
-        article_view.view_article_page(draft_article, session.Unauthenticated)
+        view_article.view_article_page(draft_article, session.Unauthenticated)
 
       [
         // Toggle button for mobile
@@ -3001,7 +3026,10 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
   }
 }
 
-fn view_edit_actions(draft: draft.Draft, article: Article) -> List(Element(Msg)) {
+fn view_edit_actions(
+  draft: article.Draft,
+  article: Article,
+) -> List(Element(Msg)) {
   [
     // Form inputs - Slug with revision
     html.div([attr.class("mb-4")], [
@@ -3017,7 +3045,7 @@ fn view_edit_actions(draft: draft.Draft, article: Article) -> List(Element(Msg))
         attr.class(
           "w-full bg-zinc-800 border border-zinc-600 rounded-md p-3 sm:p-2 font-light text-zinc-100 focus:border-pink-700 focus:ring-1 focus:ring-pink-700 focus:outline-none transition-colors duration-200",
         ),
-        attr.value(draft.slug(draft)),
+        attr.value(article.draft_slug(draft)),
         attr.id("edit-" <> article.slug <> "-" <> "Slug"),
         event.on_input(ArticleDraftUpdatedSlug(article, _)),
       ]),
@@ -3025,14 +3053,14 @@ fn view_edit_actions(draft: draft.Draft, article: Article) -> List(Element(Msg))
     view_article_edit_input(
       "Title",
       ArticleEditInputTypeTitle,
-      draft.title(draft),
+      article.draft_title(draft),
       ArticleDraftUpdatedTitle(article, _),
       article.slug,
     ),
     view_article_edit_input(
       "Subtitle",
       ArticleEditInputTypeSubtitle,
-      draft.subtitle(draft),
+      article.draft_subtitle(draft),
       ArticleDraftUpdatedSubtitle(article, _),
       article.slug,
     ),
@@ -3046,12 +3074,12 @@ fn view_edit_actions(draft: draft.Draft, article: Article) -> List(Element(Msg))
           attr.class(
             "w-full h-20 sm:h-24 bg-zinc-800 border border-zinc-600 rounded-md p-3 sm:p-2 font-bold text-zinc-100 resize-none focus:border-pink-700 focus:ring-1 focus:ring-pink-700 focus:outline-none transition-colors duration-200",
           ),
-          attr.value(draft.leading(draft)),
+          attr.value(article.draft_leading(draft)),
           attr.id("edit-" <> article.slug <> "-" <> "Leading"),
           event.on_input(ArticleDraftUpdatedLeading(article, _)),
           attr.placeholder("Write a compelling leading paragraph..."),
         ],
-        draft.leading(draft),
+        article.draft_leading(draft),
       ),
     ]),
     // Content editor
@@ -3064,11 +3092,11 @@ fn view_edit_actions(draft: draft.Draft, article: Article) -> List(Element(Msg))
           attr.class(
             "w-full h-64 sm:h-80 lg:h-96 bg-zinc-800 border border-zinc-600 rounded-md p-4 font-mono text-sm text-zinc-100 resize-none focus:border-pink-700 focus:ring-1 focus:ring-pink-700 focus:outline-none transition-colors duration-200",
           ),
-          attr.value(draft.content(draft)),
+          attr.value(article.draft_content(draft)),
           event.on_input(ArticleDraftUpdatedContent(article, _)),
           attr.placeholder("Write your article content in Djot format..."),
         ],
-        draft.content(draft),
+        article.draft_content(draft),
       ),
     ]),
     // Action buttons
@@ -3083,7 +3111,7 @@ fn view_edit_actions(draft: draft.Draft, article: Article) -> List(Element(Msg))
               "px-4 py-2 bg-zinc-700 text-zinc-300 rounded-md hover:bg-zinc-600 transition-colors duration-200",
             ),
             mouse.on_mouse_down_no_right(ArticleDraftDiscardClicked(article)),
-            attr.disabled(draft.is_saving(draft)),
+            attr.disabled(article.draft_is_saving(draft)),
           ],
           [html.text("Discard Changes")],
         ),
@@ -3093,10 +3121,10 @@ fn view_edit_actions(draft: draft.Draft, article: Article) -> List(Element(Msg))
               "px-4 py-2 bg-teal-700 text-white rounded-md hover:bg-teal-600 transition-colors duration-200",
             ),
             mouse.on_mouse_down_no_right(ArticleDraftSaveClicked(article)),
-            attr.disabled(draft.is_saving(draft)),
+            attr.disabled(article.draft_is_saving(draft)),
           ],
           [
-            case draft.is_saving(draft) {
+            case article.draft_is_saving(draft) {
               True -> html.text("Saving...")
               False -> html.text("Save Article")
             },
@@ -3256,104 +3284,11 @@ fn view_article_edit_input(
   ])
 }
 
-// removed old URL index helpers; page views now in pages/url_index_view.gleam
+// removed old URL index helpers; page views now in page/url_index_view.gleam
 
-fn view_url_list(model: Model) -> Element(Msg) {
-  case model.short_urls {
-    NotInitialized ->
-      html.div(
-        [attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")],
-        [
-          html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
-            html.text("URLs"),
-          ]),
-          ui.loading("Loading URLs...", ui.ColorNeutral),
-        ],
-      )
-    Pending(_, _) ->
-      html.div(
-        [attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")],
-        [
-          html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
-            html.text("URLs"),
-          ]),
-          ui.loading("Loading URLs...", ui.ColorNeutral),
-        ],
-      )
-    Loaded(short_urls, _, _) -> {
-      case short_urls {
-        [] ->
-          html.div(
-            [
-              attr.class(
-                "mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700",
-              ),
-            ],
-            [
-              html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
-                html.text("URLs"),
-              ]),
-              ui.empty_state(
-                "No short URLs created yet",
-                "Create your first short URL using the form above.",
-                None,
-              ),
-            ],
-          )
-        _ -> {
-          let url_elements =
-            list.map(short_urls, fn(url) {
-              let is_expanded = set.contains(model.expanded_urls, url.id)
+// legacy URL list view helpers removed
 
-              case is_expanded {
-                True -> view_expanded_url_card(model, url)
-                False -> view_compact_url_card(model, url)
-              }
-            })
-          html.div(
-            [
-              attr.class(
-                "mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700",
-              ),
-            ],
-            [
-              html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
-                html.text("URLs"),
-              ]),
-              html.ul(
-                [attr.class("space-y-2"), attr.role("list")],
-                url_elements,
-              ),
-              case model.delete_confirmation {
-                Some(delete_id) ->
-                  view_delete_confirmation(delete_id, short_urls)
-                None -> element.none()
-              },
-            ],
-          )
-        }
-      }
-    }
-    Errored(error, _) ->
-      html.div(
-        [attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")],
-        [
-          html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
-            html.text("URLs"),
-          ]),
-          html.div([attr.class("text-center py-12")], [
-            html.div([attr.class("text-red-400 text-lg mb-2")], [
-              html.text("Error loading short URLs"),
-            ]),
-            html.div([attr.class("text-zinc-500 text-sm")], [
-              html.text(error_string.http_error(error)),
-            ]),
-          ]),
-        ],
-      )
-  }
-}
-
+// legacy URL list view kept during refactor - now unused
 fn view_compact_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
   html.li(
     [
@@ -3450,6 +3385,7 @@ fn view_compact_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
   )
 }
 
+// legacy URL list view kept during refactor - now unused
 fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
   html.li(
     [
@@ -3643,48 +3579,7 @@ fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
   )
 }
 
-fn view_delete_confirmation(
-  delete_id: String,
-  short_urls: List(ShortUrl),
-) -> Element(Msg) {
-  let url_to_delete = case
-    list.find(short_urls, fn(url) { url.id == delete_id })
-  {
-    Ok(url) -> url.short_code
-    Error(_) -> "unknown"
-  }
-
-  html.div([], [
-    ui.modal_backdrop(ShortUrlDeleteCancelClicked),
-    ui.modal(
-      "Delete Short URL",
-      [
-        html.p([attr.class("text-zinc-300")], [
-          html.text("Are you sure you want to delete the short URL "),
-          html.span([attr.class("font-mono text-pink-400")], [
-            html.text("u.jst.dev/" <> url_to_delete),
-          ]),
-          html.text("? This action cannot be undone."),
-        ]),
-      ],
-      [
-        ui.button(
-          "Cancel",
-          ui.ColorTeal,
-          ui.ButtonStateNormal,
-          ShortUrlDeleteCancelClicked,
-        ),
-        ui.button(
-          "Delete",
-          ui.ColorRed,
-          ui.ButtonStateNormal,
-          ShortUrlDeleteConfirmClicked(delete_id),
-        ),
-      ],
-      ShortUrlDeleteCancelClicked,
-    ),
-  ])
-}
+// legacy URL list view helpers removed
 
 fn view_url_info_page(model: Model, short_code: String) -> List(Element(Msg)) {
   case model.short_urls {
@@ -5086,15 +4981,16 @@ fn init(_) -> #(Model, Effect(Msg)) {
       debug_ws_status: "Disconnected",
     )
   // Connect debug websocket
-  let effect_ws = ws.init("/ws", fn(ev) {
-    case ev {
-      ws.InvalidUrl -> DebugStatus("Invalid WS URL")
-      ws.OnOpen(sock) -> DebugWsOpen(sock)
-      ws.OnTextMessage(text) -> DebugWsIncoming(text)
-      ws.OnBinaryMessage(_) -> NoOp
-      ws.OnClose(_) -> DebugWsClosed
-    }
-  })
+  let effect_ws =
+    ws.init("/ws", fn(ev) {
+      case ev {
+        ws.InvalidUrl -> DebugStatus("Invalid WS URL")
+        ws.OnOpen(sock) -> DebugWsOpen(sock)
+        ws.OnTextMessage(text) -> DebugWsIncoming(text)
+        ws.OnBinaryMessage(_) -> NoOp
+        ws.OnClose(_) -> DebugWsClosed
+      }
+    })
   let effect_modem =
     modem.init(fn(uri) {
       uri
@@ -5149,29 +5045,35 @@ fn view_debug_realtime(model: Model) -> List(Element(Msg)) {
         html.h3([attr.class("font-semibold mb-2")], [
           html.text("Subscriptions (observed targets)"),
         ]),
-    html.ul(
-      [attr.class("space-y-2")],
-      list.map(targets, fn(tgt) {
-        let latest = case dict.get(model.debug_latest, tgt) {
-          Ok(v) -> v
-          Error(Nil) -> ""
-        }
-        let is_open = set.contains(model.debug_expanded, tgt)
-        html.li([attr.class("border border-zinc-700 rounded p-2")], [
-          html.details([
-            attr.attribute("open", case is_open { True -> "open" False -> "" }),
-          ], [
-            html.summary([
-              event.on_click(DebugToggleExpanded(tgt)),
-            ], [html.code([], [html.text(tgt)])]),
-            html.pre([attr.class("whitespace-pre-wrap text-xs mt-2")], [
-              html.text(latest),
-            ]),
-          ]),
-        ])
-      }),
-    ),
-  ]),
+        html.ul(
+          [attr.class("space-y-2")],
+          list.map(targets, fn(tgt) {
+            let latest = case dict.get(model.debug_latest, tgt) {
+              Ok(v) -> v
+              Error(Nil) -> ""
+            }
+            let is_open = set.contains(model.debug_expanded, tgt)
+            html.li([attr.class("border border-zinc-700 rounded p-2")], [
+              html.details(
+                [
+                  attr.attribute("open", case is_open {
+                    True -> "open"
+                    False -> ""
+                  }),
+                ],
+                [
+                  html.summary([event.on_click(DebugToggleExpanded(tgt))], [
+                    html.code([], [html.text(tgt)]),
+                  ]),
+                  html.pre([attr.class("whitespace-pre-wrap text-xs mt-2")], [
+                    html.text(latest),
+                  ]),
+                ],
+              ),
+            ])
+          }),
+        ),
+      ]),
     ]),
   ]
 }

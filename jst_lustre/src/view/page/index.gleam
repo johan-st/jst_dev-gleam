@@ -1,9 +1,9 @@
-import components/ui
+import view/ui
+import gleam/option.{Some}
 import gleam/uri
 import lustre/attribute as attr
 import lustre/element.{type Element}
 import lustre/element/html
-import gleam/option.{Some}
 
 pub fn view(msg_nav_to: fn(uri.Uri) -> msg) -> List(Element(msg)) {
   let assert Ok(nats_uri) = uri.parse("/article/nats-all-the-way-down")
@@ -30,10 +30,7 @@ pub fn view(msg_nav_to: fn(uri.Uri) -> msg) -> List(Element(msg)) {
             also share some of my thoughts and learnings here. Feel free to 
             check out my overview: ",
           ),
-          ui.link_primary(
-            "NATS all the way down →",
-            msg_nav_to(nats_uri),
-          ),
+          ui.link_primary("NATS all the way down →", msg_nav_to(nats_uri)),
         ]),
         html.p([attr.class("mb-6")], [
           html.text(
@@ -51,4 +48,3 @@ pub fn view(msg_nav_to: fn(uri.Uri) -> msg) -> List(Element(msg)) {
     ]),
   ]
 }
-
