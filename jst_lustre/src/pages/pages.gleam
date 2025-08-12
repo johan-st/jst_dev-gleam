@@ -6,6 +6,7 @@ import routes.{type Route}
 import session.{type Session}
 import utils/http.{type HttpError}
 import utils/remote_data as rd
+import pages/short_url
 // no view imports here; this module defines only the Page ADT and routing helpers
 
 // Improved Page type with better state management
@@ -25,10 +26,11 @@ pub type Page {
   PageArticleListLoading
 
   // Url Shortener pages
-  PageUrlShortIndex(session_authenticated: session.SessionAuthenticated)
+  PageUrlShortIndex(session_authenticated: session.SessionAuthenticated, form: short_url.Form)
   PageUrlShortInfo(
     short: String,
     session_authenticated: session.SessionAuthenticated,
+
   )
 
   // UI Components showcase

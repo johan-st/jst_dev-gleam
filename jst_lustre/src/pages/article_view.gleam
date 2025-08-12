@@ -16,7 +16,7 @@ import utils/error_string
 import utils/jot_to_lustre
 import routes
 
-import partials/article_partials as parts
+import view/partials/article_partials as parts
 
 pub fn view_article_listing(
   articles: List(Article),

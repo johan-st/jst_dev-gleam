@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -326,13 +327,50 @@ func (c *rtClient) handleJSSub(stream string, startSeq uint64, batch int, filter
 	if !c.isAllowedStream(stream, filter) { return }
 	// Require a filter subject for JS subscribe to ensure a concrete subject
 	if filter == "" { return }
-	opts := []nats.SubOpt{ nats.StartSequence(startSeq) }
-	if batch > 0 { opts = append(opts, nats.MaxDeliver(batch)) }
-	sub, err := c.srv.js.Subscribe(filter, func(m *nats.Msg) {
-		c.send(serverMsg{Op: "msg", Target: stream, Data: json.RawMessage(m.Data)})
-	}, opts...)
+
+	if batch <= 0 { batch = 50 }
+
+	// Create durable name per connection/user and filter
+	durable := durableName(c.id, stream, filter)
+
+	// Create a pull consumer bound to stream with optional start sequence
+	opts := []nats.SubOpt{ nats.BindStream(stream) }
+	if startSeq > 0 {
+		opts = append(opts, nats.StartSequence(startSeq))
+	}
+
+	sub, err := c.srv.js.PullSubscribe(filter, durable, opts...)
 	if err != nil { return }
+
 	c.mu.Lock(); c.subs[stream] = sub; c.mu.Unlock()
+
+	go func() {
+		defer func() {
+			_ = sub.Drain()
+		}()
+		for {
+			select {
+			case <-c.ctx.Done():
+				return
+			default:
+				msgs, err := sub.Fetch(batch, nats.MaxWait(200*time.Millisecond))
+				if err != nil {
+					// Timeout is expected when idle; other errors exit
+					if err == nats.ErrTimeout { continue }
+					return
+				}
+				for _, msg := range msgs {
+					// Forward to client; on backpressure, send() will close the connection
+					c.send(serverMsg{Op: "msg", Target: stream, Data: json.RawMessage(msg.Data)})
+					if c.ctx.Err() != nil {
+						// connection closed due to backpressure or other error; do not ack so it can be redelivered on resume
+						return
+					}
+					_ = msg.Ack()
+				}
+			}
+		}
+	}()
 }
 
 func (c *rtClient) handleCommand(target string, data json.RawMessage, inbox string) {
@@ -391,3 +429,29 @@ func (c *rtClient) applyCapabilities(newCaps capabilities) {
 	}
 	c.caps = newCaps
 }
+<<<<<<< Current (Your changes)
+=======
+
+func durableName(userID, stream, filter string) string {
+	name := fmt.Sprintf("ws_%s_%s_%s", sanitizeName(userID), sanitizeName(stream), sanitizeName(filter))
+	if len(name) > 200 { // JetStream durable limit is generous but keep it short
+		name = name[:200]
+	}
+	return name
+}
+
+func sanitizeName(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	if b.Len() == 0 {
+		return "_"
+	}
+	return b.String()
+}
+>>>>>>> Incoming (Background Agent changes)

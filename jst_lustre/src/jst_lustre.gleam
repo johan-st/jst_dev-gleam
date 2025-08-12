@@ -4,13 +4,13 @@ import article/article.{type Article, ArticleV1}
 import article/draft
 import birl
 import components/ui
+import gleam/dict.{type Dict}
+import gleam/dynamic/decode
 import gleam/int
 import gleam/json
-import gleam/dynamic/decode
-import gleam/dict.{type Dict}
-import gleam/result
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 
 // removed unused order import (sorting moved to page modules)
 import gleam/set.{type Set}
@@ -31,7 +31,7 @@ import pages/about_view
 import pages/article_list_view
 import pages/article_view
 import pages/index_view
-import pages/pages
+import pages/pages.{type Page}
 import pages/url_index_view
 import pages/url_list_view
 import plinth/browser/event as p_event
@@ -392,6 +392,36 @@ type Model {
     debug_ws_status: String,
   )
 }
+
+pub type Model {
+  Model(
+    base_uri: Uri,
+    page: Page,
+    route: Route,
+    session: Session,
+    
+    // realtime data
+    server_time: realtime.Data(Int, realtime.Error),
+    articles: realtime.Data(List(Article), realtime.Error),
+    short_urls: realtime.Data(List(ShortUrl), realtime.Error),
+
+    // TODO: add these domain
+    // chat_messages: realtime.Data(List(chat.Message), realtime.Error),
+    // live_notices: realtime.Data(List(Notice), realtime.Error),
+
+    // UI globals
+    notice: List(Notice),
+    modal: Option(Modal),
+    keyboard: Keyboard,
+  )
+}
+
+// TODO: implement realtime.Data
+// LiveData needs states for idle, replaying, in sync, and error.
+// All states might need to keep the data. Even idle states might have data that can be used (offline)
+// It needs to keep track of the last known rev (for resuming)
+// Buffering messages to be sent later should be done with CRDTs somwhere else?
+// Note on CRDTs: we have a global time subject so a LWW with a deterministic per second reesolution should be enough.
 
 pub type EditViewMode {
   EditViewModeEdit
@@ -1680,20 +1710,38 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     // Debug realtime messages
     DebugWsOpen(sock) -> {
       #(
-        Model(..model, debug_connected: True, debug_ws_retries: 0, debug_ws_status: "Connected"),
+        Model(
+          ..model,
+          debug_connected: True,
+          debug_ws_retries: 0,
+          debug_ws_status: "Connected",
+        ),
         effect.batch([
-          ws.send(sock, json.to_string(json.object([
-            #("op", json.string("sub")),
-            #("target", json.string("time.seconds")),
-          ]))),
-          ws.send(sock, json.to_string(json.object([
-            #("op", json.string("kv_sub")),
-            #("target", json.string("article")),
-          ]))),
+          ws.send(
+            sock,
+            json.to_string(
+              json.object([
+                #("op", json.string("sub")),
+                #("target", json.string("time.seconds")),
+              ]),
+            ),
+          ),
+          ws.send(
+            sock,
+            json.to_string(
+              json.object([
+                #("op", json.string("kv_sub")),
+                #("target", json.string("article")),
+              ]),
+            ),
+          ),
         ]),
       )
     }
-    DebugWsClosed -> #(Model(..model, debug_connected: False, debug_ws_status: "Disconnected"), effect.from(fn(dispatch) { dispatch(DebugWsReconnect) }))
+    DebugWsClosed -> #(
+      Model(..model, debug_connected: False, debug_ws_status: "Disconnected"),
+      effect.from(fn(dispatch) { dispatch(DebugWsReconnect) }),
+    )
     DebugWsReconnect -> {
       // attempt reconnection with backoff, reset retries on success (handled in DebugWsOpen)
       let retries = model.debug_ws_retries + 1
@@ -1703,10 +1751,17 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         3 -> 2000
         _ -> 5000
       }
-      let model = Model(..model, debug_ws_retries: retries, debug_ws_status: "Reconnecting...")
+      let model =
+        Model(
+          ..model,
+          debug_ws_retries: retries,
+          debug_ws_status: "Reconnecting...",
+        )
       #(
         model,
-        effect.from(fn(dispatch) { set_timeout(fn() { dispatch(DebugWsDoConnect) }, delay_ms) })
+        effect.from(fn(dispatch) {
+          set_timeout(fn() { dispatch(DebugWsDoConnect) }, delay_ms)
+        }),
       )
     }
     DebugStatus(s) -> #(Model(..model, debug_ws_status: s), effect.none())
@@ -1741,7 +1796,10 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           let latest = dict.insert(model.debug_latest, target, raw)
           let targets = set.insert(model.debug_targets, target)
           let was_expanded = set.contains(model.debug_expanded, target)
-          let expanded = case was_expanded { True -> set.insert(model.debug_expanded, target) False -> model.debug_expanded }
+          let expanded = case was_expanded {
+            True -> set.insert(model.debug_expanded, target)
+            False -> model.debug_expanded
+          }
           #(
             Model(
               ..model,
@@ -5086,15 +5144,16 @@ fn init(_) -> #(Model, Effect(Msg)) {
       debug_ws_status: "Disconnected",
     )
   // Connect debug websocket
-  let effect_ws = ws.init("/ws", fn(ev) {
-    case ev {
-      ws.InvalidUrl -> DebugStatus("Invalid WS URL")
-      ws.OnOpen(sock) -> DebugWsOpen(sock)
-      ws.OnTextMessage(text) -> DebugWsIncoming(text)
-      ws.OnBinaryMessage(_) -> NoOp
-      ws.OnClose(_) -> DebugWsClosed
-    }
-  })
+  let effect_ws =
+    ws.init("/ws", fn(ev) {
+      case ev {
+        ws.InvalidUrl -> DebugStatus("Invalid WS URL")
+        ws.OnOpen(sock) -> DebugWsOpen(sock)
+        ws.OnTextMessage(text) -> DebugWsIncoming(text)
+        ws.OnBinaryMessage(_) -> NoOp
+        ws.OnClose(_) -> DebugWsClosed
+      }
+    })
   let effect_modem =
     modem.init(fn(uri) {
       uri
@@ -5149,29 +5208,35 @@ fn view_debug_realtime(model: Model) -> List(Element(Msg)) {
         html.h3([attr.class("font-semibold mb-2")], [
           html.text("Subscriptions (observed targets)"),
         ]),
-    html.ul(
-      [attr.class("space-y-2")],
-      list.map(targets, fn(tgt) {
-        let latest = case dict.get(model.debug_latest, tgt) {
-          Ok(v) -> v
-          Error(Nil) -> ""
-        }
-        let is_open = set.contains(model.debug_expanded, tgt)
-        html.li([attr.class("border border-zinc-700 rounded p-2")], [
-          html.details([
-            attr.attribute("open", case is_open { True -> "open" False -> "" }),
-          ], [
-            html.summary([
-              event.on_click(DebugToggleExpanded(tgt)),
-            ], [html.code([], [html.text(tgt)])]),
-            html.pre([attr.class("whitespace-pre-wrap text-xs mt-2")], [
-              html.text(latest),
-            ]),
-          ]),
-        ])
-      }),
-    ),
-  ]),
+        html.ul(
+          [attr.class("space-y-2")],
+          list.map(targets, fn(tgt) {
+            let latest = case dict.get(model.debug_latest, tgt) {
+              Ok(v) -> v
+              Error(Nil) -> ""
+            }
+            let is_open = set.contains(model.debug_expanded, tgt)
+            html.li([attr.class("border border-zinc-700 rounded p-2")], [
+              html.details(
+                [
+                  attr.attribute("open", case is_open {
+                    True -> "open"
+                    False -> ""
+                  }),
+                ],
+                [
+                  html.summary([event.on_click(DebugToggleExpanded(tgt))], [
+                    html.code([], [html.text(tgt)]),
+                  ]),
+                  html.pre([attr.class("whitespace-pre-wrap text-xs mt-2")], [
+                    html.text(latest),
+                  ]),
+                ],
+              ),
+            ])
+          }),
+        ),
+      ]),
     ]),
   ]
 }

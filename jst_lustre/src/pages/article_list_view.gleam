@@ -6,9 +6,8 @@ import gleam/option.{Some, None}
 import birl
 import gleam/order
 import gleam/string
-// removed duplicate element import by aliasing above
 import components/ui
-import partials/article_partials as parts
+import view/partials/article_partials as parts
 
 pub fn view(articles: List(Article), sess: session.Session) -> List(Element(msg)) {
   let filtered_articles = case sess {
