@@ -90,14 +90,45 @@ func run(
 			nats.UserJWTAndSeed(
 				conf.NatsJWT,
 				conf.NatsNKEY,
-			))
+			),
+			// Add connection event handlers
+			nats.DisconnectHandler(func(nc *nats.Conn) {
+				l.Error("NATS connection disconnected")
+			}),
+			nats.ReconnectHandler(func(nc *nats.Conn) {
+				l.Info("NATS connection reconnected")
+			}),
+			nats.ClosedHandler(func(nc *nats.Conn) {
+				l.Error("NATS connection closed")
+			}),
+			nats.ErrorHandler(func(nc *nats.Conn, sub *nats.Subscription, err error) {
+				l.Error("NATS error: %v", err)
+			}),
+			// Connection resilience options
+			nats.MaxReconnects(-1), // Unlimited reconnection attempts
+			nats.ReconnectWait(1*time.Second), // Wait 1 second between reconnection attempts
+			nats.ReconnectJitter(100*time.Millisecond, 1*time.Second), // Add jitter to reconnection timing
+			nats.Timeout(10*time.Second), // Connection timeout
+			nats.PingInterval(30*time.Second), // Send ping every 30 seconds
+			nats.MaxPingsOutstanding(3), // Allow up to 3 missed pings before considering connection lost
+		)
 
 		// }
 	}
 	if err != nil {
-		return fmt.Errorf("connect to NATS: %w", err)
+		// Panic on initial connection failure - server cannot function without NATS
+		l.Fatal("Failed to connect to NATS cluster: %v", err)
+		panic(fmt.Sprintf("Failed to connect to NATS cluster: %v", err))
 	}
 	defer nc.Close()
+
+	// Verify connection is established
+	if nc.Status() != nats.CONNECTED {
+		l.Fatal("NATS connection not in CONNECTED state: %s", nc.Status())
+		panic(fmt.Sprintf("NATS connection not in CONNECTED state: %s", nc.Status()))
+	}
+
+	l.Info("Successfully connected to NATS cluster")
 
 	// - logger (connect)
 	lRoot.Connect(nc)
@@ -217,6 +248,12 @@ func run(
 	err = nc.Drain()
 	if err != nil {
 		l.Error("Failed to drain connections: %v", err)
+	}
+	
+	// Check final connection status
+	if nc.Status() != nats.CLOSED {
+		l.Debug("closing NATS connection")
+		nc.Close()
 	}
 
 	// Wait for second interrupt for force quit

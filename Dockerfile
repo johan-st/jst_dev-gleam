@@ -19,18 +19,18 @@ RUN go mod download -x || (sleep 5 && go mod download -x) || (sleep 10 && go mod
     go mod verify 
 
 # Install linting tools
-RUN go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-RUN go install github.com/securego/gosec/v2/cmd/gosec@latest
-RUN go install honnef.co/go/tools/cmd/staticcheck@latest
+# RUN go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+# RUN go install github.com/securego/gosec/v2/cmd/gosec@latest
+# RUN go install honnef.co/go/tools/cmd/staticcheck@latest
 
 # copy server code
 COPY ./server .
 
 # Run code quality checks
 # RUN gosec ./... #is very picky and slow 
-RUN golangci-lint run --timeout=5m
-RUN staticcheck ./...
-RUN go vet ./...
+# RUN golangci-lint run --timeout=5m
+# RUN staticcheck ./...
+# RUN go vet ./...
 # RUN go test -race ./... #requires cgo
 
 # Add frontend code

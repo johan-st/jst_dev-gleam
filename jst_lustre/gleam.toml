@@ -24,6 +24,7 @@ birl = ">= 1.8.0 and < 2.0.0"
 plinth = ">= 0.7.2 and < 1.0.0"
 lustre_websocket = ">= 0.9.0 and < 1.0.0"
 gleam_javascript = ">= 1.0.0 and < 2.0.0"
+gluid = ">= 1.1.0 and < 2.0.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

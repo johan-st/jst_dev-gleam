@@ -350,6 +350,7 @@ pub fn loading_article() -> Article {
     draft: None,
   )
 }
+
 // fn article_new_placeholder(author: String) -> Article {
 //   ArticleV1(
 //     id: "-",
@@ -365,7 +366,6 @@ pub fn loading_article() -> Article {
 //     draft: None,
 //   )
 // }
-
 
 // DRAFT -----------------------------------------------------------------------
 

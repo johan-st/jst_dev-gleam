@@ -531,26 +531,26 @@ func (c *rtClient) applyCapabilities(newCaps capabilities) {
 }
 
 func durableName(userID, stream, filter string) string {
-    // Create a unique, stable hash to avoid collisions between sanitized inputs
-    h := sha256.New()
-    _, _ = h.Write([]byte(fmt.Sprintf("%s:%s:%s", userID, stream, filter)))
-    hash := hex.EncodeToString(h.Sum(nil))[:16] // first 16 chars is plenty of entropy
+	// Create a unique, stable hash to avoid collisions between sanitized inputs
+	h := sha256.New()
+	_, _ = h.Write([]byte(fmt.Sprintf("%s:%s:%s", userID, stream, filter)))
+	hash := hex.EncodeToString(h.Sum(nil))[:16] // first 16 chars is plenty of entropy
 
-    shorten := func(s string, n int) string {
-        if len(s) > n {
-            return s[:n]
-        }
-        return s
-    }
+	shorten := func(s string, n int) string {
+		if len(s) > n {
+			return s[:n]
+		}
+		return s
+	}
 
-    userPart := shorten(sanitizeName(userID), 20)
-    streamPart := shorten(sanitizeName(stream), 20)
+	userPart := shorten(sanitizeName(userID), 20)
+	streamPart := shorten(sanitizeName(stream), 20)
 
-    name := fmt.Sprintf("ws_%s_%s_%s", userPart, streamPart, hash)
-    if len(name) > 200 { // keep well under typical JetStream durable limits
-        name = name[:200]
-    }
-    return name
+	name := fmt.Sprintf("ws_%s_%s_%s", userPart, streamPart, hash)
+	if len(name) > 200 { // keep well under typical JetStream durable limits
+		name = name[:200]
+	}
+	return name
 }
 
 func sanitizeName(s string) string {

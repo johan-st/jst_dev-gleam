@@ -1,97 +1,207 @@
-import gleam/dict
+import gleam/dynamic/decode
 import gleam/json
-import gleam/option.{None, Some}
+import gleam/list
+import gleam/option.{type Option, None, Some}
+import gleam/set
+import gleam/string
 import lustre/effect.{type Effect}
 import lustre_websocket as ws
 
-pub type OutMsg {
-  OnOpen(ws.WebSocket)
-  OnMessage(String)
-  OnClosed
-  OnError(String)
+@external(javascript, "./app.ffi.mjs", "set_timeout")
+fn set_timeout(callback: fn() -> Nil, delay: Int) -> Nil
+
+// ---------- Types ----------
+
+/// Elm-style child model: no knowledge of parent message type.
+pub opaque type Model {
+  Model(
+    path: String,
+    socket: Option(ws.WebSocket),
+    retries: Int,
+    subjects: set.Set(String),
+  )
 }
 
-pub fn connect(path: String) -> Effect(OutMsg) {
-  ws.init(path, fn(ev) {
-    case ev {
-      ws.InvalidUrl -> OnError("invalid_url")
-      ws.OnOpen(sock) -> OnOpen(sock)
-      ws.OnTextMessage(txt) -> OnMessage(txt)
-      ws.OnBinaryMessage(_) -> OnError("binary_not_supported")
-      ws.OnClose(_) -> OnClosed
-    }
-  })
+/// Elm-style child message: parent wraps this (e.g. RealtimeMsg) and handles it.
+pub opaque type Msg {
+  Connect
+  Connected(ws.WebSocket)
+  Disconnected(ws.WebSocketCloseReason)
+  WsText(String)
+  Subscribe(String)
+  Unsubscribe(String)
+  Incoming(String, String)
+  // target, raw json
+  Noop
 }
 
-pub fn sub(sock: ws.WebSocket, subject: String) -> Effect(OutMsg) {
-  ws.send(sock, encode_envelope("sub", subject, None, dict.new()))
+// ---------- Public API ----------
+
+pub fn init(path: String) -> #(Model, Effect(Msg)) {
+  let model = Model(path: path, socket: None, retries: 0, subjects: set.new())
+  #(model, ws.init(path, handle_ws_event))
 }
 
-pub fn unsub(sock: ws.WebSocket, subject: String) -> Effect(OutMsg) {
-  ws.send(sock, encode_envelope("unsub", subject, None, dict.new()))
-}
-
-pub fn kv_sub(
-  sock: ws.WebSocket,
-  bucket: String,
-  pattern: option.Option(String),
-) -> Effect(OutMsg) {
-  let data = case pattern {
-    Some(p) -> dict.from_list([#("pattern", json.string(p))])
-    None -> dict.new()
+/// Inspect a message and return the incoming event if present.
+pub fn incoming_of(m: Msg) -> Option(#(String, String)) {
+  case m {
+    Incoming(target, raw) -> Some(#(target, raw))
+    _ -> None
   }
-  ws.send(sock, encode_envelope("kv_sub", bucket, None, data))
 }
 
-pub fn js_sub(
-  sock: ws.WebSocket,
-  stream: String,
-  start_seq: Int,
-  batch: Int,
-  filter: String,
-) -> Effect(OutMsg) {
-  let data =
-    dict.from_list([
-      #("start_seq", json.int(start_seq)),
-      #("batch", json.int(batch)),
-      #("filter", json.string(filter)),
-    ])
-  ws.send(sock, encode_envelope("js_sub", stream, None, data))
+/// Expose connection state for debug UI
+pub fn is_connected(model: Model) -> Bool {
+  case model.socket {
+    Some(_) -> True
+    None -> False
+  }
 }
 
-pub fn cmd(
-  sock: ws.WebSocket,
-  target: String,
-  inbox: String,
-  payload: json.Json,
-) -> Effect(OutMsg) {
-  let data = payload
-  ws.send(sock, encode_envelope_with_json("cmd", target, Some(inbox), data))
+pub fn retries(model: Model) -> Int {
+  model.retries
+}
+
+pub fn next_retry_ms(model: Model) -> Int {
+  backoff_ms(model.retries + 1)
+}
+
+/// Current subjects list (sorted), for debug UI
+pub fn subjects(model: Model) -> List(String) {
+  model.subjects
+  |> set.to_list
+  |> list.sort(string.compare)
+}
+
+pub fn update(msg: Msg, model: Model) -> #(Model, Effect(Msg)) {
+  case msg {
+    Connect -> {
+      // Guard against duplicate connects
+      case model.socket {
+        Some(_) -> #(model, effect.none())
+        None -> #(model, ws.init(model.path, handle_ws_event))
+      }
+    }
+
+    Connected(socket) -> {
+      // Reset retries and resubscribe all subjects
+      let resend =
+        model.subjects
+        |> set.to_list
+        |> list.map(fn(subject) {
+          encode_envelope("sub", subject, None, json.object([]))
+        })
+      let send_effect = case resend {
+        [] -> effect.none()
+        msgs ->
+          msgs
+          |> list.map(fn(m) { ws.send(socket, m) })
+          |> effect.batch
+      }
+      #(Model(..model, socket: Some(socket), retries: 0), send_effect)
+    }
+
+    Disconnected(_reason) -> {
+      let next_retries = model.retries + 1
+      let delay_ms = backoff_ms(next_retries)
+      #(
+        Model(..model, socket: None, retries: next_retries),
+        effect.from(fn(dispatch) {
+          set_timeout(fn() { dispatch(Connect) }, delay_ms)
+        }),
+      )
+    }
+
+    WsText(text) -> handle_incoming_text(text, model)
+
+    Incoming(_, _) -> #(model, effect.none())
+
+    Subscribe(subject) -> {
+      let subjects = set.insert(model.subjects, subject)
+      let send_eff = case model.socket {
+        Some(sock) ->
+          ws.send(sock, encode_envelope("sub", subject, None, json.object([])))
+        None -> effect.none()
+      }
+      #(Model(..model, subjects: subjects), send_eff)
+    }
+
+    Unsubscribe(subject) -> {
+      let subjects = set.delete(model.subjects, subject)
+      let send_eff = case model.socket {
+        Some(sock) ->
+          ws.send(
+            sock,
+            encode_envelope("unsub", subject, None, json.object([])),
+          )
+        None -> effect.none()
+      }
+      #(Model(..model, subjects: subjects), send_eff)
+    }
+
+    Noop -> #(model, effect.none())
+  }
+}
+
+// Convenience constructors (Elm-like helpers)
+pub fn subscribe(subject: String) -> Msg {
+  Subscribe(subject)
+}
+
+pub fn unsubscribe(subject: String) -> Msg {
+  Unsubscribe(subject)
+}
+
+// ---------- Internals ----------
+
+fn handle_ws_event(event: ws.WebSocketEvent) -> Msg {
+  case event {
+    ws.InvalidUrl -> Noop
+    ws.OnBinaryMessage(_data) -> Noop
+    ws.OnClose(reason) -> Disconnected(reason)
+    ws.OnOpen(socket) -> Connected(socket)
+    ws.OnTextMessage(data) -> WsText(data)
+  }
+}
+
+fn handle_incoming_text(text: String, model: Model) -> #(Model, Effect(Msg)) {
+  let decoder = {
+    use target <- decode.field("target", decode.string)
+    decode.success(target)
+  }
+  let parsed = json.parse(from: text, using: decoder)
+  case parsed {
+    Ok(target) -> {
+      #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
+    }
+    Error(_) -> #(model, effect.none())
+  }
 }
 
 fn encode_envelope(
   op: String,
   target: String,
-  inbox: option.Option(String),
-  data: dict.Dict(String, json.Json),
-) -> String {
-  encode_envelope_with_json(op, target, inbox, json.object(dict.to_list(data)))
-}
-
-fn encode_envelope_with_json(
-  op: String,
-  target: String,
-  inbox: option.Option(String),
+  _inbox: Option(String),
   data: json.Json,
 ) -> String {
-  let base = [
-    #("op", json.string(op)),
-    #("target", json.string(target)),
-    #("data", data),
-  ]
-  let fields = case inbox {
-    Some(i) -> [#("inbox", json.string(i)), ..base]
-    None -> base
+  json.to_string(
+    json.object([
+      #("op", json.string(op)),
+      #("target", json.string(target)),
+      #("data", data),
+    ]),
+  )
+}
+
+// no id needed in Elm-style API
+
+fn backoff_ms(retries: Int) -> Int {
+  case retries {
+    1 -> 50
+    2 -> 250
+    3 -> 750
+    4 -> 1500
+    5 -> 3000
+    _ -> 5000
   }
-  json.to_string(json.object(fields))
 }

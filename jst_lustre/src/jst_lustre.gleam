@@ -27,6 +27,7 @@ import lustre/event
 import lustre_websocket as ws
 import modem
 import plinth/browser/event as p_event
+import realtime
 import routes.{type Route}
 import session.{type Session}
 import utils/dom_utils
@@ -57,8 +58,6 @@ fn clipboard_copy(text: String) -> Nil
 
 @external(javascript, "./app.ffi.mjs", "set_timeout")
 fn set_timeout(callback: fn() -> Nil, delay: Int) -> Nil
-
-// MODEL -----------------------------------------------------------------------
 
 // Keyboard chord bindings ------------------------------------------------------
 pub type ChordGroup {
@@ -387,9 +386,14 @@ type Model {
     debug_connected: Bool,
     debug_targets: Set(String),
     debug_latest: Dict(String, String),
+    debug_counts: Dict(String, Int),
     debug_expanded: Set(String),
     debug_ws_retries: Int,
     debug_ws_status: String,
+    debug_ws_msg_count: Int,
+    // realtime
+    realtime: realtime.Model,
+    realtime_time: String,
   )
 }
 
@@ -502,6 +506,9 @@ pub type Msg {
   DebugWsReconnect
   DebugWsDoConnect
   DebugStatus(String)
+
+  // Realtime
+  RealtimeMsg(realtime.Msg)
 }
 
 fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -1725,9 +1732,11 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       // attempt reconnection with backoff, reset retries on success (handled in DebugWsOpen)
       let retries = model.debug_ws_retries + 1
       let delay_ms = case retries {
-        1 -> 500
-        2 -> 1000
-        3 -> 2000
+        1 -> 50
+        2 -> 250
+        3 -> 750
+        4 -> 1500
+        5 -> 3000
         _ -> 5000
       }
       let model =
@@ -1774,6 +1783,11 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         Ok(target) -> {
           let latest = dict.insert(model.debug_latest, target, raw)
           let targets = set.insert(model.debug_targets, target)
+          let prev_count = case dict.get(model.debug_counts, target) {
+            Ok(c) -> c
+            Error(Nil) -> 0
+          }
+          let counts = dict.insert(model.debug_counts, target, prev_count + 1)
           let was_expanded = set.contains(model.debug_expanded, target)
           let expanded = case was_expanded {
             True -> set.insert(model.debug_expanded, target)
@@ -1786,12 +1800,46 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               debug_targets: targets,
               debug_connected: True,
               debug_expanded: expanded,
+              debug_counts: counts,
             ),
             effect.none(),
           )
         }
         Error(_) -> #(model, effect.none())
       }
+    }
+    // Realtime messages
+    RealtimeMsg(msg) -> {
+      let #(realtime_model, realtime_effect) =
+        realtime.update(msg, model.realtime)
+      let model = case realtime.incoming_of(msg) {
+        Some(#(target, raw)) -> {
+          let total = model.debug_ws_msg_count + 1
+          let prev_count = case dict.get(model.debug_counts, target) {
+            Ok(c) -> c
+            Error(Nil) -> 0
+          }
+          let counts = dict.insert(model.debug_counts, target, prev_count + 1)
+          let latest = dict.insert(model.debug_latest, target, raw)
+          let targets = set.insert(model.debug_targets, target)
+          let time_model = case target {
+            "time.seconds" -> Model(..model, realtime_time: raw)
+            _ -> model
+          }
+          Model(
+            ..time_model,
+            debug_ws_msg_count: total,
+            debug_counts: counts,
+            debug_latest: latest,
+            debug_targets: targets,
+          )
+        }
+        _ -> model
+      }
+      #(
+        Model(..model, realtime: realtime_model),
+        effect.map(realtime_effect, RealtimeMsg),
+      )
     }
   }
 }
@@ -2153,6 +2201,21 @@ fn view(model: Model) -> Element(Msg) {
     layout(content),
     view_status_bar_with_cmds(model),
   ])
+}
+
+fn format_unix_locale(raw_json: String) -> String {
+  // Parse { data: { unix: Int } } and format as YYYY-MM-DD HH:MM:SS
+  let decoder = {
+    use unix <- decode.subfield(["data", "unix"], decode.int)
+    decode.success(unix)
+  }
+  case json.parse(from: raw_json, using: decoder) {
+    Ok(unix) -> {
+      let dt = birl.from_unix(unix)
+      birl.to_naive_date_string(dt) <> " " <> birl.to_time_string(dt)
+    }
+    Error(_) -> raw_json
+  }
 }
 
 fn view_nav_hints_from_bindings(model: Model) -> Element(Msg) {
@@ -4929,8 +4992,9 @@ fn init(_) -> #(Model, Effect(Msg)) {
       persist.decoder(),
       GotLocalModelResult,
     )
+  let #(rt_model, rt_init) = realtime.init("/ws")
 
-  let model =
+  let base_model =
     Model(
       route: routes.from_uri(uri),
       session: session.Unauthenticated,
@@ -4976,21 +5040,17 @@ fn init(_) -> #(Model, Effect(Msg)) {
       debug_connected: False,
       debug_targets: set.new(),
       debug_latest: dict.new(),
+      debug_counts: dict.new(),
       debug_expanded: set.new(),
       debug_ws_retries: 0,
       debug_ws_status: "Disconnected",
+      debug_ws_msg_count: 0,
+      // realtime
+      realtime: rt_model,
+      realtime_time: "",
     )
+  let model = recompute_bindings_for_current_page(base_model)
   // Connect debug websocket
-  let effect_ws =
-    ws.init("/ws", fn(ev) {
-      case ev {
-        ws.InvalidUrl -> DebugStatus("Invalid WS URL")
-        ws.OnOpen(sock) -> DebugWsOpen(sock)
-        ws.OnTextMessage(text) -> DebugWsIncoming(text)
-        ws.OnBinaryMessage(_) -> NoOp
-        ws.OnClose(_) -> DebugWsClosed
-      }
-    })
   let effect_modem =
     modem.init(fn(uri) {
       uri
@@ -5001,13 +5061,15 @@ fn init(_) -> #(Model, Effect(Msg)) {
 
   // Set up global keyboard listener
 
-  let model = recompute_bindings_for_current_page(model)
+  let subscribe_time =
+    effect.from(fn(dispatch) {
+      dispatch(RealtimeMsg(realtime.subscribe("time.seconds")))
+    })
 
   #(
     model,
     effect.batch([
       effect_modem,
-      effect_ws,
       local_storage_effect,
       // effect_nav,
       session.auth_check(AuthCheckResponse, model.base_uri),
@@ -5017,6 +5079,8 @@ fn init(_) -> #(Model, Effect(Msg)) {
         KeyboardUp,
       ),
       window_events.setup(WindowUnfocused),
+      effect.map(rt_init, RealtimeMsg),
+      subscribe_time,
     ]),
   )
 }
@@ -5029,17 +5093,51 @@ fn view_debug_realtime(model: Model) -> List(Element(Msg)) {
   [
     html.div([attr.class("max-w-3xl mx-auto p-4 space-y-4")], [
       html.h2([attr.class("text-xl font-bold")], [html.text("Realtime Debug")]),
-      html.div([attr.class("text-sm text-zinc-300")], [
-        html.text("Connection: "),
-        html.span(
-          [
-            attr.class(case model.debug_connected {
-              True -> "text-green-400"
-              False -> "text-red-400"
-            }),
-          ],
-          [html.text(model.debug_ws_status)],
-        ),
+      html.div([attr.class("text-sm text-zinc-300 space-y-1")], [
+        html.div([], [
+          html.text("Connection: "),
+          html.span(
+            [
+              attr.class(case realtime.is_connected(model.realtime) {
+                True -> "text-green-400"
+                False -> "text-red-400"
+              }),
+            ],
+            [
+              html.text(case realtime.is_connected(model.realtime) {
+                True -> "Connected"
+                False -> "Disconnected"
+              }),
+            ],
+          ),
+        ]),
+        html.div([], [
+          case realtime.is_connected(model.realtime) {
+            True -> element.none()
+            False ->
+              html.span([], [
+                html.text("Failed "),
+                html.code([], [
+                  html.text(int.to_string(realtime.retries(model.realtime))),
+                ]),
+                html.text(" times: retrying in "),
+                html.code([], [
+                  html.text(
+                    int.to_string(realtime.next_retry_ms(model.realtime) / 1000)
+                    <> " s",
+                  ),
+                ]),
+              ])
+          },
+        ]),
+        html.div([], [
+          html.text("Messages received: "),
+          html.code([], [html.text(int.to_string(model.debug_ws_msg_count))]),
+        ]),
+        html.div([attr.class("pt-1")], [
+          html.text("Current time: "),
+          html.code([], [html.text(format_unix_locale(model.realtime_time))]),
+        ]),
       ]),
       html.div([], [
         html.h3([attr.class("font-semibold mb-2")], [
@@ -5051,6 +5149,10 @@ fn view_debug_realtime(model: Model) -> List(Element(Msg)) {
             let latest = case dict.get(model.debug_latest, tgt) {
               Ok(v) -> v
               Error(Nil) -> ""
+            }
+            let count = case dict.get(model.debug_counts, tgt) {
+              Ok(c) -> c
+              Error(Nil) -> 0
             }
             let is_open = set.contains(model.debug_expanded, tgt)
             html.li([attr.class("border border-zinc-700 rounded p-2")], [
@@ -5064,6 +5166,9 @@ fn view_debug_realtime(model: Model) -> List(Element(Msg)) {
                 [
                   html.summary([event.on_click(DebugToggleExpanded(tgt))], [
                     html.code([], [html.text(tgt)]),
+                    html.span([attr.class("ml-2 text-zinc-400")], [
+                      html.text("(" <> int.to_string(count) <> ")"),
+                    ]),
                   ]),
                   html.pre([attr.class("whitespace-pre-wrap text-xs mt-2")], [
                     html.text(latest),

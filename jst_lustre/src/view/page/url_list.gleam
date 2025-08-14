@@ -8,13 +8,13 @@ import lustre/attribute as attr
 import lustre/element.{type Element}
 import lustre/element/html
 
-import view/ui
 import utils/http.{type HttpError}
 import utils/mouse
 import utils/remote_data.{
   type RemoteData, Errored, Loaded, NotInitialized, Pending,
 }
 import utils/short_url.{type ShortUrl}
+import view/ui
 
 pub type Callbacks(msg) {
   Callbacks(

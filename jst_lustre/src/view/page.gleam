@@ -1,6 +1,3 @@
-
-
-
 import article.{type Article}
 import gleam/list
 import gleam/option.{None, Some}
@@ -36,7 +33,6 @@ pub type Page {
   PageUrlShortInfo(
     short: String,
     session_authenticated: session.SessionAuthenticated,
-
   )
 
   // UI Components showcase

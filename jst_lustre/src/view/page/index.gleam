@@ -1,9 +1,9 @@
-import view/ui
 import gleam/option.{Some}
 import gleam/uri
 import lustre/attribute as attr
 import lustre/element.{type Element}
 import lustre/element/html
+import view/ui
 
 pub fn view(msg_nav_to: fn(uri.Uri) -> msg) -> List(Element(msg)) {
   let assert Ok(nats_uri) = uri.parse("/article/nats-all-the-way-down")

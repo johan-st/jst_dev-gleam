@@ -10,6 +10,7 @@ import utils/remote_data.{Errored, Loaded, NotInitialized, Pending}
 
 import view/page/partials/article_partials as parts
 import view/ui
+
 pub fn view_article_page(
   article: Article,
   _sess: session.Session,
