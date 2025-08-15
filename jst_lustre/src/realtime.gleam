@@ -39,6 +39,10 @@ pub opaque type Msg {
   ArticleDelete(String)
   ArticleHistory(String)
   ArticleRevision(String, Int)
+  // Article real-time updates
+  ArticleUpdated(String, ArticleResponse) // id, article
+  ArticleCreated(String, ArticleResponse) // id, article
+  ArticleDeleted(String) // id
   // target, raw json
   Noop
 }
@@ -370,6 +374,19 @@ pub fn article_revision(id: String, revision: Int) -> Msg {
   ArticleRevision(id, revision)
 }
 
+// Article real-time update helpers
+pub fn article_updated(id: String, article: ArticleResponse) -> Msg {
+  ArticleUpdated(id, article)
+}
+
+pub fn article_created(id: String, article: ArticleResponse) -> Msg {
+  ArticleCreated(id, article)
+}
+
+pub fn article_deleted(id: String) -> Msg {
+  ArticleDeleted(id)
+}
+
 // ---------- Internals ----------
 
 fn handle_ws_event(event: ws.WebSocketEvent) -> Msg {
@@ -390,7 +407,51 @@ fn handle_incoming_text(text: String, model: Model) -> #(Model, Effect(Msg)) {
   let parsed = json.parse(from: text, using: decoder)
   case parsed {
     Ok(target) -> {
-      #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
+      // Check if this is an article update message
+      case target {
+        "article" -> {
+          // Parse article update message
+          let article_decoder = {
+            use op <- decode.field("op", decode.string)
+            use key <- decode.field("key", decode.string)
+            use article <- decode.field("article", decode.dynamic)
+            decode.success(#(op, key, article))
+          }
+          let article_parsed = json.parse(from: text, using: article_decoder)
+          case article_parsed {
+            Ok(#(op, key, article_data)) -> {
+              case op {
+                "put" -> {
+                  // Article created or updated
+                  case decode_article_response(article_data) {
+                    Ok(article) -> {
+                      #(model, effect.from(fn(dispatch) { 
+                        dispatch(ArticleUpdated(key, article)) 
+                      }))
+                    }
+                    Error(_) -> {
+                      #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
+                    }
+                  }
+                }
+                "delete" -> {
+                  // Article deleted
+                  #(model, effect.from(fn(dispatch) { dispatch(ArticleDeleted(key)) }))
+                }
+                _ -> {
+                  #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
+                }
+              }
+            }
+            Error(_) -> {
+              #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
+            }
+          }
+        }
+        _ -> {
+          #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
+        }
+      }
     }
     Error(_) -> #(model, effect.none())
   }
@@ -412,6 +473,92 @@ fn encode_envelope(
 }
 
 // no id needed in Elm-style API
+
+fn decode_article_response(data: dynamic.Dynamic) -> Result(ArticleResponse, String) {
+  case data {
+    dynamic.String(s) -> {
+      // Try to parse as JSON string
+      case json.parse(from: s, using: article_response_decoder()) {
+        Ok(article) -> Ok(article)
+        Error(e) -> Error("Failed to parse article JSON: " <> e)
+      }
+    }
+    dynamic.Map(map) -> {
+      // Parse from dynamic map
+      case decode_article_from_dynamic(data) {
+        Ok(article) -> Ok(article)
+        Error(e) -> Error("Failed to decode article: " <> e)
+      }
+    }
+    _ -> Error("Invalid article data format")
+  }
+}
+
+fn decode_article_from_dynamic(data: dynamic.Dynamic) -> Result(ArticleResponse, String) {
+  let decoder = {
+    use id <- decode.field("id", decode.string)
+    use slug <- decode.field("slug", decode.string)
+    use title <- decode.field("title", decode.string)
+    use subtitle <- decode.field("subtitle", decode.string)
+    use leading <- decode.field("leading", decode.string)
+    use author <- decode.field("author", decode.string)
+    use published_at <- decode.field("published_at", decode.int)
+    use tags <- decode.field("tags", decode.list(decode.string))
+    use content <- decode.field("content", decode.optional(decode.string))
+    use revision <- decode.field("revision", decode.int)
+    use struct_version <- decode.field("struct_version", decode.int)
+    
+    decode.success(
+      ArticleResponse(
+        id: id,
+        slug: slug,
+        title: title,
+        subtitle: subtitle,
+        leading: leading,
+        author: author,
+        published_at: published_at,
+        tags: tags,
+        content: content,
+        revision: revision,
+        struct_version: struct_version,
+      )
+    )
+  }
+  
+  case dynamic.decode(data, decoder) {
+    Ok(article) -> Ok(article)
+    Error(e) -> Error(dynamic.to_string(e))
+  }
+}
+
+fn article_response_decoder() -> decode.Decoder(ArticleResponse) {
+  decode.map8(
+    ArticleResponse,
+    decode.field("id", decode.string),
+    decode.field("slug", decode.string),
+    decode.field("title", decode.string),
+    decode.field("subtitle", decode.string),
+    decode.field("leading", decode.string),
+    decode.field("author", decode.string),
+    decode.field("published_at", decode.int),
+    decode.field("tags", decode.list(decode.string)),
+    fn(id, slug, title, subtitle, leading, author, published_at, tags) {
+      ArticleResponse(
+        id: id,
+        slug: slug,
+        title: title,
+        subtitle: subtitle,
+        leading: leading,
+        author: author,
+        published_at: published_at,
+        tags: tags,
+        content: None,
+        revision: 0,
+        struct_version: 1,
+      )
+    },
+  )
+}
 
 fn encode_update_request(req: ArticleUpdateRequest) -> json.Json {
   let fields = list.filter_map(

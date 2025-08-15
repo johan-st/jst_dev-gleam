@@ -171,7 +171,7 @@ func userIDFromRequest(r *http.Request) string {
 func authorizeInitial(l *jst_log.Logger, s *server, userID string) capabilities {
 	caps := capabilities{
 		Subjects: []string{"time.>"},
-		Buckets:  map[string][]string{"article": {">"}},
+		Buckets:  map[string][]string{"article": {">"}}, // Read-only access to article bucket
 		Commands: []string{"article_list", "article_get", "article_create", "article_update", "article_delete", "article_history", "article_revision"},
 		Streams:  map[string][]string{},
 	}
@@ -412,58 +412,141 @@ func (c *rtClient) handleKVSub(bucket, pattern string) {
 	if !c.isAllowedKV(bucket, pattern) {
 		return
 	}
-	kv, err := c.srv.js.KeyValue(bucket)
-	if err != nil {
-		return
-	}
-	var watcher nats.KeyWatcher
-	if pattern != "" {
-		// try pattern-specific watch if supported; otherwise fallback to WatchAll and filter client-side
-		w, werr := kv.Watch(pattern)
-		if werr == nil {
-			watcher = w
+	
+	// For article bucket, ensure read-only access
+	if bucket == "article" {
+		// Only allow watching, not modifying
+		kv, err := c.srv.js.KeyValue(bucket)
+		if err != nil {
+			return
+		}
+		var watcher nats.KeyWatcher
+		if pattern != "" {
+			// try pattern-specific watch if supported; otherwise fallback to WatchAll and filter client-side
+			w, werr := kv.Watch(pattern)
+			if werr == nil {
+				watcher = w
+			} else {
+				watcher, _ = kv.WatchAll()
+			}
 		} else {
 			watcher, _ = kv.WatchAll()
 		}
-	} else {
-		watcher, _ = kv.WatchAll()
-	}
-	if watcher == nil {
-		return
-	}
-	c.kvWatchers[bucket] = watcher
-	go func() {
-		for {
-			select {
-			case <-c.ctx.Done():
-				_ = watcher.Stop()
-				return
-			case entry := <-watcher.Updates():
-				if entry == nil {
-					continue
-				}
-				// If we had to fallback to WatchAll, filter by pattern here
-				if pattern != "" && !subjectMatch(pattern, entry.Key()) {
-					continue
-				}
-				var opStr string
-				switch entry.Operation() {
-				case nats.KeyValueDelete:
-					opStr = "delete"
-				case nats.KeyValuePurge:
-					opStr = "purge"
-				default:
-					opStr = "put"
-				}
-				c.send(serverMsg{Op: "msg", Target: bucket, Data: map[string]interface{}{
-					"key":   entry.Key(),
-					"value": string(entry.Value()),
-					"rev":   entry.Revision(),
-					"op":    opStr,
-				}})
-			}
+		if watcher == nil {
+			return
 		}
-	}()
+		c.kvWatchers[bucket] = watcher
+		go func() {
+			for {
+				select {
+				case <-c.ctx.Done():
+					_ = watcher.Stop()
+					return
+				case entry := <-watcher.Updates():
+					if entry == nil {
+						continue
+					}
+					// If we had to fallback to WatchAll, filter by pattern here
+					if pattern != "" && !subjectMatch(pattern, entry.Key()) {
+						continue
+					}
+					var opStr string
+					switch entry.Operation() {
+					case nats.KeyValueDelete:
+						opStr = "delete"
+					case nats.KeyValuePurge:
+						opStr = "purge"
+					default:
+						opStr = "put"
+					}
+					
+					// For articles, parse the value and send structured data
+					if bucket == "article" {
+						var articleData map[string]interface{}
+						if err := json.Unmarshal(entry.Value(), &articleData); err == nil {
+							c.send(serverMsg{Op: "msg", Target: bucket, Data: map[string]interface{}{
+								"key":      entry.Key(),
+								"article":  articleData,
+								"rev":      entry.Revision(),
+								"op":       opStr,
+								"timestamp": time.Now().Unix(),
+							}})
+						} else {
+							// Fallback to raw value if parsing fails
+							c.send(serverMsg{Op: "msg", Target: bucket, Data: map[string]interface{}{
+								"key":   entry.Key(),
+								"value": string(entry.Value()),
+								"rev":   entry.Revision(),
+								"op":    opStr,
+							}})
+						}
+					} else {
+						// For other buckets, send raw data
+						c.send(serverMsg{Op: "msg", Target: bucket, Data: map[string]interface{}{
+							"key":   entry.Key(),
+							"value": string(entry.Value()),
+							"rev":   entry.Revision(),
+							"op":    opStr,
+						}})
+					}
+				}
+			}
+		}()
+	} else {
+		// Handle other buckets as before
+		kv, err := c.srv.js.KeyValue(bucket)
+		if err != nil {
+			return
+		}
+		var watcher nats.KeyWatcher
+		if pattern != "" {
+			// try pattern-specific watch if supported; otherwise fallback to WatchAll and filter client-side
+			w, werr := kv.Watch(pattern)
+			if werr == nil {
+				watcher = w
+			} else {
+				watcher, _ = kv.WatchAll()
+			}
+		} else {
+			watcher, _ = kv.WatchAll()
+		}
+		if watcher == nil {
+			return
+		}
+		c.kvWatchers[bucket] = watcher
+		go func() {
+			for {
+				select {
+				case <-c.ctx.Done():
+					_ = watcher.Stop()
+					return
+				case entry := <-watcher.Updates():
+					if entry == nil {
+						continue
+					}
+					// If we had to fallback to WatchAll, filter by pattern here
+					if pattern != "" && !subjectMatch(pattern, entry.Key()) {
+						continue
+					}
+					var opStr string
+					switch entry.Operation() {
+					case nats.KeyValueDelete:
+						opStr = "delete"
+					case nats.KeyValuePurge:
+						opStr = "purge"
+					default:
+						opStr = "put"
+					}
+					c.send(serverMsg{Op: "msg", Target: bucket, Data: map[string]interface{}{
+						"key":   entry.Key(),
+						"value": string(entry.Value()),
+						"rev":   entry.Revision(),
+						"op":    opStr,
+					}})
+				}
+			}
+		}()
+	}
 }
 
 func (c *rtClient) handleJSSub(stream string, startSeq uint64, batch int, filter string) {
