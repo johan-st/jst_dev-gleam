@@ -2,6 +2,7 @@ import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/int
 import gleam/json
+import gleam/list
 import gleam/string
 import utils/http
 
@@ -47,7 +48,12 @@ pub fn json_error(error: json.DecodeError) -> String {
       "unexpected sequence: " <> expected
     }
     json.UnexpectedFormat(errors) -> {
-      "unexpected format\n" <> dynamic_error_list(errors)
+      "unexpected format\n" <> list.map(errors, fn(error) { 
+        case error {
+          dynamic.DecodeError(expected, found, path) -> 
+            decode.DecodeError(expected: expected, found: found, path: path)
+        }
+      }) |> decode_error_list
     }
     json.UnableToDecode(errors) -> {
       "unable to decode\n" <> decode_error_list(errors)
@@ -55,33 +61,7 @@ pub fn json_error(error: json.DecodeError) -> String {
   }
 }
 
-// gleam/dynamic
 
-fn dynamic_error_list(errors: List(dynamic.DecodeError)) -> String {
-  case errors {
-    [] -> {
-      "no errors"
-    }
-    [error, ..errors] -> {
-      dynamic_error(error) <> "\n" <> dynamic_error_list(errors)
-    }
-  }
-}
-
-fn dynamic_error(error: dynamic.DecodeError) -> String {
-  case error {
-    dynamic.DecodeError(expected, found, path) -> {
-      "expected: "
-      <> expected
-      <> ", found: "
-      <> found
-      <> ", path: "
-      <> string.join(path, "/")
-    }
-  }
-}
-
-// gleam/dynamic/decode
 
 fn decode_error_list(errors: List(decode.DecodeError)) -> String {
   case errors {

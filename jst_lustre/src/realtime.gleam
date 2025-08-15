@@ -1,3 +1,4 @@
+import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/json
 import gleam/list
@@ -33,8 +34,71 @@ pub opaque type Msg {
   Unsubscribe(String)
   KvSubscribe(String)
   Incoming(String, String)
+  // Article operations
+  ArticleList
+  ArticleGet(String)
+  ArticleCreate(ArticleCreateRequest)
+  ArticleUpdate(String, ArticleUpdateRequest)
+  ArticleDelete(String)
+  ArticleHistory(String)
+  ArticleRevision(String, Int)
+  // Article real-time updates
+  ArticleUpdated(String, ArticleResponse) // id, article
+  ArticleCreated(String, ArticleResponse) // id, article
+  ArticleDeleted(String) // id
   // target, raw json
   Noop
+}
+
+/// Article creation request
+pub type ArticleCreateRequest {
+  ArticleCreateRequest(
+    title: String,
+    subtitle: String,
+    leading: String,
+    content: String,
+    tags: List(String),
+    published_at: Int,
+  )
+}
+
+/// Article update request
+pub type ArticleUpdateRequest {
+  ArticleUpdateRequest(
+    title: Option(String),
+    subtitle: Option(String),
+    leading: Option(String),
+    content: Option(String),
+    tags: Option(List(String)),
+    published_at: Option(Int),
+  )
+}
+
+/// Article response from server
+pub type ArticleResponse {
+  ArticleResponse(
+    id: String,
+    slug: String,
+    title: String,
+    subtitle: String,
+    leading: String,
+    author: String,
+    published_at: Int,
+    tags: List(String),
+    content: Option(String),
+    revision: Int,
+    struct_version: Int,
+  )
+}
+
+/// Article list response
+pub type ArticleListResponse {
+  ArticleListResponse(articles: List(ArticleResponse))
+}
+
+/// Article history response
+pub type ArticleHistoryResponse {
+  ArticleHistoryResponse(revisions: List(ArticleResponse))
 }
 
 // ---------- Public API ----------
@@ -106,7 +170,11 @@ pub fn update(msg: Msg, model: Model) -> #(Model, Effect(Msg)) {
         |> list.map(fn(bucket) {
           encode_envelope("kv_sub", bucket, None, json.object([]))
         })
-      let all_messages = list.append(resend_subjects, resend_kv_buckets)
+      
+      // Auto-subscribe to article KV updates for real-time data
+      let article_sub = encode_envelope("kv_sub", "article", None, json.object([#("pattern", json.string(">"))]))
+      
+      let all_messages = list.append(resend_subjects, list.append(resend_kv_buckets, [article_sub]))
       let send_effect = case all_messages {
         [] -> effect.none()
         msgs ->
@@ -168,6 +236,183 @@ pub fn update(msg: Msg, model: Model) -> #(Model, Effect(Msg)) {
       #(Model(..model, kv_buckets: kv_buckets), send_eff)
     }
 
+    // Article operations
+    ArticleList -> {
+      let send_eff = case model.socket {
+        Some(sock) ->
+          ws.send(sock, encode_envelope("article_list", "", None, json.object([])))
+        None -> effect.none()
+      }
+      #(model, send_eff)
+    }
+
+    ArticleGet(id) -> {
+      let send_eff = case model.socket {
+        Some(sock) ->
+          ws.send(
+            sock,
+            encode_envelope("article_get", "", None, json.object([#("id", json.string(id))])),
+          )
+        None -> effect.none()
+      }
+      #(model, send_eff)
+    }
+
+    ArticleCreate(req) -> {
+      let data = json.object([
+        #("title", json.string(req.title)),
+        #("subtitle", json.string(req.subtitle)),
+        #("leading", json.string(req.leading)),
+        #("content", json.string(req.content)),
+                        #("tags", json.array(from: req.tags, of: json.string)),
+        #("published_at", json.int(req.published_at)),
+      ])
+      let send_eff = case model.socket {
+        Some(sock) ->
+          ws.send(sock, encode_envelope("article_create", "", None, data))
+        None -> effect.none()
+      }
+      #(model, send_eff)
+    }
+
+    ArticleUpdate(id, req) -> {
+      let update_data = json.object([
+        #("id", json.string(id)),
+        #("data", encode_update_request(req)),
+      ])
+      let send_eff = case model.socket {
+        Some(sock) ->
+          ws.send(sock, encode_envelope("article_update", "", None, update_data))
+        None -> effect.none()
+      }
+      #(model, send_eff)
+    }
+
+    ArticleDelete(id) -> {
+      let send_eff = case model.socket {
+        Some(sock) ->
+          ws.send(
+            sock,
+            encode_envelope("article_delete", "", None, json.object([#("id", json.string(id))])),
+          )
+        None -> effect.none()
+      }
+      #(model, send_eff)
+    }
+
+    ArticleHistory(id) -> {
+      let send_eff = case model.socket {
+        Some(sock) ->
+          ws.send(
+            sock,
+            encode_envelope("article_history", "", None, json.object([#("id", json.string(id))])),
+          )
+        None -> effect.none()
+      }
+      #(model, send_eff)
+    }
+
+    ArticleRevision(id, revision) -> {
+      let send_eff = case model.socket {
+        Some(sock) ->
+          ws.send(
+            sock,
+            encode_envelope(
+              "article_revision",
+              "",
+              None,
+              json.object([
+                #("id", json.string(id)),
+                #("revision", json.int(revision)),
+              ]),
+            ),
+          )
+        None -> effect.none()
+      }
+      #(model, send_eff)
+    }
+
+    ArticleUpdated(id, article) -> {
+      let send_eff = case model.socket {
+        Some(sock) ->
+          ws.send(
+            sock,
+            encode_envelope(
+              "article_updated",
+              "",
+              None,
+              json.object([
+                #("id", json.string(id)),
+                #("article", json.object([
+                  #("id", json.string(article.id)),
+                  #("slug", json.string(article.slug)),
+                  #("title", json.string(article.title)),
+                  #("subtitle", json.string(article.subtitle)),
+                  #("leading", json.string(article.leading)),
+                  #("author", json.string(article.author)),
+                  #("published_at", json.int(article.published_at)),
+                  #("tags", json.array(from: article.tags, of: json.string)),
+                  #("content", json.string(article.content |> option.unwrap(""))),
+                  #("revision", json.int(article.revision)),
+                  #("struct_version", json.int(article.struct_version)),
+                ])),
+              ]),
+            ),
+          )
+        None -> effect.none()
+      }
+      #(model, send_eff)
+    }
+
+    ArticleCreated(id, article) -> {
+      let send_eff = case model.socket {
+        Some(sock) ->
+          ws.send(
+            sock,
+            encode_envelope(
+              "article_created",
+              "",
+              None,
+              json.object([
+                #("id", json.string(id)),
+                #("article", json.object([
+                  #("id", json.string(article.id)),
+                  #("slug", json.string(article.slug)),
+                  #("title", json.string(article.title)),
+                  #("subtitle", json.string(article.subtitle)),
+                  #("leading", json.string(article.leading)),
+                  #("author", json.string(article.author)),
+                  #("published_at", json.int(article.published_at)),
+                  #("tags", json.array(from: article.tags, of: json.string)),
+                  #("content", json.string(article.content |> option.unwrap(""))),
+                  #("revision", json.int(article.revision)),
+                  #("struct_version", json.int(article.struct_version)),
+                ])),
+              ]),
+            ),
+          )
+        None -> effect.none()
+      }
+      #(model, send_eff)
+    }
+
+    ArticleDeleted(id) -> {
+      let send_eff = case model.socket {
+        Some(sock) ->
+          ws.send(
+            sock,
+            encode_envelope(
+              "article_deleted",
+              "",
+              None,
+              json.object([#("id", json.string(id))]),
+            ),
+          )
+        None -> effect.none()
+      }
+      #(model, send_eff)
+    }
+
     Noop -> #(model, effect.none())
   }
 }
@@ -183,6 +428,82 @@ pub fn unsubscribe(subject: String) -> Msg {
 
 pub fn kv_subscribe(bucket: String) -> Msg {
   KvSubscribe(bucket)
+}
+
+// Article operation helpers
+pub fn article_list() -> Msg {
+  ArticleList
+}
+
+pub fn article_get(id: String) -> Msg {
+  ArticleGet(id)
+}
+
+pub fn article_create(
+  title: String,
+  subtitle: String,
+  leading: String,
+  content: String,
+  tags: List(String),
+  published_at: Int,
+) -> Msg {
+  ArticleCreate(
+    ArticleCreateRequest(
+      title: title,
+      subtitle: subtitle,
+      leading: leading,
+      content: content,
+      tags: tags,
+      published_at: published_at,
+    )
+  )
+}
+
+pub fn article_update(
+  id: String,
+  title: Option(String),
+  subtitle: Option(String),
+  leading: Option(String),
+  content: Option(String),
+  tags: Option(List(String)),
+  published_at: Option(Int),
+) -> Msg {
+  ArticleUpdate(
+    id,
+    ArticleUpdateRequest(
+      title: title,
+      subtitle: subtitle,
+      leading: leading,
+      content: content,
+      tags: tags,
+      published_at: published_at,
+    )
+  )
+}
+
+pub fn article_delete(id: String) -> Msg {
+  ArticleDelete(id)
+}
+
+pub fn article_history(id: String) -> Msg {
+  ArticleHistory(id)
+}
+
+pub fn article_revision(id: String, revision: Int) -> Msg {
+  ArticleRevision(id, revision)
+}
+
+// Article real-time update helpers
+pub fn article_updated(id: String, article: ArticleResponse) -> Msg {
+  ArticleUpdated(id, article)
+}
+
+pub fn article_created(id: String, article: ArticleResponse) -> Msg {
+  ArticleCreated(id, article)
+}
+
+pub fn article_deleted(id: String) -> Msg {
+  ArticleDeleted(id)
 }
 
 // ---------- Internals ----------
@@ -205,7 +526,51 @@ fn handle_incoming_text(text: String, model: Model) -> #(Model, Effect(Msg)) {
   let parsed = json.parse(from: text, using: decoder)
   case parsed {
     Ok(target) -> {
-      #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
+      // Check if this is an article update message
+      case target {
+        "article" -> {
+          // Parse article update message
+          let article_decoder = {
+            use op <- decode.field("op", decode.string)
+            use key <- decode.field("key", decode.string)
+            use article <- decode.field("article", decode.dynamic)
+            decode.success(#(op, key, article))
+          }
+          let article_parsed = json.parse(from: text, using: article_decoder)
+          case article_parsed {
+            Ok(#(op, key, article_data)) -> {
+              case op {
+                "put" -> {
+                  // Article created or updated
+                  case decode_article_response(article_data) {
+                    Ok(article) -> {
+                      #(model, effect.from(fn(dispatch) { 
+                        dispatch(ArticleUpdated(key, article)) 
+                      }))
+                    }
+                    Error(_) -> {
+                      #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
+                    }
+                  }
+                }
+                "delete" -> {
+                  // Article deleted
+                  #(model, effect.from(fn(dispatch) { dispatch(ArticleDeleted(key)) }))
+                }
+                _ -> {
+                  #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
+                }
+              }
+            }
+            Error(_) -> {
+              #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
+            }
+          }
+        }
+        _ -> {
+          #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
+        }
+      }
     }
     Error(_) -> #(model, effect.none())
   }
@@ -227,6 +592,120 @@ fn encode_envelope(
 }
 
 // no id needed in Elm-style API
+
+fn decode_article_response(data: dynamic.Dynamic) -> Result(ArticleResponse, String) {
+  // Parse from dynamic data directly
+  case decode_article_from_dynamic(data) {
+    Ok(article) -> Ok(article)
+    Error(e) -> Error("Failed to decode article: " <> e)
+  }
+}
+
+fn decode_article_from_dynamic(data: dynamic.Dynamic) -> Result(ArticleResponse, String) {
+  let decoder = {
+    use id <- decode.field("id", decode.string)
+    use slug <- decode.field("slug", decode.string)
+    use title <- decode.field("title", decode.string)
+    use subtitle <- decode.field("subtitle", decode.string)
+    use leading <- decode.field("leading", decode.string)
+    use author <- decode.field("author", decode.string)
+    use published_at <- decode.field("published_at", decode.int)
+    use tags <- decode.field("tags", decode.list(decode.string))
+    use content <- decode.field("content", decode.optional(decode.string))
+    use revision <- decode.field("revision", decode.int)
+    use struct_version <- decode.field("struct_version", decode.int)
+    
+    decode.success(
+      ArticleResponse(
+        id: id,
+        slug: slug,
+        title: title,
+        subtitle: subtitle,
+        leading: leading,
+        author: author,
+        published_at: published_at,
+        tags: tags,
+        content: content,
+        revision: revision,
+        struct_version: struct_version,
+      )
+    )
+  }
+  
+  case decode.run(data, decoder) {
+    Ok(article) -> Ok(article)
+    Error(e) -> Error("Decode error: " <> string.inspect(e))
+  }
+}
+
+fn article_response_decoder() -> decode.Decoder(ArticleResponse) {
+  use id <- decode.field("id", decode.string)
+  use slug <- decode.field("slug", decode.string)
+  use title <- decode.field("title", decode.string)
+  use subtitle <- decode.field("subtitle", decode.string)
+  use leading <- decode.field("leading", decode.string)
+  use author <- decode.field("author", decode.string)
+  use published_at <- decode.field("published_at", decode.int)
+  use tags <- decode.field("tags", decode.list(decode.string))
+  use content <- decode.field("content", decode.optional(decode.string))
+  use revision <- decode.field("revision", decode.int)
+  use struct_version <- decode.field("struct_version", decode.int)
+  
+  decode.success(
+    ArticleResponse(
+      id: id,
+      slug: slug,
+      title: title,
+      subtitle: subtitle,
+      leading: leading,
+      author: author,
+      published_at: published_at,
+      tags: tags,
+      content: content,
+      revision: revision,
+      struct_version: struct_version,
+    )
+  )
+}
+
+fn encode_update_request(req: ArticleUpdateRequest) -> json.Json {
+  let fields = list.append(
+    list.append(
+      list.append(
+        list.append(
+          list.append(
+            case req.title {
+              Some(title) -> [#("title", json.string(title))]
+              None -> []
+            },
+            case req.subtitle {
+              Some(subtitle) -> [#("subtitle", json.string(subtitle))]
+              None -> []
+            }
+          ),
+          case req.leading {
+            Some(leading) -> [#("leading", json.string(leading))]
+            None -> []
+          }
+        ),
+        case req.content {
+          Some(content) -> [#("content", json.string(content))]
+          None -> []
+        }
+      ),
+      case req.tags {
+        Some(tags) -> [#("tags", json.array(from: tags, of: json.string))]
+        None -> []
+      }
+    ),
+    case req.published_at {
+      Some(published_at) -> [#("published_at", json.int(published_at))]
+      None -> []
+    }
+  )
+  
+  json.object(fields)
+}
 
 fn backoff_ms(retries: Int) -> Int {
   case retries {

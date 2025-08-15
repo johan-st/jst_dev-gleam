@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Articles Example</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .section {
+            border: 1px solid #ddd;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .output {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin-top: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .status {
+            padding: 10px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+        }
+        .status.connected {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.connecting {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Articles Example</h1>
+    
+    <div class="status disconnected" id="connectionStatus">
+        Disconnected
+    </div>
+
+    <div class="container">
+        <div class="section">
+            <h2>Connection</h2>
+            <div class="form-group">
+                <label for="wsUrl">WebSocket URL:</label>
+                <input type="text" id="wsUrl" value="ws://localhost:8080/ws" />
+            </div>
+            <button onclick="connect()" id="connectBtn">Connect</button>
+            <button onclick="disconnect()" id="disconnectBtn" disabled>Disconnect</button>
+            
+            <h3>Real-time Updates</h3>
+            <button onclick="subscribeToArticles()" id="subscribeBtn" disabled>Subscribe to Article Changes</button>
+            <button onclick="unsubscribeFromArticles()" id="unsubscribeBtn" disabled>Unsubscribe</button>
+            
+            <div class="output" id="realtimeOutput">
+                <p>Real-time updates will appear here...</p>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Article Operations</h2>
+            
+            <h3>List Articles</h3>
+            <button onclick="listArticles()" id="listBtn" disabled>List All Articles</button>
+            
+            <h3>Get Article</h3>
+            <div class="form-group">
+                <label for="articleId">Article ID:</label>
+                <input type="text" id="articleId" placeholder="Enter article ID" />
+            </div>
+            <button onclick="getArticle()" id="getBtn" disabled>Get Article</button>
+            
+            <h3>Create Article</h3>
+            <div class="form-group">
+                <label for="articleTitle">Title:</label>
+                <input type="text" id="articleTitle" placeholder="Article title" />
+            </div>
+            <div class="form-group">
+                <label for="articleSubtitle">Subtitle:</label>
+                <input type="text" id="articleSubtitle" placeholder="Article subtitle" />
+            </div>
+            <div class="form-group">
+                <label for="articleLeading">Leading:</label>
+                <textarea id="articleLeading" placeholder="Article leading paragraph" rows="3"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="articleContent">Content:</label>
+                <textarea id="articleContent" placeholder="Article content" rows="5"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="articleTags">Tags (comma-separated):</label>
+                <input type="text" id="articleTags" placeholder="tag1, tag2, tag3" />
+            </div>
+            <button onclick="createArticle()" id="createBtn" disabled>Create Article</button>
+            
+            <h3>Update Article</h3>
+            <div class="form-group">
+                <label for="updateArticleId">Article ID:</label>
+                <input type="text" id="updateArticleId" placeholder="Enter article ID to update" />
+            </div>
+            <div class="form-group">
+                <label for="updateTitle">New Title:</label>
+                <input type="text" id="updateTitle" placeholder="New title" />
+            </div>
+            <button onclick="updateArticle()" id="updateBtn" disabled>Update Article</button>
+            
+            <h3>Delete Article</h3>
+            <div class="form-group">
+                <label for="deleteArticleId">Article ID:</label>
+                <input type="text" id="deleteArticleId" placeholder="Enter article ID to delete" />
+            </div>
+            <button onclick="deleteArticle()" id="deleteBtn" disabled>Delete Article</button>
+            
+            <h3>Article History</h3>
+            <div class="form-group">
+                <label for="historyArticleId">Article ID:</label>
+                <input type="text" id="historyArticleId" placeholder="Enter article ID for history" />
+            </div>
+            <button onclick="getArticleHistory()" id="historyBtn" disabled>Get History</button>
+            
+            <div class="output" id="operationOutput">
+                <p>Operation results will appear here...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let messageId = 0;
+        let isSubscribedToArticles = false;
+
+        function updateConnectionStatus(status, message) {
+            const statusEl = document.getElementById('connectionStatus');
+            statusEl.className = `status ${status}`;
+            statusEl.textContent = message;
+        }
+
+        function updateButtonStates(connected) {
+            const buttons = ['connectBtn', 'disconnectBtn', 'subscribeBtn', 'listBtn', 'getBtn', 'createBtn', 'updateBtn', 'deleteBtn', 'historyBtn'];
+            buttons.forEach(id => {
+                const btn = document.getElementById(id);
+                if (id === 'connectBtn') {
+                    btn.disabled = connected;
+                } else {
+                    btn.disabled = !connected;
+                }
+            });
+        }
+
+        function connect() {
+            const url = document.getElementById('wsUrl').value;
+            updateConnectionStatus('connecting', 'Connecting...');
+            
+            try {
+                ws = new WebSocket(url);
+                
+                ws.onopen = function() {
+                    updateConnectionStatus('connected', 'Connected');
+                    updateButtonStates(true);
+                    logMessage('realtimeOutput', 'WebSocket connected successfully');
+                };
+                
+                ws.onmessage = function(event) {
+                    handleMessage(JSON.parse(event.data));
+                };
+                
+                ws.onclose = function() {
+                    updateConnectionStatus('disconnected', 'Disconnected');
+                    updateButtonStates(false);
+                    isSubscribedToArticles = false;
+                    logMessage('realtimeOutput', 'WebSocket disconnected');
+                };
+                
+                ws.onerror = function(error) {
+                    updateConnectionStatus('disconnected', 'Connection Error');
+                    logMessage('realtimeOutput', 'WebSocket error: ' + error);
+                };
+                
+            } catch (error) {
+                updateConnectionStatus('disconnected', 'Connection Failed');
+                logMessage('realtimeOutput', 'Failed to create WebSocket: ' + error.message);
+            }
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+
+        function sendMessage(op, target, data, inbox) {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                logMessage('operationOutput', 'WebSocket not connected');
+                return;
+            }
+
+            const message = {
+                op: op,
+                target: target,
+                data: data,
+                inbox: inbox || `inbox_${++messageId}`
+            };
+
+            ws.send(JSON.stringify(message));
+            return message.inbox;
+        }
+
+        function handleMessage(msg) {
+            console.log('Received message:', msg);
+            
+            if (msg.op === 'msg' && msg.target === 'article') {
+                // Real-time article update
+                logMessage('realtimeOutput', `Article update: ${msg.data.op} - ${msg.data.key} (rev: ${msg.data.rev})`);
+            } else if (msg.op === 'reply') {
+                // Operation response
+                logMessage('operationOutput', `Response for ${msg.inbox}: ${JSON.stringify(msg.data, null, 2)}`);
+            } else if (msg.op === 'error') {
+                logMessage('operationOutput', `Error: ${JSON.stringify(msg.data, null, 2)}`);
+            }
+        }
+
+        function logMessage(outputId, message) {
+            const output = document.getElementById(outputId);
+            const timestamp = new Date().toLocaleTimeString();
+            output.innerHTML += `<p><strong>[${timestamp}]</strong> ${message}</p>`;
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function subscribeToArticles() {
+            if (isSubscribedToArticles) return;
+            
+            sendMessage('kv_sub', 'article', { pattern: '>' });
+            isSubscribedToArticles = true;
+            document.getElementById('subscribeBtn').disabled = true;
+            document.getElementById('unsubscribeBtn').disabled = false;
+            logMessage('realtimeOutput', 'Subscribed to article changes');
+        }
+
+        function unsubscribeFromArticles() {
+            if (!isSubscribedToArticles) return;
+            
+            sendMessage('unsub', 'article');
+            isSubscribedToArticles = false;
+            document.getElementById('subscribeBtn').disabled = false;
+            document.getElementById('unsubscribeBtn').disabled = true;
+            logMessage('realtimeOutput', 'Unsubscribed from article changes');
+        }
+
+        function listArticles() {
+            sendMessage('article_list', '', {});
+        }
+
+        function getArticle() {
+            const id = document.getElementById('articleId').value;
+            if (!id) {
+                logMessage('operationOutput', 'Please enter an article ID');
+                return;
+            }
+            sendMessage('article_get', '', { id: id });
+        }
+
+        function createArticle() {
+            const title = document.getElementById('articleTitle').value;
+            const subtitle = document.getElementById('articleSubtitle').value;
+            const leading = document.getElementById('articleLeading').value;
+            const content = document.getElementById('articleContent').value;
+            const tags = document.getElementById('articleTags').value.split(',').map(t => t.trim()).filter(t => t);
+            
+            if (!title) {
+                logMessage('operationOutput', 'Please enter a title');
+                return;
+            }
+
+            const articleData = {
+                title: title,
+                subtitle: subtitle,
+                leading: leading,
+                content: content,
+                tags: tags,
+                published_at: Math.floor(Date.now() / 1000)
+            };
+
+            sendMessage('article_create', '', articleData);
+        }
+
+        function updateArticle() {
+            const id = document.getElementById('updateArticleId').value;
+            const title = document.getElementById('updateTitle').value;
+            
+            if (!id) {
+                logMessage('operationOutput', 'Please enter an article ID');
+                return;
+            }
+            if (!title) {
+                logMessage('operationOutput', 'Please enter a new title');
+                return;
+            }
+
+            const updateData = {
+                id: id,
+                data: {
+                    title: title
+                }
+            };
+
+            sendMessage('article_update', '', updateData);
+        }
+
+        function deleteArticle() {
+            const id = document.getElementById('deleteArticleId').value;
+            if (!id) {
+                logMessage('operationOutput', 'Please enter an article ID');
+                return;
+            }
+            sendMessage('article_delete', '', { id: id });
+        }
+
+        function getArticleHistory() {
+            const id = document.getElementById('historyArticleId').value;
+            if (!id) {
+                logMessage('operationOutput', 'Please enter an article ID');
+                return;
+            }
+            sendMessage('article_history', '', { id: id });
+        }
+
+        // Initialize
+        updateButtonStates(false);
+    </script>
+</body>
+</html>
