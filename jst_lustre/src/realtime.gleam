@@ -31,8 +31,67 @@ pub opaque type Msg {
   Subscribe(String)
   Unsubscribe(String)
   Incoming(String, String)
+  // Article operations
+  ArticleList
+  ArticleGet(String)
+  ArticleCreate(ArticleCreateRequest)
+  ArticleUpdate(String, ArticleUpdateRequest)
+  ArticleDelete(String)
+  ArticleHistory(String)
+  ArticleRevision(String, Int)
   // target, raw json
   Noop
+}
+
+/// Article creation request
+pub type ArticleCreateRequest {
+  ArticleCreateRequest(
+    title: String,
+    subtitle: String,
+    leading: String,
+    content: String,
+    tags: List(String),
+    published_at: Int,
+  )
+}
+
+/// Article update request
+pub type ArticleUpdateRequest {
+  ArticleUpdateRequest(
+    title: Option(String),
+    subtitle: Option(String),
+    leading: Option(String),
+    content: Option(String),
+    tags: Option(List(String)),
+    published_at: Option(Int),
+  )
+}
+
+/// Article response from server
+pub type ArticleResponse {
+  ArticleResponse(
+    id: String,
+    slug: String,
+    title: String,
+    subtitle: String,
+    leading: String,
+    author: String,
+    published_at: Int,
+    tags: List(String),
+    content: Option(String),
+    revision: Int,
+    struct_version: Int,
+  )
+}
+
+/// Article list response
+pub type ArticleListResponse {
+  ArticleListResponse(articles: List(ArticleResponse))
+}
+
+/// Article history response
+pub type ArticleHistoryResponse {
+  ArticleHistoryResponse(revisions: List(ArticleResponse))
 }
 
 // ---------- Public API ----------
@@ -139,6 +198,102 @@ pub fn update(msg: Msg, model: Model) -> #(Model, Effect(Msg)) {
       #(Model(..model, subjects: subjects), send_eff)
     }
 
+    // Article operations
+    ArticleList -> {
+      let send_eff = case model.socket {
+        Some(sock) ->
+          ws.send(sock, encode_envelope("article_list", "", None, json.object([])))
+        None -> effect.none()
+      }
+      #(model, send_eff)
+    }
+
+    ArticleGet(id) -> {
+      let send_eff = case model.socket {
+        Some(sock) ->
+          ws.send(
+            sock,
+            encode_envelope("article_get", "", None, json.object([#("id", json.string(id))])),
+          )
+        None -> effect.none()
+      }
+      #(model, send_eff)
+    }
+
+    ArticleCreate(req) -> {
+      let data = json.object([
+        #("title", json.string(req.title)),
+        #("subtitle", json.string(req.subtitle)),
+        #("leading", json.string(req.leading)),
+        #("content", json.string(req.content)),
+        #("tags", json.array(list.map(json.string, req.tags))),
+        #("published_at", json.int(req.published_at)),
+      ])
+      let send_eff = case model.socket {
+        Some(sock) ->
+          ws.send(sock, encode_envelope("article_create", "", None, data))
+        None -> effect.none()
+      }
+      #(model, send_eff)
+    }
+
+    ArticleUpdate(id, req) -> {
+      let update_data = json.object([
+        #("id", json.string(id)),
+        #("data", encode_update_request(req)),
+      ])
+      let send_eff = case model.socket {
+        Some(sock) ->
+          ws.send(sock, encode_envelope("article_update", "", None, update_data))
+        None -> effect.none()
+      }
+      #(model, send_eff)
+    }
+
+    ArticleDelete(id) -> {
+      let send_eff = case model.socket {
+        Some(sock) ->
+          ws.send(
+            sock,
+            encode_envelope("article_delete", "", None, json.object([#("id", json.string(id))])),
+          )
+        None -> effect.none()
+      }
+      #(model, send_eff)
+    }
+
+    ArticleHistory(id) -> {
+      let send_eff = case model.socket {
+        Some(sock) ->
+          ws.send(
+            sock,
+            encode_envelope("article_history", "", None, json.object([#("id", json.string(id))])),
+          )
+        None -> effect.none()
+      }
+      #(model, send_eff)
+    }
+
+    ArticleRevision(id, revision) -> {
+      let send_eff = case model.socket {
+        Some(sock) ->
+          ws.send(
+            sock,
+            encode_envelope(
+              "article_revision",
+              "",
+              None,
+              json.object([
+                #("id", json.string(id)),
+                #("revision", json.int(revision)),
+              ]),
+            ),
+          )
+        None -> effect.none()
+      }
+      #(model, send_eff)
+    }
+
     Noop -> #(model, effect.none())
   }
 }
@@ -150,6 +305,69 @@ pub fn subscribe(subject: String) -> Msg {
 
 pub fn unsubscribe(subject: String) -> Msg {
   Unsubscribe(subject)
+}
+
+// Article operation helpers
+pub fn article_list() -> Msg {
+  ArticleList
+}
+
+pub fn article_get(id: String) -> Msg {
+  ArticleGet(id)
+}
+
+pub fn article_create(
+  title: String,
+  subtitle: String,
+  leading: String,
+  content: String,
+  tags: List(String),
+  published_at: Int,
+) -> Msg {
+  ArticleCreate(
+    ArticleCreateRequest(
+      title: title,
+      subtitle: subtitle,
+      leading: leading,
+      content: content,
+      tags: tags,
+      published_at: published_at,
+    )
+  )
+}
+
+pub fn article_update(
+  id: String,
+  title: Option(String),
+  subtitle: Option(String),
+  leading: Option(String),
+  content: Option(String),
+  tags: Option(List(String)),
+  published_at: Option(Int),
+) -> Msg {
+  ArticleUpdate(
+    id,
+    ArticleUpdateRequest(
+      title: title,
+      subtitle: subtitle,
+      leading: leading,
+      content: content,
+      tags: tags,
+      published_at: published_at,
+    )
+  )
+}
+
+pub fn article_delete(id: String) -> Msg {
+  ArticleDelete(id)
+}
+
+pub fn article_history(id: String) -> Msg {
+  ArticleHistory(id)
+}
+
+pub fn article_revision(id: String, revision: Int) -> Msg {
+  ArticleRevision(id, revision)
 }
 
 // ---------- Internals ----------
@@ -194,6 +412,30 @@ fn encode_envelope(
 }
 
 // no id needed in Elm-style API
+
+fn encode_update_request(req: ArticleUpdateRequest) -> json.Json {
+  let fields = list.filter_map(
+    fn(pair) {
+      case pair {
+        #("title", value) -> Some(#("title", value))
+        #("subtitle", value) -> Some(#("subtitle", value))
+        #("leading", value) -> Some(#("leading", value))
+        #("content", value) -> Some(#("content", value))
+        #("tags", value) -> Some(#("tags", value))
+        #("published_at", value) -> Some(#("published_at", value))
+      }
+    },
+    [
+      #("title", option.map(json.string, req.title)),
+      #("subtitle", option.map(json.string, req.subtitle)),
+      #("leading", option.map(json.string, req.leading)),
+      #("content", option.map(json.string, req.content)),
+      #("tags", option.map(fn(tags) { json.array(list.map(json.string, tags)) }, req.tags)),
+      #("published_at", option.map(json.int, req.published_at)),
+    ],
+  )
+  json.object(fields)
+}
 
 fn backoff_ms(retries: Int) -> Int {
   case retries {
