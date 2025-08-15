@@ -1952,11 +1952,13 @@ fn convert_article_response_to_article(
 }
 
 fn get_article_from_cache_by_slug(model: Model, slug: String) -> Option(Article) {
-  case list.find(
-    dict.values(model.article_cache),
-    fn(article_response) { article_response.slug == slug },
-  ) {
-    Ok(article_response) -> Some(convert_article_response_to_article(article_response))
+  case
+    list.find(dict.values(model.article_cache), fn(article_response) {
+      article_response.slug == slug
+    })
+  {
+    Ok(article_response) ->
+      Some(convert_article_response_to_article(article_response))
     Error(Nil) -> None
   }
 }
@@ -2320,12 +2322,12 @@ fn view(model: Model) -> Element(Msg) {
 fn format_unix_locale(raw_json: String) -> String {
   // Parse { data: { unix: Int } } and format as YYYY-MM-DD HH:MM:SS
   let decoder = {
-    use unix <- decode.subfield(["data", "unix"], decode.int)
+    use unix <- decode.subfield(["data", "unixMilli"], decode.int)
     decode.success(unix)
   }
   case json.parse(from: raw_json, using: decoder) {
     Ok(unix) -> {
-      let dt = birl.from_unix(unix)
+      let dt = birl.from_unix_milli(unix)
       birl.to_naive_date_string(dt) <> " " <> birl.to_time_string(dt)
     }
     Error(_) -> raw_json
@@ -2334,16 +2336,22 @@ fn format_unix_locale(raw_json: String) -> String {
 
 fn client_server_time_diff_ms(raw_json: String) -> String {
   let decoder = {
-    use unix <- decode.subfield(["data", "unix"], decode.int)
+    use unix <- decode.subfield(["data", "unixMilli"], decode.int)
     decode.success(unix)
   }
   case json.parse(from: raw_json, using: decoder) {
     Ok(unix) -> {
       let now_ms = birl.to_unix_milli(birl.now())
-      let server_ms = unix * 1000
+      let server_ms = unix
       let diff_ms = now_ms - server_ms
-      let magnitude = case diff_ms < 0 { True -> -diff_ms False -> diff_ms }
-      let sign = case diff_ms < 0 { True -> "-" False -> "+" }
+      let magnitude = case diff_ms < 0 {
+        True -> -diff_ms
+        False -> diff_ms
+      }
+      let sign = case diff_ms < 0 {
+        True -> "-"
+        False -> "+"
+      }
       sign <> int.to_string(magnitude) <> " ms"
     }
     Error(_) -> "n/a"
@@ -3757,7 +3765,7 @@ fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
             ]),
             html.span([attr.class("text-zinc-300")], [
               html.text(
-                birl.from_unix_milli(url.created_at * 1000)
+                birl.from_unix(url.created_at)
                 |> birl.to_naive_date_string,
               ),
             ]),
@@ -3768,7 +3776,7 @@ fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
             ]),
             html.span([attr.class("text-zinc-300")], [
               html.text(
-                birl.from_unix_milli(url.updated_at * 1000)
+                birl.from_unix(url.updated_at)
                 |> birl.to_naive_date_string,
               ),
             ]),
@@ -3872,7 +3880,7 @@ fn view_url_info_page(model: Model, short_code: String) -> List(Element(Msg)) {
                   ]),
                   html.span([], [
                     html.text(
-                      birl.from_unix_milli(url.created_at * 1000)
+                      birl.from_unix(url.created_at)
                       |> birl.to_naive_date_string,
                     ),
                   ]),
@@ -3883,7 +3891,7 @@ fn view_url_info_page(model: Model, short_code: String) -> List(Element(Msg)) {
                   ]),
                   html.span([], [
                     html.text(
-                      birl.from_unix_milli(url.updated_at * 1000)
+                      birl.from_unix(url.updated_at)
                       |> birl.to_naive_date_string,
                     ),
                   ]),
@@ -5336,7 +5344,9 @@ fn view_debug_realtime(model: Model) -> List(Element(Msg)) {
         ]),
         html.div([attr.class("pt-1")], [
           html.text("Client - server time diff: "),
-          html.code([], [html.text(client_server_time_diff_ms(model.realtime_time))]),
+          html.code([], [
+            html.text(client_server_time_diff_ms(model.realtime_time)),
+          ]),
         ]),
         html.div([attr.class("pt-1")], [
           html.text("KV buckets: "),
