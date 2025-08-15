@@ -2218,6 +2218,24 @@ fn format_unix_locale(raw_json: String) -> String {
   }
 }
 
+fn client_server_time_diff_ms(raw_json: String) -> String {
+  let decoder = {
+    use unix <- decode.subfield(["data", "unix"], decode.int)
+    decode.success(unix)
+  }
+  case json.parse(from: raw_json, using: decoder) {
+    Ok(unix) -> {
+      let now_ms = birl.to_unix_milli(birl.now())
+      let server_ms = unix * 1000
+      let diff_ms = now_ms - server_ms
+      let magnitude = case diff_ms < 0 { True -> -diff_ms False -> diff_ms }
+      let sign = case diff_ms < 0 { True -> "-" False -> "+" }
+      sign <> int.to_string(magnitude) <> " ms"
+    }
+    Error(_) -> "n/a"
+  }
+}
+
 // Decoder for KV article updates
 fn article_kv_decoder() -> decode.Decoder(ArticleKvUpdate) {
   use key <- decode.field("key", decode.string)
@@ -5173,6 +5191,10 @@ fn view_debug_realtime(model: Model) -> List(Element(Msg)) {
         html.div([attr.class("pt-1")], [
           html.text("Current time: "),
           html.code([], [html.text(format_unix_locale(model.realtime_time))]),
+        ]),
+        html.div([attr.class("pt-1")], [
+          html.text("Client - server time diff: "),
+          html.code([], [html.text(client_server_time_diff_ms(model.realtime_time))]),
         ]),
         html.div([attr.class("pt-1")], [
           html.text("KV buckets: "),
