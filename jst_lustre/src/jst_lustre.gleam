@@ -394,6 +394,8 @@ type Model {
     // realtime
     realtime: realtime.Model,
     realtime_time: String,
+    // Article cache from WebSocket
+    article_cache: Dict(String, realtime.ArticleResponse),
   )
 }
 
@@ -497,6 +499,12 @@ pub type Msg {
   ProfileSaveResponse(Result(user.UserUpdateResponse, HttpError))
   ProfileChangePasswordClicked
   ProfileChangePasswordResponse(Result(user.UserUpdateResponse, HttpError))
+
+  // WebSocket Article Operations
+  ArticleListRequested
+  ArticleListReceived(List(realtime.ArticleResponse))
+  ArticleCacheUpdated(String, realtime.ArticleResponse) // id, article
+  ArticleCacheDeleted(String) // id
 
   // Debug realtime
   DebugWsIncoming(String)
@@ -822,6 +830,35 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         }
       }
     }
+
+    // WebSocket Article Operations
+    ArticleListRequested -> {
+      #(model, effect.from(fn(dispatch) {
+        dispatch(RealtimeMsg(realtime.article_list()))
+      }))
+    }
+
+    ArticleListReceived(articles) -> {
+      let article_cache = list.fold(
+        over: articles,
+        from: dict.new(),
+        with: fn(acc, article) {
+          dict.insert(acc, article.id, article)
+        }
+      )
+      #(Model(..model, article_cache: article_cache), effect.none())
+    }
+
+    ArticleCacheUpdated(id, article) -> {
+      let article_cache = dict.insert(model.article_cache, id, article)
+      #(Model(..model, article_cache: article_cache), effect.none())
+    }
+
+    ArticleCacheDeleted(id) -> {
+      let article_cache = dict.delete(model.article_cache, id)
+      #(model, effect.none())
+    }
+
     // ARTICLE DRAFT
     ArticleDraftUpdatedSlug(article, text) -> {
       case article {
@@ -1822,12 +1859,36 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           let counts = dict.insert(model.debug_counts, target, prev_count + 1)
           let latest = dict.insert(model.debug_latest, target, raw)
           let targets = set.insert(model.debug_targets, target)
-          let time_model = case target {
+          let updated_model = case target {
             "time.seconds" -> Model(..model, realtime_time: raw)
+            "article" -> {
+              // Parse article message and dispatch appropriate action
+              let article_decoder = {
+                use op <- decode.field("op", decode.string)
+                use key <- decode.field("key", decode.string)
+                decode.success(#(op, key))
+              }
+              case json.parse(from: raw, using: article_decoder) {
+                Ok(#(op, key)) -> {
+                  case op {
+                    "put" -> {
+                      // Article created or updated - will be handled by realtime module
+                      model
+                    }
+                    "delete" -> {
+                      // Article deleted - will be handled by realtime module
+                      model
+                    }
+                    _ -> model
+                  }
+                }
+                Error(_) -> model
+              }
+            }
             _ -> model
           }
           Model(
-            ..time_model,
+            ..updated_model,
             debug_ws_msg_count: total,
             debug_counts: counts,
             debug_latest: latest,
@@ -1836,9 +1897,63 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         }
         _ -> model
       }
+      // Handle realtime effects that might contain article messages
+      let #(final_model, final_effect) = case realtime_effect {
+        effect.None -> #(model, effect.none())
+        effect.Batch(effects) -> {
+          // Check if any of the effects contain article messages
+          let article_effects = list.filter(effects, fn(eff) {
+            case eff {
+              effect.From(_) -> True
+              _ -> False
+            }
+          })
+          case article_effects {
+            [] -> #(model, effect.none())
+            _ -> {
+              // Convert realtime article messages to main model messages
+              let converted_effects = list.map(article_effects, fn(eff) {
+                case eff {
+                  effect.From(dispatch_fn) -> {
+                    effect.from(fn(dispatch) {
+                      dispatch_fn(fn(msg) {
+                        case msg {
+                          realtime.ArticleUpdated(id, article) -> dispatch(ArticleCacheUpdated(id, article))
+                          realtime.ArticleCreated(id, article) -> dispatch(ArticleCacheUpdated(id, article))
+                          realtime.ArticleDeleted(id) -> dispatch(ArticleCacheDeleted(id))
+                          realtime.ArticleListReceived(articles) -> dispatch(ArticleListReceived(articles))
+                          _ -> dispatch(RealtimeMsg(msg))
+                        }
+                      })
+                    })
+                  }
+                  _ -> effect.none()
+                }
+              })
+              #(model, effect.batch(converted_effects))
+            }
+          }
+        }
+        effect.From(dispatch_fn) -> {
+          // Convert single realtime message
+          effect.from(fn(dispatch) {
+            dispatch_fn(fn(msg) {
+              case msg {
+                realtime.ArticleUpdated(id, article) -> dispatch(ArticleCacheUpdated(id, article))
+                realtime.ArticleCreated(id, article) -> dispatch(ArticleCacheUpdated(id, article))
+                realtime.ArticleDeleted(id) -> dispatch(ArticleCacheDeleted(id))
+                realtime.ArticleListReceived(articles) -> dispatch(ArticleListReceived(articles))
+                _ -> dispatch(RealtimeMsg(msg))
+              }
+            })
+          })
+        }
+        _ -> effect.map(realtime_effect, RealtimeMsg)
+      }
+      
       #(
         Model(..model, realtime: realtime_model),
-        effect.map(realtime_effect, RealtimeMsg),
+        final_effect,
       )
     }
   }
@@ -1858,6 +1973,39 @@ fn fetch_articles_model(model_effect_touple) -> #(Model, Effect(Msg)) {
   #(model, effect)
 }
 
+// Helper functions for article cache
+fn get_articles_from_cache(model: Model) -> List(Article) {
+  dict.values(model.article_cache)
+  |> list.map(fn(article_response) {
+    convert_article_response_to_article(article_response)
+  })
+}
+
+fn convert_article_response_to_article(article_response: realtime.ArticleResponse) -> Article {
+  ArticleV1(
+    id: article_response.id,
+    slug: article_response.slug,
+    revision: int.from_string(article_response.revision) |> result.unwrap(1),
+    author: article_response.author,
+    tags: article_response.tags,
+    published_at: Some(birl.from_unix(int.to_float(article_response.published_at / 1000))),
+    title: article_response.title,
+    subtitle: article_response.subtitle,
+    leading: article_response.leading,
+    content: case article_response.content {
+      Some(content) -> rd.data(content)
+      None -> rd.data("")
+    },
+    draft: None,
+  )
+}
+
+fn get_article_from_cache_by_slug(model: Model, slug: String) -> Option(Article) {
+  dict.values(model.article_cache)
+  |> list.find(fn(article_response) { article_response.slug == slug })
+  |> option.map(convert_article_response_to_article)
+}
+
 fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
   let route = routes.from_uri(uri)
   case route {
@@ -1866,53 +2014,64 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
       #(model, effect.none())
     }
     routes.Article(slug) -> {
-      case model.articles {
-        NotInitialized -> #(
-          Model(
-            ..model,
-            route:,
-            articles: model.articles |> rd.to_pending(None),
-          ),
-          article.article_metadata_get(ArticleMetaGot, model.base_uri),
-        )
-        Loaded(articles, _, _) -> {
-          let #(effect, articles_updated) =
-            list.map_fold(
-              over: articles,
-              from: effect.none(),
-              with: fn(eff, art) {
-                case art.slug == slug, art.content {
-                  True, NotInitialized -> #(
-                    effect.batch([
-                      eff,
-                      article.article_get(
-                        ArticleGot(art.id, _),
-                        art.id,
-                        model.base_uri,
-                      ),
-                    ]),
-                    ArticleV1(
-                      ..art,
-                      content: art.content |> rd.to_pending(None),
-                    ),
-                  )
-                  _, _ -> #(eff, art)
-                }
-              },
-            )
-          let model =
-            Model(
-              ..model,
-              route:,
-              articles: model.articles |> rd.to_loaded(articles_updated),
-            )
-            |> recompute_bindings_for_current_page
-          #(model, effect)
+      // First check if we have articles in the cache
+      case get_article_from_cache_by_slug(model, slug) {
+        Some(cached_article) -> {
+          // Use cached article data
+          let model = Model(..model, route:)
+          #(model |> recompute_bindings_for_current_page, effect.none())
         }
-        _ -> {
-          let model =
-            recompute_bindings_for_current_page(Model(..model, route:))
-          #(model, effect.none())
+        None -> {
+          // Fall back to HTTP API
+          case model.articles {
+            NotInitialized -> #(
+              Model(
+                ..model,
+                route:,
+                articles: model.articles |> rd.to_pending(None),
+              ),
+              article.article_metadata_get(ArticleMetaGot, model.base_uri),
+            )
+            Loaded(articles, _, _) -> {
+              let #(effect, articles_updated) =
+                list.map_fold(
+                  over: articles,
+                  from: effect.none(),
+                  with: fn(eff, art) {
+                    case art.slug == slug, art.content {
+                      True, NotInitialized -> #(
+                        effect.batch([
+                          eff,
+                          article.article_get(
+                            ArticleGot(art.id, _),
+                            art.id,
+                            model.base_uri,
+                          ),
+                        ]),
+                        ArticleV1(
+                          ..art,
+                          content: art.content |> rd.to_pending(None),
+                        ),
+                      )
+                      _, _ -> #(eff, art)
+                    }
+                  },
+                )
+              let model =
+                Model(
+                  ..model,
+                  route:,
+                  articles: model.articles |> rd.to_loaded(articles_updated),
+                )
+                |> recompute_bindings_for_current_page
+              #(model, effect)
+            }
+            _ -> {
+              let model =
+                recompute_bindings_for_current_page(Model(..model, route:))
+              #(model, effect.none())
+            }
+          }
         }
       }
     }
@@ -2576,29 +2735,46 @@ fn page_from_model(model: Model) -> page.Page {
   case model.route {
     routes.Index -> page.PageIndex
     routes.Articles -> {
-      case model.articles {
-        Pending(_, _) -> page.PageArticleListLoading
-        NotInitialized -> page.PageError(page.Other("articles not initialized"))
-        Errored(error, _) ->
-          page.PageError(page.HttpError(error, "Failed to load article list"))
-        Loaded(articles_list, _, _) ->
-          page.PageArticleList(articles_list, model.session)
+      // First check if we have articles in the cache
+      case dict.size(model.article_cache) > 0 {
+        True -> {
+          let cached_articles = get_articles_from_cache(model)
+          page.PageArticleList(cached_articles, model.session)
+        }
+        False -> {
+          // Fall back to HTTP API
+          case model.articles {
+            Pending(_, _) -> page.PageArticleListLoading
+            NotInitialized -> page.PageError(page.Other("articles not initialized"))
+            Errored(error, _) ->
+              page.PageError(page.HttpError(error, "Failed to load article list"))
+            Loaded(articles_list, _, _) ->
+              page.PageArticleList(articles_list, model.session)
+          }
+        }
       }
     }
     routes.Article(slug) -> {
-      case model.articles {
-        Pending(_, _) -> page.PageArticleListLoading
-        NotInitialized -> page.PageError(page.Other("articles not initialized"))
-        Errored(error, _) ->
-          page.PageError(page.HttpError(error, "Failed to load articles"))
-        Loaded(articles_list, _, _) -> {
-          case list.find(articles_list, fn(art) { art.slug == slug }) {
-            Ok(article) -> page.PageArticle(article, model.session)
-            Error(_) ->
-              page.PageError(page.ArticleNotFound(
-                slug,
-                page.get_available_slugs(articles_list),
-              ))
+      // First check if we have articles in the cache
+      case get_article_from_cache_by_slug(model, slug) {
+        Some(cached_article) -> page.PageArticle(cached_article, model.session)
+        None -> {
+          // Fall back to HTTP API
+          case model.articles {
+            Pending(_, _) -> page.PageArticleListLoading
+            NotInitialized -> page.PageError(page.Other("articles not initialized"))
+            Errored(error, _) ->
+              page.PageError(page.HttpError(error, "Failed to load articles"))
+            Loaded(articles_list, _, _) -> {
+              case list.find(articles_list, fn(art) { art.slug == slug }) {
+                Ok(article) -> page.PageArticle(article, model.session)
+                Error(_) ->
+                  page.PageError(page.ArticleNotFound(
+                    slug,
+                    page.get_available_slugs(articles_list),
+                  ))
+              }
+            }
           }
         }
       }
@@ -5077,6 +5253,8 @@ fn init(_) -> #(Model, Effect(Msg)) {
       // realtime
       realtime: rt_model,
       realtime_time: "",
+      // Article cache from WebSocket
+      article_cache: dict.new(),
     )
   let model = recompute_bindings_for_current_page(base_model)
   // Connect debug websocket
@@ -5100,6 +5278,11 @@ fn init(_) -> #(Model, Effect(Msg)) {
       dispatch(RealtimeMsg(realtime.kv_subscribe("article")))
     })
 
+  let request_article_list =
+    effect.from(fn(dispatch) {
+      dispatch(RealtimeMsg(realtime.article_list()))
+    })
+
   #(
     model,
     effect.batch([
@@ -5107,6 +5290,9 @@ fn init(_) -> #(Model, Effect(Msg)) {
       local_storage_effect,
       // effect_nav,
       session.auth_check(AuthCheckResponse, model.base_uri),
+      subscribe_time,
+      subscribe_article_kv,
+      request_article_list,
       key.setup(
         should_prevent_keydown(model.chords_available),
         KeyboardDown,
