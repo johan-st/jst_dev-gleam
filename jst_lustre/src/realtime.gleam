@@ -240,7 +240,7 @@ pub fn update(msg: Msg, model: Model) -> #(Model, Effect(Msg)) {
     ArticleList -> {
       let send_eff = case model.socket {
         Some(sock) ->
-          ws.send(sock, encode_envelope("article_list", "", None, json.object([])))
+          ws.send(sock, encode_envelope("article_list", "", Some("list_articles_1"), json.object([])))
         None -> effect.none()
       }
       #(model, send_eff)
@@ -533,16 +533,16 @@ fn handle_incoming_text(text: String, model: Model) -> #(Model, Effect(Msg)) {
           let article_decoder = {
             use op <- decode.field("op", decode.string)
             use key <- decode.field("key", decode.string)
-            use article <- decode.field("article", decode.dynamic)
-            decode.success(#(op, key, article))
+            use value <- decode.field("value", decode.dynamic)
+            decode.success(#(op, key, value))
           }
           let article_parsed = json.parse(from: text, using: article_decoder)
           case article_parsed {
-            Ok(#(op, key, article_data)) -> {
+            Ok(#(op, key, value_data)) -> {
               case op {
                 "put" -> {
                   // Article created or updated
-                  case decode_article_response(article_data) {
+                  case decode_article_response(value_data) {
                     Ok(article) -> {
                       #(model, effect.from(fn(dispatch) { 
                         dispatch(ArticleUpdated(key, article)) 
@@ -568,7 +568,62 @@ fn handle_incoming_text(text: String, model: Model) -> #(Model, Effect(Msg)) {
           }
         }
         _ -> {
-          #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
+          // Check if this is a reply message (for article operations)
+          let reply_decoder = {
+            use op <- decode.field("op", decode.string)
+            use inbox <- decode.field("inbox", decode.optional(decode.string))
+            use data <- decode.field("data", decode.dynamic)
+            decode.success(#(op, inbox, data))
+          }
+          case json.parse(from: text, using: reply_decoder) {
+            Ok(#(op, inbox, data)) -> {
+              case op {
+                "reply" -> {
+                  // Handle article list response
+                  case inbox {
+                    Some("list_articles_1") -> {
+                      // This is the article list response
+                                              case decode_article_list_response(data) {
+                          Ok(articles) -> {
+                            let articles_json = json.array(from: articles, of: fn(article) {
+                              json.object([
+                                #("id", json.string(article.id)),
+                                #("slug", json.string(article.slug)),
+                                #("title", json.string(article.title)),
+                                #("subtitle", json.string(article.subtitle)),
+                                #("leading", json.string(article.leading)),
+                                #("author", json.string(article.author)),
+                                #("published_at", json.int(article.published_at)),
+                                #("tags", json.array(from: article.tags, of: json.string)),
+                                #("content", json.string(article.content |> option.unwrap(""))),
+                                #("revision", json.int(article.revision)),
+                                #("struct_version", json.int(article.struct_version))
+                              ])
+                            })
+                            let response_data = json.object([#("articles", articles_json)])
+                            #(model, effect.from(fn(dispatch) { 
+                              dispatch(Incoming(target, json.to_string(response_data))) 
+                            }))
+                          }
+                          Error(_) -> {
+                            #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
+                          }
+                        }
+                    }
+                    _ -> {
+                      #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
+                    }
+                  }
+                }
+                _ -> {
+                  #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
+                }
+              }
+            }
+            Error(_) -> {
+              #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
+            }
+          }
         }
       }
     }
@@ -634,6 +689,18 @@ fn decode_article_from_dynamic(data: dynamic.Dynamic) -> Result(ArticleResponse,
   
   case decode.run(data, decoder) {
     Ok(article) -> Ok(article)
+    Error(e) -> Error("Decode error: " <> string.inspect(e))
+  }
+}
+
+fn decode_article_list_response(data: dynamic.Dynamic) -> Result(List(ArticleResponse), String) {
+  let decoder = {
+    use articles <- decode.field("articles", decode.list(article_response_decoder()))
+    decode.success(articles)
+  }
+  
+  case decode.run(data, decoder) {
+    Ok(articles) -> Ok(articles)
     Error(e) -> Error("Decode error: " <> string.inspect(e))
   }
 }
