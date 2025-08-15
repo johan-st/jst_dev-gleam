@@ -3,11 +3,8 @@ package main
 import (
 	"flag"
 	"log"
-	"os"
 
 	"jst_dev/server/talk"
-
-	"github.com/joho/godotenv"
 )
 
 // TODO: think this through.. atm all we need is an app name
@@ -19,9 +16,12 @@ type GlobalConfig struct {
 	WebPort      string
 	NtfyToken    string
 
-	AppName string
-	Talk    talk.Conf
-	Flags   Flags
+	AppName       string
+	Region        string
+	PrimaryRegion string
+
+	Talk  talk.Conf
+	Flags Flags
 }
 type Flags struct {
 	NatsEmbedded  bool
@@ -30,7 +30,7 @@ type Flags struct {
 }
 
 // loadConf returns a GlobalConfig instance with default settings for the talk component.
-func loadConf() (*GlobalConfig, error) {
+func loadConf(getenv func(string) string) (*GlobalConfig, error) {
 	var (
 		natsEmbedded, proxyFrontend bool
 		logLevel                    string
@@ -40,35 +40,33 @@ func loadConf() (*GlobalConfig, error) {
 	flag.StringVar(&logLevel, "log", "info", "set log level (debug, info, warn, error, fatal)")
 	flag.Parse()
 
-	_ = godotenv.Load()
-
-	envNatsJwt := os.Getenv("NATS_JWT")
+	envNatsJwt := getenv("NATS_JWT")
 	if envNatsJwt == "" {
 		log.Fatalf("missing env-var: NATS_JWT")
 	}
 
-	envNatsNkey := os.Getenv("NATS_NKEY")
+	envNatsNkey := getenv("NATS_NKEY")
 	if envNatsNkey == "" {
 		log.Fatalf("missing env-var: NKEY")
 	}
 
-	envJwtSecret := os.Getenv("JWT_SECRET")
+	envJwtSecret := getenv("JWT_SECRET")
 	if envJwtSecret == "" {
 		log.Fatalf("missing env-var: JWT_SECRET")
 	}
 
-	envHashSalt := os.Getenv("WEB_HASH_SALT")
+	envHashSalt := getenv("WEB_HASH_SALT")
 	if envHashSalt == "" {
 		log.Fatalf("missing env-var: WEB_HASH_SALT")
 	}
 
-	envPort := os.Getenv("PORT")
+	envPort := getenv("PORT")
 	if envPort == "" {
 		log.Fatalf("missing env-var: PORT")
 	}
 
 	// NTFY_TOKEN is optional
-	envNtfyToken := os.Getenv("NTFY_TOKEN")
+	envNtfyToken := getenv("NTFY_TOKEN")
 	if envNtfyToken == "" {
 		log.Fatalf("missing env-var: NTFY_TOKEN")
 	}
@@ -81,7 +79,9 @@ func loadConf() (*GlobalConfig, error) {
 		WebPort:      envPort,
 		NtfyToken:    envNtfyToken,
 
-		AppName: os.Getenv("FLY_APP_NAME") + "-" + os.Getenv("PRIMARY_REGION"),
+		AppName:       getenv("FLY_APP_NAME"),
+		Region:        getenv("FLY_REGION"),
+		PrimaryRegion: getenv("PRIMARY_REGION"),
 		Talk: talk.Conf{
 			ServerName:        "jst",
 			EnableLogging:     false,

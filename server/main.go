@@ -18,6 +18,7 @@ import (
 	web "jst_dev/server/web"
 	"jst_dev/server/who"
 
+	"github.com/joho/godotenv"
 	"github.com/nats-io/nats.go"
 )
 
@@ -25,13 +26,14 @@ import (
 // If an error occurs during startup or execution, it prints the error to standard error and exits with status code 1.
 func main() {
 	ctx := context.Background()
+	_ = godotenv.Load()
 	if err := run(
 		ctx,
 		// os.Args,
 		// os.Stdin,
 		// os.Stdout,
 		// os.Stderr,
-		// os.Getenv,
+		os.Getenv,
 		// os.Getwd,
 	); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
@@ -48,7 +50,7 @@ func run(
 	// stdin io.Reader, // For reading input
 	// stdout io.Writer, // For writing output
 	// stderr io.Writer, // For writing error logs
-	// getenv func(string) string, //	For reading environment variables
+	getenv func(string) string, //	For reading environment variables
 	// getwd func() (string, error), //	Get the working directory
 ) error {
 	cleanShutdown := &sync.WaitGroup{}
@@ -56,7 +58,7 @@ func run(
 	defer cancel()
 
 	// - conf
-	conf, err := loadConf()
+	conf, err := loadConf(getenv)
 	if err != nil {
 		return fmt.Errorf("load conf: %w", err)
 	}
@@ -91,6 +93,7 @@ func run(
 				conf.NatsJWT,
 				conf.NatsNKEY,
 			),
+			nats.Name(conf.AppName+"-"+conf.Region),
 			// Add connection event handlers
 			nats.DisconnectHandler(func(nc *nats.Conn) {
 				l.Error("NATS connection disconnected")
@@ -104,13 +107,12 @@ func run(
 			nats.ErrorHandler(func(nc *nats.Conn, sub *nats.Subscription, err error) {
 				l.Error("NATS error: %v", err)
 			}),
-			// Connection resilience options
-			nats.MaxReconnects(-1), // Unlimited reconnection attempts
-			nats.ReconnectWait(1*time.Second), // Wait 1 second between reconnection attempts
-			nats.ReconnectJitter(100*time.Millisecond, 1*time.Second), // Add jitter to reconnection timing
-			nats.Timeout(10*time.Second), // Connection timeout
-			nats.PingInterval(30*time.Second), // Send ping every 30 seconds
-			nats.MaxPingsOutstanding(3), // Allow up to 3 missed pings before considering connection lost
+			nats.MaxReconnects(60),
+			nats.ReconnectWait(1*time.Second),
+			nats.ReconnectJitter(100*time.Millisecond, 1*time.Second),
+			nats.Timeout(2*time.Second), 
+			nats.PingInterval(2*time.Second),
+			nats.MaxPingsOutstanding(2),
 		)
 
 		// }
@@ -210,7 +212,7 @@ func run(
 
 	// - time ticker publisher (NATS core)
 	go func() {
-		ticker := time.NewTicker(1 * time.Second)
+		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 		for {
 			select {
@@ -219,11 +221,11 @@ func run(
 			case t := <-ticker.C:
 				// Get Fly.io environment variables
 				flyAppName := os.Getenv("FLY_APP_NAME")
-				flyRegion := os.Getenv("PRIMARY_REGION")
+				flyRegion := os.Getenv("FLY_REGION")
 				
 				// Create payload with Fly.io identifiers
-				payload := fmt.Sprintf(`{"unix": %d, "fly_app_name": "%s", "fly_region": "%s"}`, 
-					t.Unix(), flyAppName, flyRegion)
+				payload := fmt.Sprintf(`{"unixMilli": %d, "fly_app_name": "%s", "fly_region": "%s"}`, 
+					t.UnixMilli(), flyAppName, flyRegion)
 				_ = nc.Publish("time.seconds", []byte(payload))
 			}
 		}
