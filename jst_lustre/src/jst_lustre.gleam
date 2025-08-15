@@ -2218,6 +2218,35 @@ fn format_unix_locale(raw_json: String) -> String {
   }
 }
 
+// Decoder for KV article updates
+fn article_kv_decoder() -> decode.Decoder(ArticleKvUpdate) {
+  use key <- decode.field("key", decode.string)
+  use revision <- decode.field("revision", decode.int)
+  use operation <- decode.field("op", decode.string)
+  use value <- decode.field("value", decode.string)
+ 
+  let article_value = case value {
+    "" -> None
+    _ -> None
+  }
+ 
+  decode.success(ArticleKvUpdate(
+    key:,
+    revision:,
+    operation:,
+    value: article_value,
+  ))
+}
+
+type ArticleKvUpdate {
+  ArticleKvUpdate(
+    key: String,
+    revision: Int,
+    operation: String,
+    value: Option(Article),
+  )
+}
+
 fn view_nav_hints_from_bindings(model: Model) -> Element(Msg) {
   let shift = set.contains(model.keys_down, key.Captured(key.Shift))
   let nav_items =
@@ -5065,6 +5094,11 @@ fn init(_) -> #(Model, Effect(Msg)) {
     effect.from(fn(dispatch) {
       dispatch(RealtimeMsg(realtime.subscribe("time.seconds")))
     })
+  
+  let subscribe_article_kv =
+    effect.from(fn(dispatch) {
+      dispatch(RealtimeMsg(realtime.kv_subscribe("article")))
+    })
 
   #(
     model,
@@ -5081,6 +5115,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
       window_events.setup(WindowUnfocused),
       effect.map(rt_init, RealtimeMsg),
       subscribe_time,
+      subscribe_article_kv,
     ]),
   )
 }
@@ -5090,6 +5125,7 @@ fn view_debug_realtime(model: Model) -> List(Element(Msg)) {
     model.debug_targets
     |> set.to_list
     |> list.sort(string.compare)
+
   [
     html.div([attr.class("max-w-3xl mx-auto p-4 space-y-4")], [
       html.h2([attr.class("text-xl font-bold")], [html.text("Realtime Debug")]),
@@ -5138,10 +5174,20 @@ fn view_debug_realtime(model: Model) -> List(Element(Msg)) {
           html.text("Current time: "),
           html.code([], [html.text(format_unix_locale(model.realtime_time))]),
         ]),
+        html.div([attr.class("pt-1")], [
+          html.text("KV buckets: "),
+          html.code([], [
+            html.text(
+              realtime.kv_buckets(model.realtime)
+              |> list.map(fn(bucket) { bucket })
+              |> string.join(", ")
+            ),
+          ]),
+        ]),
       ]),
       html.div([], [
         html.h3([attr.class("font-semibold mb-2")], [
-          html.text("Subscriptions (observed targets)"),
+          html.text("Active Subscriptions"),
         ]),
         html.ul(
           [attr.class("space-y-2")],
@@ -5155,6 +5201,68 @@ fn view_debug_realtime(model: Model) -> List(Element(Msg)) {
               Error(Nil) -> 0
             }
             let is_open = set.contains(model.debug_expanded, tgt)
+            
+            // Try to parse article KV updates for better display
+            let parsed_content = case tgt {
+              "article" -> {
+                case json.parse(from: latest, using: article_kv_decoder()) {
+                  Ok(update) -> {
+                    html.div([attr.class("space-y-2")], [
+                      html.div([attr.class("flex justify-between items-center")], [
+                        html.span([attr.class("text-sm font-medium text-blue-300")], [
+                          html.text("Article Update: " <> update.operation),
+                        ]),
+                        html.span([attr.class("text-xs text-zinc-400")], [
+                          html.text("Rev " <> int.to_string(update.revision)),
+                        ]),
+                      ]),
+                      html.div([attr.class("text-xs space-y-1")], [
+                        html.div([], [
+                          html.text("Key: "),
+                          html.code([attr.class("text-blue-400")], [
+                            html.text(update.key),
+                          ]),
+                        ]),
+                        case update.value {
+                          Some(article) -> {
+                            html.div([attr.class("mt-2 p-2 bg-zinc-900 rounded")], [
+                              html.div([attr.class("font-medium text-blue-300")], [
+                                html.text(article.title),
+                              ]),
+                              html.div([attr.class("text-xs text-zinc-400 mt-1")], [
+                                html.text("Slug: " <> article.slug),
+                              ]),
+                              html.div([attr.class("text-xs text-zinc-400")], [
+                                html.text("Author: " <> article.author),
+                              ]),
+                              html.div([attr.class("text-xs text-zinc-400")], [
+                                html.text("Tags: " <> string.join(article.tags, ", ")),
+                              ]),
+                            ])
+                          }
+                          None -> {
+                            html.div([attr.class("text-red-400 text-xs")], [
+                              html.text("Article deleted"),
+                            ])
+                          }
+                        },
+                      ]),
+                    ])
+                  }
+                  Error(_) -> {
+                    html.pre([attr.class("whitespace-pre-wrap text-xs")], [
+                      html.text(latest),
+                    ])
+                  }
+                }
+              }
+              _ -> {
+                html.pre([attr.class("whitespace-pre-wrap text-xs")], [
+                  html.text(latest),
+                ])
+              }
+            }
+            
             html.li([attr.class("border border-zinc-700 rounded p-2")], [
               html.details(
                 [
@@ -5170,9 +5278,7 @@ fn view_debug_realtime(model: Model) -> List(Element(Msg)) {
                       html.text("(" <> int.to_string(count) <> ")"),
                     ]),
                   ]),
-                  html.pre([attr.class("whitespace-pre-wrap text-xs mt-2")], [
-                    html.text(latest),
-                  ]),
+                  html.div([attr.class("mt-2")], [parsed_content]),
                 ],
               ),
             ])

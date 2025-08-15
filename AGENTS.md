@@ -30,9 +30,20 @@
 - Pattern matching for error handling
 - Explicit type annotations for public functions
 - Organize imports alphabetically
+- Use `case` for pattern matching
+  - Case expressions look like this:
+    ```gleam
+    case expression {
+      pattern -> {
+        expression
+      }
+      pattern -> {
+        expression
+      }
+    }
+    ```
 
 ### General
-- Write comprehensive tests for new functionality
 - Document public APIs with comments
 - Keep functions small and focused
 - Use descriptive variable names

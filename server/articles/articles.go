@@ -23,6 +23,7 @@ type ArticleRepo interface {
 	GetRevision(id uuid.UUID, revision uint64) (Article, error)
 	Context() context.Context
 	Purge() error
+	WatchAll() (jetstream.KeyWatcher, error)
 }
 
 type ArticleRepoWithWatchAll interface {
@@ -254,6 +255,8 @@ func (r *articleRepo) Context() context.Context {
 func (r *articleRepo) WatchAll() (jetstream.KeyWatcher, error) {
 	return r.kv.WatchAll(r.ctx)
 }
+
+
 
 func (r *articleRepo) Purge() error {
 	keys, err := r.kv.ListKeys(r.ctx)

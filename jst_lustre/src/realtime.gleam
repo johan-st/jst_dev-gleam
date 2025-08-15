@@ -19,6 +19,7 @@ pub opaque type Model {
     socket: Option(ws.WebSocket),
     retries: Int,
     subjects: set.Set(String),
+    kv_buckets: set.Set(String),
   )
 }
 
@@ -30,6 +31,7 @@ pub opaque type Msg {
   WsText(String)
   Subscribe(String)
   Unsubscribe(String)
+  KvSubscribe(String)
   Incoming(String, String)
   // target, raw json
   Noop
@@ -38,7 +40,7 @@ pub opaque type Msg {
 // ---------- Public API ----------
 
 pub fn init(path: String) -> #(Model, Effect(Msg)) {
-  let model = Model(path: path, socket: None, retries: 0, subjects: set.new())
+  let model = Model(path: path, socket: None, retries: 0, subjects: set.new(), kv_buckets: set.new())
   #(model, ws.init(path, handle_ws_event))
 }
 
@@ -73,6 +75,13 @@ pub fn subjects(model: Model) -> List(String) {
   |> list.sort(string.compare)
 }
 
+/// Current KV buckets list (sorted), for debug UI
+pub fn kv_buckets(model: Model) -> List(String) {
+  model.kv_buckets
+  |> set.to_list
+  |> list.sort(string.compare)
+}
+
 pub fn update(msg: Msg, model: Model) -> #(Model, Effect(Msg)) {
   case msg {
     Connect -> {
@@ -84,14 +93,21 @@ pub fn update(msg: Msg, model: Model) -> #(Model, Effect(Msg)) {
     }
 
     Connected(socket) -> {
-      // Reset retries and resubscribe all subjects
-      let resend =
+      // Reset retries and resubscribe all subjects and KV buckets
+      let resend_subjects =
         model.subjects
         |> set.to_list
         |> list.map(fn(subject) {
           encode_envelope("sub", subject, None, json.object([]))
         })
-      let send_effect = case resend {
+      let resend_kv_buckets =
+        model.kv_buckets
+        |> set.to_list
+        |> list.map(fn(bucket) {
+          encode_envelope("kv_sub", bucket, None, json.object([]))
+        })
+      let all_messages = list.append(resend_subjects, resend_kv_buckets)
+      let send_effect = case all_messages {
         [] -> effect.none()
         msgs ->
           msgs
@@ -139,6 +155,19 @@ pub fn update(msg: Msg, model: Model) -> #(Model, Effect(Msg)) {
       #(Model(..model, subjects: subjects), send_eff)
     }
 
+    KvSubscribe(bucket) -> {
+      let kv_buckets = set.insert(model.kv_buckets, bucket)
+      let send_eff = case model.socket {
+        Some(sock) ->
+          ws.send(
+            sock,
+            encode_envelope("kv_sub", bucket, None, json.object([])),
+          )
+        None -> effect.none()
+      }
+      #(Model(..model, kv_buckets: kv_buckets), send_eff)
+    }
+
     Noop -> #(model, effect.none())
   }
 }
@@ -150,6 +179,10 @@ pub fn subscribe(subject: String) -> Msg {
 
 pub fn unsubscribe(subject: String) -> Msg {
   Unsubscribe(subject)
+}
+
+pub fn kv_subscribe(bucket: String) -> Msg {
+  KvSubscribe(bucket)
 }
 
 // ---------- Internals ----------

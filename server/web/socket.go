@@ -199,10 +199,13 @@ func (c *rtClient) readLoop() {
 		}
 		switch m.Op {
 		case "sub":
+			c.log.Debug("Received sub message for target=%s", m.Target)
 			c.handleSub(m.Target)
 		case "unsub":
+			c.log.Debug("Received unsub message for target=%s", m.Target)
 			c.handleUnsub(m.Target)
 		case "kv_sub":
+			c.log.Debug("Received kv_sub message for target=%s", m.Target)
 			var opts struct {
 				Pattern string `json:"pattern"`
 			}
@@ -329,13 +332,17 @@ func (c *rtClient) handleUnsub(subject string) {
 }
 
 func (c *rtClient) handleKVSub(bucket, pattern string) {
+	c.log.Debug("handleKVSub called with bucket=%s, pattern=%s", bucket, pattern)
 	if !c.isAllowedKV(bucket, pattern) {
+		c.log.Debug("KV subscription not allowed for bucket=%s, pattern=%s", bucket, pattern)
 		return
 	}
 	kv, err := c.srv.js.KeyValue(bucket)
 	if err != nil {
+		c.log.Error("Failed to get KV bucket %s: %v", bucket, err)
 		return
 	}
+	c.log.Debug("Successfully got KV bucket %s", bucket)
 	var watcher nats.KeyWatcher
 	if pattern != "" {
 		// try pattern-specific watch if supported; otherwise fallback to WatchAll and filter client-side
@@ -349,8 +356,10 @@ func (c *rtClient) handleKVSub(bucket, pattern string) {
 		watcher, _ = kv.WatchAll()
 	}
 	if watcher == nil {
+		c.log.Error("Failed to create watcher for bucket %s", bucket)
 		return
 	}
+	c.log.Debug("Successfully created watcher for bucket %s", bucket)
 	c.kvWatchers[bucket] = watcher
 	go func() {
 		for {
