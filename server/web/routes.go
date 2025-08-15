@@ -63,7 +63,7 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 
 	// realtime websocket bridge
 	mux.Handle("GET /ws", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		HandleRealtimeWebSocket(l.WithBreadcrumb("ws"), nc, w, r)
+		HandleRealtimeWebSocket(l.WithBreadcrumb("ws"), nc, w, r, repo)
 	}))
 
 	// web

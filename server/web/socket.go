@@ -15,9 +15,11 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/nats-io/nats.go"
 
+	"jst_dev/server/articles"
 	"jst_dev/server/jst_log"
 	"jst_dev/server/who"
 	whoApi "jst_dev/server/who/api"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 // Unified protocol messages
@@ -87,8 +89,9 @@ type capabilities struct {
 }
 
 type server struct {
-	nc *nats.Conn
-	js nats.JetStreamContext
+	nc          *nats.Conn
+	js          nats.JetStreamContext
+	articleRepo articles.ArticleRepo
 }
 
 type rtClient struct {
@@ -97,7 +100,8 @@ type rtClient struct {
 	conn       *websocket.Conn
 	srv        *server
 	subs       map[string]*nats.Subscription
-	kvWatchers map[string]nats.KeyWatcher
+	kvWatchers map[string]interface{} // Can hold both nats.KeyWatcher and jetstream.KeyWatcher
+	articleRepo articles.ArticleRepo
 	sendCh     chan serverMsg
 	mu         sync.Mutex
 	ctx        context.Context
@@ -122,7 +126,7 @@ var upgrader = websocket.Upgrader{
 }
 
 // HandleRealtimeWebSocket upgrades the connection and serves the realtime bridge
-func HandleRealtimeWebSocket(l *jst_log.Logger, nc *nats.Conn, w http.ResponseWriter, r *http.Request) {
+func HandleRealtimeWebSocket(l *jst_log.Logger, nc *nats.Conn, w http.ResponseWriter, r *http.Request, repo articles.ArticleRepo) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		l.Error("ws upgrade: %v", err)
@@ -137,7 +141,7 @@ func HandleRealtimeWebSocket(l *jst_log.Logger, nc *nats.Conn, w http.ResponseWr
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &server{nc: nc, js: js}
+	s := &server{nc: nc, js: js, articleRepo: repo}
 
 	userID := userIDFromRequest(r)
 	c := &rtClient{
@@ -146,7 +150,8 @@ func HandleRealtimeWebSocket(l *jst_log.Logger, nc *nats.Conn, w http.ResponseWr
 		conn:       conn,
 		srv:        s,
 		subs:       make(map[string]*nats.Subscription),
-		kvWatchers: make(map[string]nats.KeyWatcher),
+		kvWatchers: make(map[string]interface{}),
+		articleRepo: repo,
 		sendCh:     make(chan serverMsg, 256),
 		ctx:        ctx,
 		cancel:     cancel,
@@ -252,7 +257,11 @@ func (c *rtClient) readLoop() {
 				Pattern string `json:"pattern"`
 			}
 			_ = json.Unmarshal(m.Data, &opts)
-			c.handleKVSub(m.Target, opts.Pattern)
+			if m.Target == "article" {
+				c.handleArticleKVSub(opts.Pattern)
+			} else {
+				c.handleKVSub(m.Target, opts.Pattern)
+			}
 		case "js_sub":
 			var opts struct {
 				StartSeq uint64 `json:"start_seq"`
@@ -312,7 +321,11 @@ func (c *rtClient) unsubscribeAll() {
 		_ = s.Unsubscribe()
 	}
 	for _, w := range c.kvWatchers {
-		_ = w.Stop()
+		if watcher, ok := w.(nats.KeyWatcher); ok {
+			_ = watcher.Stop()
+		} else if watcher, ok := w.(jetstream.KeyWatcher); ok {
+			_ = watcher.Stop()
+		}
 	}
 }
 
@@ -406,7 +419,11 @@ func (c *rtClient) handleUnsub(subject string) {
 		delete(c.subs, subject)
 	}
 	if w, ok := c.kvWatchers[subject]; ok {
-		_ = w.Stop()
+		if watcher, ok := w.(nats.KeyWatcher); ok {
+			_ = watcher.Stop()
+		} else if watcher, ok := w.(jetstream.KeyWatcher); ok {
+			_ = watcher.Stop()
+		}
 		delete(c.kvWatchers, subject)
 	}
 }
@@ -612,7 +629,11 @@ func (c *rtClient) applyCapabilities(newCaps capabilities) {
 			}
 		}
 		if !allowed {
-			_ = w.Stop()
+			if watcher, ok := w.(nats.KeyWatcher); ok {
+				_ = watcher.Stop()
+			} else if watcher, ok := w.(jetstream.KeyWatcher); ok {
+				_ = watcher.Stop()
+			}
 			delete(c.kvWatchers, bucket)
 		}
 	}
@@ -628,43 +649,16 @@ func (c *rtClient) handleArticleList(inbox string) {
 	}
 
 	go func() {
-		kv, err := c.srv.js.KeyValue("article")
-		if err != nil {
-			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to access article bucket"}})
-			return
-		}
-
-		keys, err := kv.ListKeys()
+		articles, err := c.articleRepo.AllNoContent()
 		if err != nil {
 			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to list articles"}})
 			return
 		}
 
-		var articles []articleResponse
-		for key := range keys.Keys() {
-			entry, err := kv.Get(key)
-			if err != nil {
-				continue // Skip articles we can't read
-			}
-
-			var art struct {
-				ID            string   `json:"id"`
-				Slug          string   `json:"slug"`
-				Title         string   `json:"title"`
-				Subtitle      string   `json:"subtitle"`
-				Leading       string   `json:"leading"`
-				Author        string   `json:"author"`
-				PublishedAt   int      `json:"published_at"`
-				Tags          []string `json:"tags"`
-				StructVersion int      `json:"struct_version"`
-			}
-
-			if err := json.Unmarshal(entry.Value(), &art); err != nil {
-				continue
-			}
-
-			articles = append(articles, articleResponse{
-				ID:            art.ID,
+		var articleResponses []articleResponse
+		for _, art := range articles {
+			articleResponses = append(articleResponses, articleResponse{
+				ID:            art.Id.String(),
 				Slug:          art.Slug,
 				Title:         art.Title,
 				Subtitle:      art.Subtitle,
@@ -672,12 +666,12 @@ func (c *rtClient) handleArticleList(inbox string) {
 				Author:        art.Author,
 				PublishedAt:   art.PublishedAt,
 				Tags:          art.Tags,
-				Revision:      entry.Revision(),
+				Revision:      art.Rev,
 				StructVersion: art.StructVersion,
 			})
 		}
 
-		c.send(serverMsg{Op: "reply", Inbox: inbox, Data: articleListResponse{Articles: articles}})
+		c.send(serverMsg{Op: "reply", Inbox: inbox, Data: articleListResponse{Articles: articleResponses}})
 	}()
 }
 
@@ -688,26 +682,33 @@ func (c *rtClient) handleArticleGet(id string, inbox string) {
 	}
 
 	go func() {
-		kv, err := c.srv.js.KeyValue("article")
+		articleID, err := uuid.Parse(id)
 		if err != nil {
-			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to access article bucket"}})
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "invalid article ID"}})
 			return
 		}
 
-		entry, err := kv.Get(id)
+		art, err := c.articleRepo.Get(articleID)
 		if err != nil {
 			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "article not found"}})
 			return
 		}
 
-		var art articleResponse
-		if err := json.Unmarshal(entry.Value(), &art); err != nil {
-			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to parse article"}})
-			return
+		articleResp := articleResponse{
+			ID:            art.Id.String(),
+			Slug:          art.Slug,
+			Title:         art.Title,
+			Subtitle:      art.Subtitle,
+			Leading:       art.Leading,
+			Author:        art.Author,
+			PublishedAt:   art.PublishedAt,
+			Tags:          art.Tags,
+			Content:       art.Content,
+			Revision:      art.Rev,
+			StructVersion: art.StructVersion,
 		}
 
-		art.Revision = entry.Revision()
-		c.send(serverMsg{Op: "reply", Inbox: inbox, Data: art})
+		c.send(serverMsg{Op: "reply", Inbox: inbox, Data: articleResp})
 	}()
 }
 
@@ -718,43 +719,39 @@ func (c *rtClient) handleArticleCreate(req articleCreateRequest, inbox string) {
 	}
 
 	go func() {
-		kv, err := c.srv.js.KeyValue("article")
-		if err != nil {
-			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to access article bucket"}})
-			return
+		// Create article using the repository
+		article := articles.Article{
+			Title:       req.Title,
+			Subtitle:    req.Subtitle,
+			Leading:     req.Leading,
+			Content:     req.Content,
+			Author:      c.id, // Use current user ID
+			PublishedAt: req.PublishedAt,
+			Tags:        req.Tags,
 		}
 
-		// Generate new UUID for the article
-		id := uuid.New().String()
-		
-		article := articleResponse{
-			ID:            id,
-			Slug:          id, // Use ID as slug initially
-			Title:         req.Title,
-			Subtitle:      req.Subtitle,
-			Leading:       req.Leading,
-			Content:       req.Content,
-			Author:        c.id, // Use current user ID
-			PublishedAt:   req.PublishedAt,
-			Tags:          req.Tags,
-			StructVersion: 1,
-			Revision:      1,
-		}
-
-		data, err := json.Marshal(article)
-		if err != nil {
-			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to marshal article"}})
-			return
-		}
-
-		rev, err := kv.Create(id, data)
+		createdArticle, err := c.articleRepo.Create(article)
 		if err != nil {
 			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to create article"}})
 			return
 		}
 
-		article.Revision = rev
-		c.send(serverMsg{Op: "reply", Inbox: inbox, Data: article})
+		// Convert to response format
+		articleResp := articleResponse{
+			ID:            createdArticle.Id.String(),
+			Slug:          createdArticle.Slug,
+			Title:         createdArticle.Title,
+			Subtitle:      createdArticle.Subtitle,
+			Leading:       createdArticle.Leading,
+			Content:       createdArticle.Content,
+			Author:        createdArticle.Author,
+			PublishedAt:   createdArticle.PublishedAt,
+			Tags:          createdArticle.Tags,
+			Revision:      createdArticle.Rev,
+			StructVersion: createdArticle.StructVersion,
+		}
+
+		c.send(serverMsg{Op: "reply", Inbox: inbox, Data: articleResp})
 	}()
 }
 
@@ -765,22 +762,17 @@ func (c *rtClient) handleArticleUpdate(id string, req articleUpdateRequest, inbo
 	}
 
 	go func() {
-		kv, err := c.srv.js.KeyValue("article")
+		// Parse article ID
+		articleID, err := uuid.Parse(id)
 		if err != nil {
-			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to access article bucket"}})
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "invalid article ID"}})
 			return
 		}
 
 		// Get existing article
-		entry, err := kv.Get(id)
+		existing, err := c.articleRepo.Get(articleID)
 		if err != nil {
 			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "article not found"}})
-			return
-		}
-
-		var existing articleResponse
-		if err := json.Unmarshal(entry.Value(), &existing); err != nil {
-			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to parse existing article"}})
 			return
 		}
 
@@ -804,22 +796,29 @@ func (c *rtClient) handleArticleUpdate(id string, req articleUpdateRequest, inbo
 			existing.PublishedAt = req.PublishedAt
 		}
 
-		existing.Revision++
-
-		data, err := json.Marshal(existing)
-		if err != nil {
-			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to marshal updated article"}})
-			return
-		}
-
-		rev, err := kv.Put(id, data)
+		// Update article using repository
+		updatedArticle, err := c.articleRepo.Update(existing)
 		if err != nil {
 			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to update article"}})
 			return
 		}
 
-		existing.Revision = rev
-		c.send(serverMsg{Op: "reply", Inbox: inbox, Data: existing})
+		// Convert to response format
+		articleResp := articleResponse{
+			ID:            updatedArticle.Id.String(),
+			Slug:          updatedArticle.Slug,
+			Title:         updatedArticle.Title,
+			Subtitle:      updatedArticle.Subtitle,
+			Leading:       updatedArticle.Leading,
+			Content:       updatedArticle.Content,
+			Author:        updatedArticle.Author,
+			PublishedAt:   updatedArticle.PublishedAt,
+			Tags:          updatedArticle.Tags,
+			Revision:      updatedArticle.Rev,
+			StructVersion: updatedArticle.StructVersion,
+		}
+
+		c.send(serverMsg{Op: "reply", Inbox: inbox, Data: articleResp})
 	}()
 }
 
@@ -830,13 +829,15 @@ func (c *rtClient) handleArticleDelete(id string, inbox string) {
 	}
 
 	go func() {
-		kv, err := c.srv.js.KeyValue("article")
+		// Parse article ID
+		articleID, err := uuid.Parse(id)
 		if err != nil {
-			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to access article bucket"}})
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "invalid article ID"}})
 			return
 		}
 
-		err = kv.Delete(id)
+		// Delete article using repository
+		err = c.articleRepo.Delete(articleID)
 		if err != nil {
 			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to delete article"}})
 			return
@@ -853,54 +854,140 @@ func (c *rtClient) handleArticleRevision(id string, revision uint64, inbox strin
 	}
 
 	go func() {
-		kv, err := c.srv.js.KeyValue("article")
+		// Parse article ID
+		articleID, err := uuid.Parse(id)
 		if err != nil {
-			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to access article bucket"}})
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "invalid article ID"}})
 			return
 		}
 
 		if revision == 0 {
 			// Get history
-			history, err := kv.History(id)
+			history, err := c.articleRepo.GetHistory(articleID)
 			if err != nil {
 				c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to get article history"}})
 				return
 			}
 
 			var revisions []articleResponse
-			for _, entry := range history {
-				if entry.Operation() == nats.KeyValuePut {
-					var art articleResponse
-					if err := json.Unmarshal(entry.Value(), &art); err != nil {
-						continue
-					}
-					art.Revision = entry.Revision()
-					revisions = append(revisions, art)
-				}
-			}
-
-			// Reverse to show newest first
-			for i, j := 0, len(revisions)-1; i < j; i, j = i+1, j-1 {
-				revisions[i], revisions[j] = revisions[j], revisions[i]
+			for _, art := range history {
+				revisions = append(revisions, articleResponse{
+					ID:            art.Id.String(),
+					Slug:          art.Slug,
+					Title:         art.Title,
+					Subtitle:      art.Subtitle,
+					Leading:       art.Leading,
+					Author:        art.Author,
+					PublishedAt:   art.PublishedAt,
+					Tags:          art.Tags,
+					Content:       art.Content,
+					Revision:      art.Rev,
+					StructVersion: art.StructVersion,
+				})
 			}
 
 			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: articleHistoryResponse{Revisions: revisions}})
 		} else {
 			// Get specific revision
-			entry, err := kv.GetRevision(id, revision)
+			art, err := c.articleRepo.GetRevision(articleID, revision)
 			if err != nil {
 				c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "revision not found"}})
 				return
 			}
 
-			var art articleResponse
-			if err := json.Unmarshal(entry.Value(), &art); err != nil {
-				c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to parse article revision"}})
-				return
+			articleResp := articleResponse{
+				ID:            art.Id.String(),
+				Slug:          art.Slug,
+				Title:         art.Title,
+				Subtitle:      art.Subtitle,
+				Leading:       art.Leading,
+				Author:        art.Author,
+				PublishedAt:   art.PublishedAt,
+				Tags:          art.Tags,
+				Content:       art.Content,
+				Revision:      art.Rev,
+				StructVersion: art.StructVersion,
 			}
 
-			art.Revision = entry.Revision()
-			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: art})
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: articleResp})
+		}
+	}()
+}
+
+func (c *rtClient) handleArticleKVSub(pattern string) {
+	c.log.Debug("handleArticleKVSub called with pattern=%s", pattern)
+	if !c.isAllowedKV("article", pattern) {
+		c.log.Debug("Article KV subscription not allowed for pattern=%s", pattern)
+		return
+	}
+
+	// Use the article repository's WatchAll method
+	watcher, err := c.articleRepo.WatchAll()
+	if err != nil {
+		c.log.Error("Failed to create article watcher: %v", err)
+		return
+	}
+
+	c.log.Debug("Successfully created article watcher")
+	c.kvWatchers["article"] = watcher
+
+	go func() {
+		for {
+			select {
+			case <-c.ctx.Done():
+				_ = watcher.Stop()
+				return
+			case entry := <-watcher.Updates():
+				if entry == nil {
+					continue
+				}
+				
+				// Filter by pattern if specified
+				if pattern != "" && !subjectMatch(pattern, entry.Key()) {
+					continue
+				}
+
+				var opStr string
+				switch entry.Operation() {
+				case jetstream.KeyValueDelete:
+					opStr = "delete"
+				case jetstream.KeyValuePurge:
+					opStr = "purge"
+				default:
+					opStr = "put"
+				}
+
+				// For article updates, we can also include the article data
+				var articleData interface{}
+				if entry.Operation() == jetstream.KeyValuePut {
+					var art articles.Article
+					if err := json.Unmarshal(entry.Value(), &art); err == nil {
+						articleData = map[string]interface{}{
+							"id":             art.Id.String(),
+							"slug":           art.Slug,
+							"title":          art.Title,
+							"subtitle":       art.Subtitle,
+							"leading":        art.Leading,
+							"author":         art.Author,
+							"published_at":   art.PublishedAt,
+							"tags":           art.Tags,
+							"revision":       art.Rev,
+							"struct_version": art.StructVersion,
+						}
+					} else {
+						articleData = string(entry.Value())
+					}
+				} else {
+					articleData = entry.Key()
+				}
+
+				c.send(serverMsg{Op: "msg", Target: "article", Data: map[string]interface{}{
+					"key":   entry.Key(),
+					"value": articleData,
+					"rev":   entry.Revision(),
+					"op":    opStr,
+				}})
+			}
 		}
 	}()
 }
