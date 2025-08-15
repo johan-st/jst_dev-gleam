@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/nats-io/nats.go"
 
@@ -33,6 +34,47 @@ type serverMsg struct {
 	Target string      `json:"target"`
 	Inbox  string      `json:"inbox,omitempty"`
 	Data   interface{} `json:"data,omitempty"`
+}
+
+// Article-specific message types
+type articleCreateRequest struct {
+	Title       string   `json:"title"`
+	Subtitle    string   `json:"subtitle"`
+	Leading     string   `json:"leading"`
+	Content     string   `json:"content"`
+	Tags        []string `json:"tags"`
+	PublishedAt int      `json:"published_at"`
+}
+
+type articleUpdateRequest struct {
+	Title       string   `json:"title,omitempty"`
+	Subtitle    string   `json:"subtitle,omitempty"`
+	Leading     string   `json:"leading,omitempty"`
+	Content     string   `json:"content,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	PublishedAt int      `json:"published_at,omitempty"`
+}
+
+type articleResponse struct {
+	ID            string   `json:"id"`
+	Slug          string   `json:"slug"`
+	Title         string   `json:"title"`
+	Subtitle      string   `json:"subtitle"`
+	Leading       string   `json:"leading"`
+	Author        string   `json:"author"`
+	PublishedAt   int      `json:"published_at"`
+	Tags          []string `json:"tags"`
+	Content       string   `json:"content,omitempty"`
+	Revision      uint64   `json:"revision"`
+	StructVersion int      `json:"struct_version"`
+}
+
+type articleListResponse struct {
+	Articles []articleResponse `json:"articles"`
+}
+
+type articleHistoryResponse struct {
+	Revisions []articleResponse `json:"revisions"`
 }
 
 // Capabilities with pattern-based permissions
@@ -129,8 +171,8 @@ func userIDFromRequest(r *http.Request) string {
 func authorizeInitial(l *jst_log.Logger, s *server, userID string) capabilities {
 	caps := capabilities{
 		Subjects: []string{"time.>"},
-		Buckets:  map[string][]string{"article": {">"}},
-		Commands: nil,
+		Buckets:  map[string][]string{"article": {">"}}, // Read-only access to article bucket
+		Commands: []string{"article_list", "article_get", "article_create", "article_update", "article_delete", "article_history", "article_revision"},
 		Streams:  map[string][]string{},
 	}
 	if userID == "" {
@@ -218,6 +260,44 @@ func (c *rtClient) readLoop() {
 			c.handleJSSub(m.Target, opts.StartSeq, opts.Batch, opts.Filter)
 		case "cmd":
 			c.handleCommand(m.Target, m.Data, m.Inbox)
+		case "article_list":
+			c.handleArticleList(m.Inbox)
+		case "article_get":
+			var opts struct {
+				ID string `json:"id"`
+			}
+			_ = json.Unmarshal(m.Data, &opts)
+			c.handleArticleGet(opts.ID, m.Inbox)
+		case "article_create":
+			var req articleCreateRequest
+			_ = json.Unmarshal(m.Data, &req)
+			c.handleArticleCreate(req, m.Inbox)
+		case "article_update":
+			var opts struct {
+				ID   string                `json:"id"`
+				Data articleUpdateRequest  `json:"data"`
+			}
+			_ = json.Unmarshal(m.Data, &opts)
+			c.handleArticleUpdate(opts.ID, opts.Data, m.Inbox)
+		case "article_delete":
+			var opts struct {
+				ID string `json:"id"`
+			}
+			_ = json.Unmarshal(m.Data, &opts)
+			c.handleArticleDelete(opts.ID, m.Inbox)
+		case "article_history":
+			var opts struct {
+				ID string `json:"id"`
+			}
+			_ = json.Unmarshal(m.Data, &opts)
+			c.handleArticleRevision(opts.ID, 0, m.Inbox)
+		case "article_revision":
+			var opts struct {
+				ID        string `json:"id"`
+				Revision  uint64 `json:"revision"`
+			}
+			_ = json.Unmarshal(m.Data, &opts)
+			c.handleArticleRevision(opts.ID, opts.Revision, m.Inbox)
 		}
 	}
 }
@@ -332,58 +412,141 @@ func (c *rtClient) handleKVSub(bucket, pattern string) {
 	if !c.isAllowedKV(bucket, pattern) {
 		return
 	}
-	kv, err := c.srv.js.KeyValue(bucket)
-	if err != nil {
-		return
-	}
-	var watcher nats.KeyWatcher
-	if pattern != "" {
-		// try pattern-specific watch if supported; otherwise fallback to WatchAll and filter client-side
-		w, werr := kv.Watch(pattern)
-		if werr == nil {
-			watcher = w
+	
+	// For article bucket, ensure read-only access
+	if bucket == "article" {
+		// Only allow watching, not modifying
+		kv, err := c.srv.js.KeyValue(bucket)
+		if err != nil {
+			return
+		}
+		var watcher nats.KeyWatcher
+		if pattern != "" {
+			// try pattern-specific watch if supported; otherwise fallback to WatchAll and filter client-side
+			w, werr := kv.Watch(pattern)
+			if werr == nil {
+				watcher = w
+			} else {
+				watcher, _ = kv.WatchAll()
+			}
 		} else {
 			watcher, _ = kv.WatchAll()
 		}
-	} else {
-		watcher, _ = kv.WatchAll()
-	}
-	if watcher == nil {
-		return
-	}
-	c.kvWatchers[bucket] = watcher
-	go func() {
-		for {
-			select {
-			case <-c.ctx.Done():
-				_ = watcher.Stop()
-				return
-			case entry := <-watcher.Updates():
-				if entry == nil {
-					continue
-				}
-				// If we had to fallback to WatchAll, filter by pattern here
-				if pattern != "" && !subjectMatch(pattern, entry.Key()) {
-					continue
-				}
-				var opStr string
-				switch entry.Operation() {
-				case nats.KeyValueDelete:
-					opStr = "delete"
-				case nats.KeyValuePurge:
-					opStr = "purge"
-				default:
-					opStr = "put"
-				}
-				c.send(serverMsg{Op: "msg", Target: bucket, Data: map[string]interface{}{
-					"key":   entry.Key(),
-					"value": string(entry.Value()),
-					"rev":   entry.Revision(),
-					"op":    opStr,
-				}})
-			}
+		if watcher == nil {
+			return
 		}
-	}()
+		c.kvWatchers[bucket] = watcher
+		go func() {
+			for {
+				select {
+				case <-c.ctx.Done():
+					_ = watcher.Stop()
+					return
+				case entry := <-watcher.Updates():
+					if entry == nil {
+						continue
+					}
+					// If we had to fallback to WatchAll, filter by pattern here
+					if pattern != "" && !subjectMatch(pattern, entry.Key()) {
+						continue
+					}
+					var opStr string
+					switch entry.Operation() {
+					case nats.KeyValueDelete:
+						opStr = "delete"
+					case nats.KeyValuePurge:
+						opStr = "purge"
+					default:
+						opStr = "put"
+					}
+					
+					// For articles, parse the value and send structured data
+					if bucket == "article" {
+						var articleData map[string]interface{}
+						if err := json.Unmarshal(entry.Value(), &articleData); err == nil {
+							c.send(serverMsg{Op: "msg", Target: bucket, Data: map[string]interface{}{
+								"key":      entry.Key(),
+								"article":  articleData,
+								"rev":      entry.Revision(),
+								"op":       opStr,
+								"timestamp": time.Now().Unix(),
+							}})
+						} else {
+							// Fallback to raw value if parsing fails
+							c.send(serverMsg{Op: "msg", Target: bucket, Data: map[string]interface{}{
+								"key":   entry.Key(),
+								"value": string(entry.Value()),
+								"rev":   entry.Revision(),
+								"op":    opStr,
+							}})
+						}
+					} else {
+						// For other buckets, send raw data
+						c.send(serverMsg{Op: "msg", Target: bucket, Data: map[string]interface{}{
+							"key":   entry.Key(),
+							"value": string(entry.Value()),
+							"rev":   entry.Revision(),
+							"op":    opStr,
+						}})
+					}
+				}
+			}
+		}()
+	} else {
+		// Handle other buckets as before
+		kv, err := c.srv.js.KeyValue(bucket)
+		if err != nil {
+			return
+		}
+		var watcher nats.KeyWatcher
+		if pattern != "" {
+			// try pattern-specific watch if supported; otherwise fallback to WatchAll and filter client-side
+			w, werr := kv.Watch(pattern)
+			if werr == nil {
+				watcher = w
+			} else {
+				watcher, _ = kv.WatchAll()
+			}
+		} else {
+			watcher, _ = kv.WatchAll()
+		}
+		if watcher == nil {
+			return
+		}
+		c.kvWatchers[bucket] = watcher
+		go func() {
+			for {
+				select {
+				case <-c.ctx.Done():
+					_ = watcher.Stop()
+					return
+				case entry := <-watcher.Updates():
+					if entry == nil {
+						continue
+					}
+					// If we had to fallback to WatchAll, filter by pattern here
+					if pattern != "" && !subjectMatch(pattern, entry.Key()) {
+						continue
+					}
+					var opStr string
+					switch entry.Operation() {
+					case nats.KeyValueDelete:
+						opStr = "delete"
+					case nats.KeyValuePurge:
+						opStr = "purge"
+					default:
+						opStr = "put"
+					}
+					c.send(serverMsg{Op: "msg", Target: bucket, Data: map[string]interface{}{
+						"key":   entry.Key(),
+						"value": string(entry.Value()),
+						"rev":   entry.Revision(),
+						"op":    opStr,
+					}})
+				}
+			}
+		}()
+	}
 }
 
 func (c *rtClient) handleJSSub(stream string, startSeq uint64, batch int, filter string) {
@@ -528,6 +691,292 @@ func (c *rtClient) applyCapabilities(newCaps capabilities) {
 		}
 	}
 	c.caps = newCaps
+}
+
+// ---- Article Handlers ----
+
+func (c *rtClient) handleArticleList(inbox string) {
+	if !c.isAllowedKV("article", ">") {
+		c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "insufficient permissions"}})
+		return
+	}
+
+	go func() {
+		kv, err := c.srv.js.KeyValue("article")
+		if err != nil {
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to access article bucket"}})
+			return
+		}
+
+		keys, err := kv.ListKeys()
+		if err != nil {
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to list articles"}})
+			return
+		}
+
+		var articles []articleResponse
+		for key := range keys.Keys() {
+			entry, err := kv.Get(key)
+			if err != nil {
+				continue // Skip articles we can't read
+			}
+
+			var art struct {
+				ID            string   `json:"id"`
+				Slug          string   `json:"slug"`
+				Title         string   `json:"title"`
+				Subtitle      string   `json:"subtitle"`
+				Leading       string   `json:"leading"`
+				Author        string   `json:"author"`
+				PublishedAt   int      `json:"published_at"`
+				Tags          []string `json:"tags"`
+				StructVersion int      `json:"struct_version"`
+			}
+
+			if err := json.Unmarshal(entry.Value(), &art); err != nil {
+				continue
+			}
+
+			articles = append(articles, articleResponse{
+				ID:            art.ID,
+				Slug:          art.Slug,
+				Title:         art.Title,
+				Subtitle:      art.Subtitle,
+				Leading:       art.Leading,
+				Author:        art.Author,
+				PublishedAt:   art.PublishedAt,
+				Tags:          art.Tags,
+				Revision:      entry.Revision(),
+				StructVersion: art.StructVersion,
+			})
+		}
+
+		c.send(serverMsg{Op: "reply", Inbox: inbox, Data: articleListResponse{Articles: articles}})
+	}()
+}
+
+func (c *rtClient) handleArticleGet(id string, inbox string) {
+	if !c.isAllowedKV("article", id) {
+		c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "insufficient permissions"}})
+		return
+	}
+
+	go func() {
+		kv, err := c.srv.js.KeyValue("article")
+		if err != nil {
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to access article bucket"}})
+			return
+		}
+
+		entry, err := kv.Get(id)
+		if err != nil {
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "article not found"}})
+			return
+		}
+
+		var art articleResponse
+		if err := json.Unmarshal(entry.Value(), &art); err != nil {
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to parse article"}})
+			return
+		}
+
+		art.Revision = entry.Revision()
+		c.send(serverMsg{Op: "reply", Inbox: inbox, Data: art})
+	}()
+}
+
+func (c *rtClient) handleArticleCreate(req articleCreateRequest, inbox string) {
+	if !c.isAllowedKV("article", ">") {
+		c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "insufficient permissions"}})
+		return
+	}
+
+	go func() {
+		kv, err := c.srv.js.KeyValue("article")
+		if err != nil {
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to access article bucket"}})
+			return
+		}
+
+		// Generate new UUID for the article
+		id := uuid.New().String()
+		
+		article := articleResponse{
+			ID:            id,
+			Slug:          id, // Use ID as slug initially
+			Title:         req.Title,
+			Subtitle:      req.Subtitle,
+			Leading:       req.Leading,
+			Content:       req.Content,
+			Author:        c.id, // Use current user ID
+			PublishedAt:   req.PublishedAt,
+			Tags:          req.Tags,
+			StructVersion: 1,
+			Revision:      1,
+		}
+
+		data, err := json.Marshal(article)
+		if err != nil {
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to marshal article"}})
+			return
+		}
+
+		rev, err := kv.Create(id, data)
+		if err != nil {
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to create article"}})
+			return
+		}
+
+		article.Revision = rev
+		c.send(serverMsg{Op: "reply", Inbox: inbox, Data: article})
+	}()
+}
+
+func (c *rtClient) handleArticleUpdate(id string, req articleUpdateRequest, inbox string) {
+	if !c.isAllowedKV("article", id) {
+		c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "insufficient permissions"}})
+		return
+	}
+
+	go func() {
+		kv, err := c.srv.js.KeyValue("article")
+		if err != nil {
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to access article bucket"}})
+			return
+		}
+
+		// Get existing article
+		entry, err := kv.Get(id)
+		if err != nil {
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "article not found"}})
+			return
+		}
+
+		var existing articleResponse
+		if err := json.Unmarshal(entry.Value(), &existing); err != nil {
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to parse existing article"}})
+			return
+		}
+
+		// Update fields if provided
+		if req.Title != "" {
+			existing.Title = req.Title
+		}
+		if req.Subtitle != "" {
+			existing.Subtitle = req.Subtitle
+		}
+		if req.Leading != "" {
+			existing.Leading = req.Leading
+		}
+		if req.Content != "" {
+			existing.Content = req.Content
+		}
+		if req.Tags != nil {
+			existing.Tags = req.Tags
+		}
+		if req.PublishedAt != 0 {
+			existing.PublishedAt = req.PublishedAt
+		}
+
+		existing.Revision++
+
+		data, err := json.Marshal(existing)
+		if err != nil {
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to marshal updated article"}})
+			return
+		}
+
+		rev, err := kv.Put(id, data)
+		if err != nil {
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to update article"}})
+			return
+		}
+
+		existing.Revision = rev
+		c.send(serverMsg{Op: "reply", Inbox: inbox, Data: existing})
+	}()
+}
+
+func (c *rtClient) handleArticleDelete(id string, inbox string) {
+	if !c.isAllowedKV("article", id) {
+		c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "insufficient permissions"}})
+		return
+	}
+
+	go func() {
+		kv, err := c.srv.js.KeyValue("article")
+		if err != nil {
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to access article bucket"}})
+			return
+		}
+
+		err = kv.Delete(id)
+		if err != nil {
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to delete article"}})
+			return
+		}
+
+		c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"status": "deleted"}})
+	}()
+}
+
+func (c *rtClient) handleArticleRevision(id string, revision uint64, inbox string) {
+	if !c.isAllowedKV("article", id) {
+		c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "insufficient permissions"}})
+		return
+	}
+
+	go func() {
+		kv, err := c.srv.js.KeyValue("article")
+		if err != nil {
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to access article bucket"}})
+			return
+		}
+
+		if revision == 0 {
+			// Get history
+			history, err := kv.History(id)
+			if err != nil {
+				c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to get article history"}})
+				return
+			}
+
+			var revisions []articleResponse
+			for _, entry := range history {
+				if entry.Operation() == nats.KeyValuePut {
+					var art articleResponse
+					if err := json.Unmarshal(entry.Value(), &art); err != nil {
+						continue
+					}
+					art.Revision = entry.Revision()
+					revisions = append(revisions, art)
+				}
+			}
+
+			// Reverse to show newest first
+			for i, j := 0, len(revisions)-1; i < j; i, j = i+1, j-1 {
+				revisions[i], revisions[j] = revisions[j], revisions[i]
+			}
+
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: articleHistoryResponse{Revisions: revisions}})
+		} else {
+			// Get specific revision
+			entry, err := kv.GetRevision(id, revision)
+			if err != nil {
+				c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "revision not found"}})
+				return
+			}
+
+			var art articleResponse
+			if err := json.Unmarshal(entry.Value(), &art); err != nil {
+				c.send(serverMsg{Op: "reply", Inbox: inbox, Data: map[string]string{"error": "failed to parse article revision"}})
+				return
+			}
+
+			art.Revision = entry.Revision()
+			c.send(serverMsg{Op: "reply", Inbox: inbox, Data: art})
+		}
+	}()
 }
 
 func durableName(userID, stream, filter string) string {
