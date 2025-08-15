@@ -394,7 +394,7 @@ type Model {
     // realtime
     realtime: realtime.Model,
     realtime_time: String,
-    // Article cache from WebSocket
+    // Article cache from WebSocket KV stream
     article_cache: Dict(String, realtime.ArticleResponse),
   )
 }
@@ -1973,7 +1973,7 @@ fn fetch_articles_model(model_effect_touple) -> #(Model, Effect(Msg)) {
   #(model, effect)
 }
 
-// Helper functions for article cache
+// Helper function to get articles from cache
 fn get_articles_from_cache(model: Model) -> List(Article) {
   dict.values(model.article_cache)
   |> list.map(fn(article_response) {
@@ -1999,6 +1999,14 @@ fn convert_article_response_to_article(article_response: realtime.ArticleRespons
     draft: None,
   )
 }
+
+fn get_article_from_cache_by_slug(model: Model, slug: String) -> Option(Article) {
+  dict.values(model.article_cache)
+  |> list.find(fn(article_response) { article_response.slug == slug })
+  |> option.map(convert_article_response_to_article)
+}
+
+
 
 fn get_article_from_cache_by_slug(model: Model, slug: String) -> Option(Article) {
   dict.values(model.article_cache)
@@ -5253,7 +5261,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
       // realtime
       realtime: rt_model,
       realtime_time: "",
-      // Article cache from WebSocket
+      // Article cache from WebSocket KV stream
       article_cache: dict.new(),
     )
   let model = recompute_bindings_for_current_page(base_model)
@@ -5300,8 +5308,6 @@ fn init(_) -> #(Model, Effect(Msg)) {
       ),
       window_events.setup(WindowUnfocused),
       effect.map(rt_init, RealtimeMsg),
-      subscribe_time,
-      subscribe_article_kv,
     ]),
   )
 }
