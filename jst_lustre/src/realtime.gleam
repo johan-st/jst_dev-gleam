@@ -154,7 +154,12 @@ pub fn update(msg: Msg, model: Model) -> #(Model, Effect(Msg)) {
         |> list.map(fn(subject) {
           encode_envelope("sub", subject, None, json.object([]))
         })
-      let send_effect = case resend {
+      
+      // Auto-subscribe to article KV updates for real-time data
+      let article_sub = encode_envelope("kv_sub", "article", None, json.object([#("pattern", json.string(">"))]))
+      
+      let all_msgs = list.append(resend, [article_sub])
+      let send_effect = case all_msgs {
         [] -> effect.none()
         msgs ->
           msgs

@@ -127,24 +127,19 @@ pub fn can_publish(_article: Article, session: Session) -> Bool {
   |> session.permission_any(["post_edit_any"])
 }
 
-// HTTP -------------------------------------------------------------------------
+// WebSocket Operations (replaces HTTP read operations)
+// All read operations now come through real-time KV updates
 
-pub fn article_get(msg, id: String, base_uri: Uri) -> Effect(a) {
-  let request =
-    request.new()
-    |> request.set_method(gleam_http.Get)
-    |> request.set_path("/api/articles/" <> id)
-    |> add_base_uri(base_uri)
-  http.send(request, http.expect_json(article_decoder(), msg))
+pub fn article_get_websocket(msg, id: String) -> Effect(a) {
+  // This is now handled through real-time KV updates
+  // The article data will be received automatically when the KV changes
+  effect.none()
 }
 
-pub fn article_metadata_get(msg, base_uri: Uri) -> Effect(a) {
-  let request =
-    request.new()
-    |> request.set_method(gleam_http.Get)
-    |> request.set_path("/api/articles")
-    |> add_base_uri(base_uri)
-  http.send(request, http.expect_json(metadata_decoder(), msg))
+pub fn article_metadata_get_websocket(msg) -> Effect(a) {
+  // This is now handled through real-time KV updates
+  // All article metadata comes through the KV subscription
+  effect.none()
 }
 
 pub fn article_update(msg, article: Article, base_uri: Uri) -> Effect(a) {

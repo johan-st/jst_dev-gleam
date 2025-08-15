@@ -28,6 +28,7 @@ import lustre_websocket as ws
 import modem
 import plinth/browser/event as p_event
 import realtime
+import realtime.{type ArticleResponse, ArticleCreateRequest, ArticleUpdateRequest}
 import routes.{type Route}
 import session.{type Session}
 import utils/dom_utils
@@ -435,6 +436,10 @@ pub type Msg {
   ArticleDeleteResponse(id: String, result: Result(String, HttpError))
   ArticlePublishClicked(article: Article)
   ArticleUnpublishClicked(article: Article)
+  // WebSocket real-time article updates
+  ArticleRealtimeUpdate(String, ArticleResponse) // id, article
+  ArticleRealtimeCreate(String, ArticleResponse) // id, article
+  ArticleRealtimeDelete(String) // id
   AuthLoginClicked(username: String, password: String)
   AuthLoginResponse(result: Result(session.Session, HttpError))
   AuthLogoutClicked
@@ -709,7 +714,8 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                     birl.now(),
                   ),
                 ),
-                article.article_get(ArticleGot(id, _), id, model.base_uri),
+                // Article content is now loaded through real-time KV updates
+                effect.none(),
               )
             }
             Error(Nil) -> #(
@@ -727,7 +733,8 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         }
         Ok(articles), routes.ArticleEdit(id) -> #(
           Model(..model, articles: model.articles |> rd.to_loaded(articles)),
-          article.article_get(ArticleGot(id, _), id, model.base_uri),
+          // Article content is now loaded through real-time KV updates
+          effect.none(),
         )
 
         Ok(articles), _ -> {
@@ -802,20 +809,14 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             )
           #(
             Model(..model, articles: updated_articles),
-            article.article_get(
-              ArticleGot(article.id, _),
-              article.id,
-              model.base_uri,
-            ),
+            // Article content is now loaded through real-time KV updates
+            effect.none(),
           )
         }
         Errored(_, _) -> #(
           model,
-          article.article_get(
-            ArticleGot(article.id, _),
-            article.id,
-            model.base_uri,
-          ),
+          // Article content is now loaded through real-time KV updates
+          effect.none(),
         )
         Pending(_, _) | Loaded(_, _, _) -> {
           #(model, effect.none())
@@ -983,14 +984,33 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                 }
               }),
             )
+          // Update article via WebSocket command
+          let update_effect = case model.realtime.socket {
+            Some(socket) -> {
+              let update_request = realtime.article_update(
+                updated_article.id,
+                title: Some(updated_article.title),
+                subtitle: Some(updated_article.subtitle),
+                leading: Some(updated_article.leading),
+                content: Some(rd.data(updated_article.content)),
+                tags: Some(updated_article.tags),
+                published_at: case updated_article.published_at {
+                  Some(time) -> Some(birl.to_unix(time))
+                  None -> Some(0)
+                },
+              )
+              effect.map(
+                realtime.update(update_request, model.realtime),
+                RealtimeMsg,
+              )
+            }
+            None -> effect.none()
+          }
+          
           #(
             Model(..model, articles: updated_articles),
             effect.batch([
-              article.article_update(
-                ArticleUpdateResponse(updated_article.id, _),
-                updated_article,
-                model.base_uri,
-              ),
+              update_effect,
               modem.push(
                 page.to_uri(page.PageArticle(updated_article, model.session))
                   |> uri.to_string,
@@ -1163,31 +1183,25 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     // ARTICLE ACTIONS
     ArticleCreateClicked -> {
       echo "article create clicked"
-      // Create a new article with default values
-      let new_article =
-        ArticleV1(
-          id: "",
-          // Will be set by server
-          slug: "new-article",
-          revision: 1,
-          author: "current-user",
-          // TODO: get from session
-          tags: [],
-          published_at: None,
-          title: "",
-          subtitle: "",
-          leading: "",
-          content: rd.to_pending(rd.NotInitialized, Some("")),
-          draft: None,
-        )
-      #(
-        model,
-        article.article_create(
-          ArticleCreateResponse,
-          new_article,
-          model.base_uri,
-        ),
-      )
+      // Create article via WebSocket command
+      let effect = case model.realtime.socket {
+        Some(socket) -> {
+          let create_request = realtime.article_create(
+            title: "New Article",
+            subtitle: "",
+            leading: "Enter article summary here...",
+            content: "",
+            tags: ["new"],
+            published_at: 0,
+          )
+          effect.map(
+            realtime.update(create_request, model.realtime),
+            RealtimeMsg,
+          )
+        }
+        None -> effect.none()
+      }
+      #(model, effect)
     }
     ArticleCreateResponse(result) -> {
       case result {
@@ -1222,14 +1236,21 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     ArticleDeleteClicked(article) -> {
       echo "article delete clicked"
+      // Delete article via WebSocket command
+      let effect = case model.realtime.socket {
+        Some(socket) -> {
+          let delete_request = realtime.article_delete(article.id)
+          effect.map(
+            realtime.update(delete_request, model.realtime),
+            RealtimeMsg,
+          )
+        }
+        None -> effect.none()
+      }
       #(
         model,
         effect.batch([
-          article.article_delete(
-            ArticleDeleteResponse(article.id, _),
-            article.id,
-            model.base_uri,
-          ),
+          effect,
           modem.push(
             routes.Articles |> routes.to_uri |> uri.to_string,
             None,
@@ -1253,6 +1274,47 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           echo err
           #(model, effect.none())
         }
+      }
+    }
+    
+    // WebSocket real-time article updates
+    ArticleRealtimeUpdate(id, article_response) -> {
+      // Convert ArticleResponse to Article and update the model
+      let article = article_to_article(article_response)
+      case model.articles {
+        Loaded(articles, _, _) -> {
+          let updated_articles = list.map(articles, fn(existing) {
+            case existing.id == id {
+              True -> article
+              False -> existing
+            }
+          })
+          #(Model(..model, articles: Loaded(updated_articles, birl.now(), birl.now())), effect.none())
+        }
+        _ -> #(model, effect.none())
+      }
+    }
+    
+    ArticleRealtimeCreate(id, article_response) -> {
+      // Convert ArticleResponse to Article and add to the model
+      let article = article_to_article(article_response)
+      case model.articles {
+        Loaded(articles, _, _) -> {
+          let all_articles = list.append(articles, [article])
+          #(Model(..model, articles: Loaded(all_articles, birl.now(), birl.now())), effect.none())
+        }
+        _ -> #(model, effect.none())
+      }
+    }
+    
+    ArticleRealtimeDelete(id) -> {
+      // Remove article from the model
+      case model.articles {
+        Loaded(articles, _, _) -> {
+          let filtered_articles = list.filter(articles, fn(a) { a.id != id })
+          #(Model(..model, articles: Loaded(filtered_articles, birl.now(), birl.now())), effect.none())
+        }
+        _ -> #(model, effect.none())
       }
     }
     ArticlePublishClicked(article) -> {
@@ -1836,6 +1898,26 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         }
         _ -> model
       }
+      
+      // Handle realtime article updates
+      let model = case msg {
+        realtime.ArticleUpdated(id, article) -> {
+          // Dispatch to main update function for proper handling
+          let #(updated_model, _) = update(model, ArticleRealtimeUpdate(id, article))
+          updated_model
+        }
+        realtime.ArticleCreated(id, article) -> {
+          // Dispatch to main update function for proper handling
+          let #(updated_model, _) = update(model, ArticleRealtimeCreate(id, article))
+          updated_model
+        }
+        realtime.ArticleDeleted(id) -> {
+          // Dispatch to main update function for proper handling
+          let #(updated_model, _) = update(model, ArticleRealtimeDelete(id))
+          updated_model
+        }
+        _ -> model
+      }
       #(
         Model(..model, realtime: realtime_model),
         effect.map(realtime_effect, RealtimeMsg),
@@ -1848,12 +1930,9 @@ fn fetch_articles_model(model_effect_touple) -> #(Model, Effect(Msg)) {
   echo "fetch_articles_model called"
   let #(model, effect) = model_effect_touple
 
+  // Articles are now loaded through real-time KV updates
+  // No need to fetch via HTTP
   let model = Model(..model, articles: model.articles |> rd.to_pending(None))
-  let effect =
-    effect.batch([
-      effect,
-      article.article_metadata_get(ArticleMetaGot, model.base_uri),
-    ])
 
   #(model, effect)
 }
@@ -1873,7 +1952,7 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
             route:,
             articles: model.articles |> rd.to_pending(None),
           ),
-          article.article_metadata_get(ArticleMetaGot, model.base_uri),
+          effect.none(),
         )
         Loaded(articles, _, _) -> {
           let #(effect, articles_updated) =
@@ -1885,11 +1964,8 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
                   True, NotInitialized -> #(
                     effect.batch([
                       eff,
-                      article.article_get(
-                        ArticleGot(art.id, _),
-                        art.id,
-                        model.base_uri,
-                      ),
+                      // Article content is now loaded through real-time KV updates
+                      effect.none(),
                     ]),
                     ArticleV1(
                       ..art,
@@ -1924,7 +2000,7 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
             route:,
             articles: model.articles |> rd.to_pending(None),
           ),
-          article.article_metadata_get(ArticleMetaGot, model.base_uri),
+          effect.none(),
         )
         Loaded(articles, _, _) -> {
           let #(effect, articles_updated) =
@@ -1940,11 +2016,8 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
                   True, NotInitialized -> #(
                     effect.batch([
                       eff,
-                      article.article_get(
-                        ArticleGot(art.id, _),
-                        art.id,
-                        model.base_uri,
-                      ),
+                      // Article content is now loaded through real-time KV updates
+                      effect.none(),
                     ]),
                     ArticleV1(
                       ..art,
@@ -1980,7 +2053,7 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
             route:,
             articles: model.articles |> rd.to_pending(None),
           ),
-          article.article_metadata_get(ArticleMetaGot, model.base_uri),
+          effect.none(),
         )
         _ -> {
           let model =
@@ -5181,4 +5254,27 @@ fn view_debug_realtime(model: Model) -> List(Element(Msg)) {
       ]),
     ]),
   ]
+}
+
+// Helper function to convert ArticleResponse to Article
+fn article_to_article(response: ArticleResponse) -> Article {
+  ArticleV1(
+    id: response.id,
+    slug: response.slug,
+    revision: response.revision,
+    author: response.author,
+    tags: response.tags,
+    published_at: case response.published_at {
+      0 -> None
+      timestamp -> Some(birl.from_unix(timestamp))
+    },
+    title: response.title,
+    subtitle: response.subtitle,
+    leading: response.leading,
+    content: case response.content {
+      Some(content) -> rd.data(content)
+      None -> rd.not_initialized()
+    },
+    draft: None,
+  )
 }
