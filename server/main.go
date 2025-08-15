@@ -217,7 +217,13 @@ func run(
 			case <-ctx.Done():
 				return
 			case t := <-ticker.C:
-				payload := fmt.Sprintf(`{"unix": %d}`, t.Unix())
+				// Get Fly.io environment variables
+				flyAppName := os.Getenv("FLY_APP_NAME")
+				flyRegion := os.Getenv("PRIMARY_REGION")
+				
+				// Create payload with Fly.io identifiers
+				payload := fmt.Sprintf(`{"unix": %d, "fly_app_name": "%s", "fly_region": "%s"}`, 
+					t.Unix(), flyAppName, flyRegion)
 				_ = nc.Publish("time.seconds", []byte(payload))
 			}
 		}
