@@ -48,20 +48,20 @@ pub fn json_error(error: json.DecodeError) -> String {
       "unexpected sequence: " <> expected
     }
     json.UnexpectedFormat(errors) -> {
-      "unexpected format\n" <> list.map(errors, fn(error) { 
+      "unexpected format\n"
+      <> list.map(errors, fn(error) {
         case error {
-          dynamic.DecodeError(expected, found, path) -> 
+          dynamic.DecodeError(expected, found, path) ->
             decode.DecodeError(expected: expected, found: found, path: path)
         }
-      }) |> decode_error_list
+      })
+      |> decode_error_list
     }
     json.UnableToDecode(errors) -> {
       "unable to decode\n" <> decode_error_list(errors)
     }
   }
 }
-
-
 
 fn decode_error_list(errors: List(decode.DecodeError)) -> String {
   case errors {

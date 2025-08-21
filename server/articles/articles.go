@@ -256,8 +256,6 @@ func (r *articleRepo) WatchAll() (jetstream.KeyWatcher, error) {
 	return r.kv.WatchAll(r.ctx)
 }
 
-
-
 func (r *articleRepo) Purge() error {
 	keys, err := r.kv.ListKeys(r.ctx)
 	if err != nil {

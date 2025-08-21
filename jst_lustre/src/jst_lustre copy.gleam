@@ -9,7 +9,6 @@ import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
-import sync
 import view/ui
 
 // removed unused import: import gleam/result
@@ -66,7 +65,7 @@ type Model {
     base_uri: Uri,
     route: Route,
     session: Session,
-    // articles: RemoteData(List(Article), HttpError),
+    articles: sync.KV(String, Article),
     short_urls: RemoteData(List(ShortUrl), HttpError),
     short_url_form_short_code: String,
     short_url_form_target_url: String,
@@ -82,6 +81,10 @@ type Model {
     login_username: String,
     login_password: String,
     login_loading: Bool,
+    // Keyboard
+    keys_down: Set(key.Key),
+    chords_available: Set(key.Chord),
+    chord_bindings: List(ChordBinding),
     // Notification form fields
     notification_form_title: String,
     notification_form_message: String,
@@ -108,10 +111,11 @@ type Model {
     debug_ws_retries: Int,
     debug_ws_status: String,
     debug_ws_msg_count: Int,
-    // Sync
-    ws: Option(ws.WebSocket),
-    article_kv: sync.KV(String, article.Article),
-    // realtime_time: String,
+    // realtime
+    realtime: realtime.Model,
+    realtime_time: String,
+    // Article cache from WebSocket KV stream
+    article_cache: Dict(String, realtime.ArticleResponse),
   )
 }
 
@@ -138,6 +142,7 @@ pub type Msg {
   PersistGotModel(opt: Option(PersistentModel))
   ArticleHovered(article: Article)
   ArticleGot(id: String, result: Result(Article, HttpError))
+  ArticleMetaGot(result: Result(List(Article), HttpError))
   ArticleDraftUpdatedSlug(article: Article, text: String)
   ArticleDraftUpdatedTitle(article: Article, text: String)
   ArticleDraftUpdatedLeading(article: Article, text: String)
@@ -215,6 +220,14 @@ pub type Msg {
   ProfileChangePasswordClicked
   ProfileChangePasswordResponse(Result(user.UserUpdateResponse, HttpError))
 
+  // WebSocket Article Operations
+  ArticleListRequested
+  ArticleListReceived(List(realtime.ArticleResponse))
+  ArticleCacheUpdated(String, realtime.ArticleResponse)
+  // id, article
+  ArticleCacheDeleted(String)
+
+  // id
   // Debug realtime
   DebugWsIncoming(String)
   DebugWsOpen(ws.WebSocket)
@@ -224,43 +237,33 @@ pub type Msg {
   DebugWsDoConnect
   DebugStatus(String)
 
-  // Sync
-  WebSocketMsg(ws.WebSocketEvent)
+  // Realtime
+  RealtimeMsg(realtime.Msg)
 }
 
 fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
   case model.debug_use_local_storage {
     True -> {
       let #(new_model, effect) = update(model, msg)
-      // let sync.KV(
-      //   id:,
-      //   state:,
-      //   bucket:,
-      //   filter:,
-      //   revision:,
-      //   data:,
-      //   encoder_key:,
-      //   encoder_value:,
-      //   decoder_key:,
-      //   decoder_value:,
-      // ) = model.article_kv
-
-      let articles =
-        model.article_kv.data
-        |> dict.to_list
-        |> list.map(fn(kv) {
-          case kv {
-            #(_key, value) -> {
-              value
-            }
-          }
+      let persistent_model = fn(model: Model) -> PersistentModel {
+        PersistentModelV1(articles: case model.articles {
+          Loaded(articles, _, _) -> articles
+          NotInitialized -> []
+          Pending(_, _) -> []
+          Errored(_, _) -> []
         })
-
+      }
       case msg {
+        ArticleMetaGot(_) -> {
+          persist.localstorage_set(
+            persist.model_localstorage_key,
+            persist.encode(persistent_model(new_model)),
+          )
+        }
         ArticleGot(_, _) -> {
           persist.localstorage_set(
             persist.model_localstorage_key,
-            persist.encode(PersistentModelV1(articles: articles)),
+            persist.encode(persistent_model(new_model)),
           )
         }
         _ -> Nil
@@ -272,7 +275,6 @@ fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
-  echo msg
   case msg {
     // LOCAL MODEL
     GotLocalModelResult(res) -> {
@@ -286,12 +288,11 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                 Model(
                   ..model,
                   debug_use_local_storage: True,
-                  article_kv: model.article_kv
-                    |> sync.set_data(
-                      articles
-                      |> list.map(fn(article) { #(article.id, article) })
-                      |> dict.from_list,
-                    ),
+                  articles: Loaded(
+                    articles,
+                    birl.from_unix(0),
+                    birl.from_unix(0),
+                  ),
                 ),
                 uri,
               )
@@ -362,21 +363,21 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     // Keyboard events
     KeyboardDown(ev) -> {
-      echo ev
-      #(model, effect.none())
+      update_chord(ev, model)
     }
 
     KeyboardUp(key) -> {
       let code = p_event.code(key)
       let key = p_event.key(key)
       let key_parsed = key.parse_key(code, key)
-      echo key_parsed
+      let model =
+        Model(..model, keys_down: set.delete(model.keys_down, key_parsed))
       #(model, effect.none())
     }
 
     // Other events
     WindowUnfocused -> {
-      #(model, effect.none())
+      #(Model(..model, keys_down: set.new()), effect.none())
     }
 
     // Messages
@@ -390,12 +391,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           #(
             Model(
               ..model,
-              article_kv: model.article_kv
-                |> sync.set_data(
-                  dict.from_list(
-                    list.map(articles, fn(article) { #(article.id, article) }),
-                  ),
-                ),
+              articles: Loaded(articles, birl.from_unix(0), birl.from_unix(0)),
             ),
             effect.none(),
           )
@@ -408,29 +404,180 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         }
       }
     }
+    ArticleMetaGot(result:) -> {
+      // case ok, update articles, if on article page, load content
+      case result, model.route {
+        Ok(articles), routes.Article(slug) -> {
+          case list.find(articles, fn(article) { article.slug == slug }) {
+            Ok(ArticleV1(
+              id:,
+              slug: slug,
+              author: _,
+              title: _,
+              leading: _,
+              subtitle: _,
+              content: _,
+              draft: _,
+              published_at: _,
+              revision: _,
+              tags: _,
+            )) -> {
+              let articles_with_pending_content =
+                list.map(articles, fn(article) {
+                  case article.slug == slug {
+                    True ->
+                      ArticleV1(..article, content: Pending(None, birl.now()))
+                    False -> article
+                  }
+                })
+              #(
+                Model(
+                  ..model,
+                  articles: Loaded(
+                    articles_with_pending_content,
+                    birl.now(),
+                    birl.now(),
+                  ),
+                ),
+                article.article_get(ArticleGot(id, _), id, model.base_uri),
+              )
+            }
+            Error(Nil) -> #(
+              model,
+              modem.push(
+                model.route
+                  |> routes.to_uri
+                  |> routes.NotFound
+                  |> routes.to_string,
+                None,
+                None,
+              ),
+            )
+          }
+        }
+        Ok(articles), routes.ArticleEdit(id) -> #(
+          Model(..model, articles: model.articles |> rd.to_loaded(articles)),
+          article.article_get(ArticleGot(id, _), id, model.base_uri),
+        )
+
+        Ok(articles), _ -> {
+          let model =
+            Model(..model, articles: model.articles |> rd.to_loaded(articles))
+            |> recompute_bindings_for_current_page
+          #(model, effect.none())
+        }
+        Error(err), _ -> #(
+          Model(..model, articles: model.articles |> rd.to_errored(err)),
+          effect.none(),
+        )
+      }
+    }
     ArticleGot(id, result) -> {
       case result {
         Ok(article) -> {
           let assert True = id == article.id
           let updated_articles =
-            model.article_kv.data
-            |> dict.insert(id, article)
-          let model =
-            Model(
-              ..model,
-              article_kv: model.article_kv |> sync.set_data(updated_articles),
+            model.articles
+            |> rd.map(
+              list.map(_, fn(article_current) {
+                case id == article_current.id {
+                  True -> article
+                  False -> article_current
+                }
+              }),
             )
+          let model =
+            Model(..model, articles: updated_articles)
+            |> recompute_bindings_for_current_page
           #(model, effect.none())
         }
         Error(err) -> {
-          echo "article got error"
-          echo err
+          let updated_articles =
+            model.articles
+            |> rd.map(
+              list.map(_, fn(article_current) {
+                case id == article_current.id {
+                  True ->
+                    ArticleV1(
+                      ..article_current,
+                      content: Errored(err, birl.now()),
+                    )
+                  False -> article_current
+                }
+              }),
+            )
+          let model =
+            Model(..model, articles: updated_articles)
+            |> recompute_bindings_for_current_page
           #(model, effect.none())
         }
       }
     }
     ArticleHovered(article:) -> {
-      echo "article hovered"
+      case article.content {
+        NotInitialized -> {
+          let updated_articles =
+            model.articles
+            |> rd.map(
+              list.map(_, fn(article_current) {
+                case article.id == article_current.id {
+                  True ->
+                    ArticleV1(
+                      ..article_current,
+                      content: article.content |> rd.to_pending(None),
+                    )
+                  False -> article_current
+                }
+              }),
+            )
+          #(
+            Model(..model, articles: updated_articles),
+            article.article_get(
+              ArticleGot(article.id, _),
+              article.id,
+              model.base_uri,
+            ),
+          )
+        }
+        Errored(_, _) -> #(
+          model,
+          article.article_get(
+            ArticleGot(article.id, _),
+            article.id,
+            model.base_uri,
+          ),
+        )
+        Pending(_, _) | Loaded(_, _, _) -> {
+          #(model, effect.none())
+        }
+      }
+    }
+
+    // WebSocket Article Operations
+    ArticleListRequested -> {
+      #(
+        model,
+        effect.from(fn(dispatch) {
+          dispatch(RealtimeMsg(realtime.article_list()))
+        }),
+      )
+    }
+
+    ArticleListReceived(articles) -> {
+      let article_cache =
+        list.fold(over: articles, from: dict.new(), with: fn(acc, article) {
+          dict.insert(acc, article.id, article)
+        })
+      #(Model(..model, article_cache: article_cache), effect.none())
+    }
+
+    ArticleCacheUpdated(id, article) -> {
+      let article_cache = dict.insert(model.article_cache, id, article)
+      #(Model(..model, article_cache: article_cache), effect.none())
+    }
+
+    ArticleCacheDeleted(id) -> {
+      let article_cache = dict.delete(model.article_cache, id)
       #(model, effect.none())
     }
 
@@ -457,12 +604,15 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           #(
             Model(
               ..model,
-              article_kv: model.article_kv
-                |> sync.set_data(dict.insert(
-                  model.article_kv.data,
-                  article.id,
-                  updated_article,
-                )),
+              articles: rd.map(
+                model.articles,
+                list.map(_, fn(article_current) {
+                  case article.id == article_current.id {
+                    True -> updated_article
+                    False -> article_current
+                  }
+                }),
+              ),
             ),
             effect.none(),
           )
@@ -476,15 +626,16 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           article.draft_set_title(draft, text)
         })
       let updated_articles =
-        model.article_kv.data
-        |> dict.insert(article.id, updated_article)
-      #(
-        Model(
-          ..model,
-          article_kv: model.article_kv |> sync.set_data(updated_articles),
-        ),
-        effect.none(),
-      )
+        rd.map(
+          model.articles,
+          list.map(_, fn(article_current) {
+            case article.id == article_current.id {
+              True -> updated_article
+              False -> article_current
+            }
+          }),
+        )
+      #(Model(..model, articles: updated_articles), effect.none())
     }
     ArticleDraftUpdatedLeading(article, text) -> {
       let updated_article =
@@ -492,15 +643,16 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           article.draft_set_leading(draft, text)
         })
       let updated_articles =
-        model.article_kv.data
-        |> dict.insert(article.id, updated_article)
-      #(
-        Model(
-          ..model,
-          article_kv: model.article_kv |> sync.set_data(updated_articles),
-        ),
-        effect.none(),
-      )
+        rd.map(
+          model.articles,
+          list.map(_, fn(article_current) {
+            case article.id == article_current.id {
+              True -> updated_article
+              False -> article_current
+            }
+          }),
+        )
+      #(Model(..model, articles: updated_articles), effect.none())
     }
     ArticleDraftUpdatedSubtitle(article, text) -> {
       let updated_article =
@@ -508,15 +660,16 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           article.draft_set_subtitle(draft, text)
         })
       let updated_articles =
-        model.article_kv.data
-        |> dict.insert(article.id, updated_article)
-      #(
-        Model(
-          ..model,
-          article_kv: model.article_kv |> sync.set_data(updated_articles),
-        ),
-        effect.none(),
-      )
+        rd.map(
+          model.articles,
+          list.map(_, fn(article_current) {
+            case article.id == article_current.id {
+              True -> updated_article
+              False -> article_current
+            }
+          }),
+        )
+      #(Model(..model, articles: updated_articles), effect.none())
     }
     ArticleDraftUpdatedContent(article, content) -> {
       let updated_article =
@@ -526,12 +679,15 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(
         Model(
           ..model,
-          article_kv: model.article_kv
-            |> sync.set_data(dict.insert(
-              model.article_kv.data,
-              article.id,
-              updated_article,
-            )),
+          articles: rd.map(
+            model.articles,
+            list.map(_, fn(article_current) {
+              case article.id == article_current.id {
+                True -> updated_article
+                False -> article_current
+              }
+            }),
+          ),
         ),
         effect.none(),
       )
@@ -540,13 +696,17 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ArticleDraftDiscardClicked(article) -> {
       echo "article draft discard clicked"
       let updated_articles =
-        model.article_kv.data
-        |> dict.insert(article.id, ArticleV1(..article, draft: None))
+        rd.map(
+          model.articles,
+          list.map(_, fn(article_current) {
+            case article.id == article_current.id {
+              True -> ArticleV1(..article, draft: None)
+              False -> article_current
+            }
+          }),
+        )
       #(
-        Model(
-          ..model,
-          article_kv: model.article_kv |> sync.set_data(updated_articles),
-        ),
+        Model(..model, articles: updated_articles),
         modem.push(
           page.to_uri(page.PageArticle(article, model.session))
             |> uri.to_string,
@@ -566,17 +726,24 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               title: article.draft_title(current_draft),
               leading: article.draft_leading(current_draft),
               subtitle: article.draft_subtitle(current_draft),
-              content: article.draft_content(current_draft),
+              content: rd.to_loaded(
+                rd.NotInitialized,
+                article.draft_content(current_draft),
+              ),
               draft: Some(current_draft),
             )
           let updated_articles =
-            model.article_kv.data
-            |> dict.insert(article.id, updated_article)
+            rd.map(
+              model.articles,
+              list.map(_, fn(article_current) {
+                case article.id == article_current.id {
+                  True -> updated_article
+                  False -> article_current
+                }
+              }),
+            )
           #(
-            Model(
-              ..model,
-              article_kv: model.article_kv |> sync.set_data(updated_articles),
-            ),
+            Model(..model, articles: updated_articles),
             effect.batch([
               article.article_update(
                 ArticleUpdateResponse(updated_article.id, _),
@@ -599,15 +766,16 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       case result {
         Ok(saved_article) -> {
           let updated_articles =
-            model.article_kv.data
-            |> dict.insert(id, saved_article)
-          #(
-            Model(
-              ..model,
-              article_kv: model.article_kv |> sync.set_data(updated_articles),
-            ),
-            effect.none(),
-          )
+            rd.map(
+              model.articles,
+              list.map(_, fn(article_current) {
+                case id == article_current.id {
+                  True -> saved_article
+                  False -> article_current
+                }
+              }),
+            )
+          #(Model(..model, articles: updated_articles), effect.none())
         }
         Error(err) -> {
           echo "article update response error"
@@ -645,6 +813,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               login_username: "",
               login_password: "",
             )
+            |> recompute_bindings_for_current_page
           #(model, schedule_effect)
         }
         Error(err) -> {
@@ -656,16 +825,21 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               notice: "Login failed. Please check your credentials.",
               login_loading: False,
             )
+            |> recompute_bindings_for_current_page
           #(model, effect.none())
         }
       }
     }
     AuthLogoutClicked -> {
-      let model = Model(..model, session: session.Unauthenticated)
+      let model =
+        Model(..model, session: session.Unauthenticated)
+        |> recompute_bindings_for_current_page
       #(model, session.auth_logout(AuthLogoutResponse, model.base_uri))
     }
     AuthLogoutResponse(_result) -> {
-      let model = Model(..model, session: session.Unauthenticated)
+      let model =
+        Model(..model, session: session.Unauthenticated)
+        |> recompute_bindings_for_current_page
       #(model, effect.none())
     }
     AuthCheckClicked -> {
@@ -686,7 +860,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               )
             None -> effect.none()
           }
-          let model = Model(..model, session: sess, notice: "auth check, OK")
+          let model =
+            Model(..model, session: sess, notice: "auth check, OK")
+            |> recompute_bindings_for_current_page
           #(model, schedule_effect)
         }
         Error(err) -> {
@@ -698,6 +874,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               session: session.Unauthenticated,
               notice: "auth check, ERROR",
             )
+            |> recompute_bindings_for_current_page
           #(model, effect.none())
         }
       }
@@ -717,7 +894,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               )
             None -> effect.none()
           }
-          let model = Model(..model, session: sess)
+          let model =
+            Model(..model, session: sess)
+            |> recompute_bindings_for_current_page
           #(model, schedule_effect)
         }
         Error(_err) -> #(model, effect.none())
@@ -757,32 +936,31 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           title: "",
           subtitle: "",
           leading: "",
-          content: "",
+          content: rd.to_pending(rd.NotInitialized, Some("")),
           draft: None,
         )
-      // #(
-      //   model,
-      //   article.article_create(
-      //     ArticleCreateResponse,
-      //     new_article,
-      //     model.base_uri,
-      //   ),
-      // )
-      todo as "article_create"
+      #(
+        model,
+        article.article_create(
+          ArticleCreateResponse,
+          new_article,
+          model.base_uri,
+        ),
+      )
     }
     ArticleCreateResponse(result) -> {
       case result {
         Ok(created_article) -> {
           echo "article created successfully with id: " <> created_article.id
           // Add the new article to the local state
-          let updated_articles =
-            model.article_kv.data
-            |> dict.insert(created_article.id, created_article)
+          let updated_articles = case model.articles {
+            Loaded(articles, _, _) ->
+              Loaded([created_article, ..articles], birl.now(), birl.now())
+            other -> other
+            // If articles aren't loaded, don't update
+          }
           #(
-            Model(
-              ..model,
-              article_kv: model.article_kv |> sync.set_data(updated_articles),
-            ),
+            Model(..model, articles: updated_articles),
             // Navigate to edit the newly created article
             modem.push(
               routes.ArticleEdit(created_article.id)
@@ -803,36 +981,31 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     ArticleDeleteClicked(article) -> {
       echo "article delete clicked"
-      // #(
-      //   model,
-      //   effect.batch([
-      //     article.article_delete(
-      //       ArticleDeleteResponse(article.id, _),
-      //       article.id,
-      //       model.base_uri,
-      //     ),
-      //     modem.push(
-      //       routes.Articles |> routes.to_uri |> uri.to_string,
-      //       None,
-      //       None,
-      //     ),
-      //   ]),
-      // )
-      todo as "article_delete"
+      #(
+        model,
+        effect.batch([
+          article.article_delete(
+            ArticleDeleteResponse(article.id, _),
+            article.id,
+            model.base_uri,
+          ),
+          modem.push(
+            routes.Articles |> routes.to_uri |> uri.to_string,
+            None,
+            None,
+          ),
+        ]),
+      )
     }
     ArticleDeleteResponse(id, result) -> {
       case result {
         Ok(_) -> {
           let updated_articles =
-            model.article_kv.data
-            |> dict.delete(id)
-          #(
-            Model(
-              ..model,
-              article_kv: model.article_kv |> sync.set_data(updated_articles),
-            ),
-            effect.none(),
-          )
+            rd.map(
+              model.articles,
+              list.filter(_, fn(article_current) { article_current.id != id }),
+            )
+          #(Model(..model, articles: updated_articles), effect.none())
         }
         Error(err) -> {
           echo "article delete response error"
@@ -844,27 +1017,25 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ArticlePublishClicked(article) -> {
       echo "article publish clicked"
       let updated_article = ArticleV1(..article, published_at: Some(birl.now()))
-      // #(
-      //   model,
-      //   article.article_update(
-      //     ArticleUpdateResponse(article.id, _),
-      //     updated_article,
-      //     model.base_uri,
-      //   ),
-      // )
-      todo as "article_update"
+      #(
+        model,
+        article.article_update(
+          ArticleUpdateResponse(article.id, _),
+          updated_article,
+          model.base_uri,
+        ),
+      )
     }
     ArticleUnpublishClicked(article) -> {
       echo "article unpublish clicked"
-      // #(
-      //   model,
-      //   article.article_update(
-      //     ArticleUpdateResponse(article.id, _),
-      //     ArticleV1(..article, published_at: None),
-      //     model.base_uri,
-      //   ),
-      // )
-      todo as "article_update"
+      #(
+        model,
+        article.article_update(
+          ArticleUpdateResponse(article.id, _),
+          ArticleV1(..article, published_at: None),
+          model.base_uri,
+        ),
+      )
     }
     // SHORT URLS
     ShortUrlCreateClicked(short_code, target_url) -> {
@@ -1264,7 +1435,10 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         True -> persist.localstorage_set(persist.model_localstorage_key, "")
         False -> {
           let persistent_model = {
-            PersistentModelV1(articles: dict.values(model.article_kv.data))
+            PersistentModelV1(articles: case model.articles {
+              Loaded(articles, _, _) -> articles
+              _ -> []
+            })
           }
           persist.localstorage_set(
             persist.model_localstorage_key,
@@ -1279,36 +1453,35 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     NoOp -> #(model, effect.none())
     // Debug realtime messages
-    DebugWsOpen(_sock) -> {
-      #(model, effect.none())
-      // #(
-      //   Model(
-      //     ..model,
-      //     debug_connected: True,
-      //     debug_ws_retries: 0,
-      //     debug_ws_status: "Connected",
-      //   ),
-      //   effect.batch([
-      //     ws.send(
-      //       sock,
-      //       json.to_string(
-      //         json.object([
-      //           #("op", json.string("sub")),
-      //           #("target", json.string("time.seconds")),
-      //         ]),
-      //       ),
-      //     ),
-      //     ws.send(
-      //       sock,
-      //       json.to_string(
-      //         json.object([
-      //           #("op", json.string("kv_sub")),
-      //           #("target", json.string("article")),
-      //         ]),
-      //       ),
-      //     ),
-      //   ]),
-      // )
+    DebugWsOpen(sock) -> {
+      #(
+        Model(
+          ..model,
+          debug_connected: True,
+          debug_ws_retries: 0,
+          debug_ws_status: "Connected",
+        ),
+        effect.batch([
+          ws.send(
+            sock,
+            json.to_string(
+              json.object([
+                #("op", json.string("sub")),
+                #("target", json.string("time.seconds")),
+              ]),
+            ),
+          ),
+          ws.send(
+            sock,
+            json.to_string(
+              json.object([
+                #("op", json.string("kv_sub")),
+                #("target", json.string("article")),
+              ]),
+            ),
+          ),
+        ]),
+      )
     }
     DebugWsClosed -> #(
       Model(..model, debug_connected: False, debug_ws_status: "Disconnected"),
@@ -1394,30 +1567,62 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         Error(_) -> #(model, effect.none())
       }
     }
-    // Sync ----------------------------------------------------------------------
-    WebSocketMsg(msg) -> {
-      case msg {
-        ws.OnTextMessage(text) -> {
-          let #(kv_article, effect) =
-            sync.ws_text_message(model.article_kv, text)
-          let model = Model(..model, article_kv: kv_article)
-          #(model, effect)
+    // Realtime messages
+    RealtimeMsg(msg) -> {
+      let #(realtime_model, realtime_effect) =
+        realtime.update(msg, model.realtime)
+      let model = case realtime.incoming_of(msg) {
+        Some(#(target, raw)) -> {
+          let total = model.debug_ws_msg_count + 1
+          let prev_count = case dict.get(model.debug_counts, target) {
+            Ok(c) -> c
+            Error(Nil) -> 0
+          }
+          let counts = dict.insert(model.debug_counts, target, prev_count + 1)
+          let latest = dict.insert(model.debug_latest, target, raw)
+          let targets = set.insert(model.debug_targets, target)
+          let updated_model = case target {
+            "time.seconds" -> Model(..model, realtime_time: raw)
+            "article" -> {
+              // Parse article message and dispatch appropriate action
+              let article_decoder = {
+                use op <- decode.field("op", decode.string)
+                use key <- decode.field("key", decode.string)
+                decode.success(#(op, key))
+              }
+              case json.parse(from: raw, using: article_decoder) {
+                Ok(#(op, key)) -> {
+                  case op {
+                    "put" -> {
+                      // Article created or updated - will be handled by realtime module
+                      model
+                    }
+                    "delete" -> {
+                      // Article deleted - will be handled by realtime module
+                      model
+                    }
+                    _ -> model
+                  }
+                }
+                Error(_) -> model
+              }
+            }
+            _ -> model
+          }
+          Model(
+            ..updated_model,
+            debug_ws_msg_count: total,
+            debug_counts: counts,
+            debug_latest: latest,
+            debug_targets: targets,
+          )
         }
-        ws.InvalidUrl -> todo as "ws.InvalidUrl"
-        ws.OnBinaryMessage(_) -> todo as "ws.OnBinaryMessage"
-        ws.OnClose(reason) -> {
-          let #(kv_article, effect) = sync.ws_close(model.article_kv, reason)
-          let model = Model(..model, article_kv: kv_article)
-          #(model, effect)
-        }
-        ws.OnOpen(w) -> {
-          let #(kv_article, effect) = sync.ws_open(model.article_kv, w)
-          echo "ws_open"
-          echo effect
-          let model = Model(..model, article_kv: kv_article)
-          #(model, effect)
-        }
+        _ -> model
       }
+      // Handle realtime effects by mapping them to main model messages
+      let final_effect = effect.map(realtime_effect, RealtimeMsg)
+
+      #(Model(..model, realtime: realtime_model), final_effect)
     }
   }
 }
@@ -1426,40 +1631,202 @@ fn fetch_articles_model(model_effect_touple) -> #(Model, Effect(Msg)) {
   echo "fetch_articles_model called"
   let #(model, effect) = model_effect_touple
 
-  let model =
-    Model(..model, article_kv: model.article_kv |> sync.set_data(dict.new()))
+  let model = Model(..model, articles: model.articles |> rd.to_pending(None))
   let effect =
     effect.batch([
       effect,
-      // article.article_metadata_get(ArticleMetaGot, model.base_uri),
+      article.article_metadata_get(ArticleMetaGot, model.base_uri),
     ])
 
   #(model, effect)
+}
+
+// Helper function to get articles from cache
+fn get_articles_from_cache(model: Model) -> List(Article) {
+  dict.values(model.article_cache)
+  |> list.map(fn(article_response) {
+    convert_article_response_to_article(article_response)
+  })
+}
+
+fn convert_article_response_to_article(
+  article_response: realtime.ArticleResponse,
+) -> Article {
+  ArticleV1(
+    id: article_response.id,
+    slug: article_response.slug,
+    revision: article_response.revision,
+    author: article_response.author,
+    tags: article_response.tags,
+    published_at: Some(birl.from_unix(article_response.published_at)),
+    title: article_response.title,
+    subtitle: article_response.subtitle,
+    leading: article_response.leading,
+    content: case article_response.content {
+      Some(content) -> rd.to_loaded(rd.NotInitialized, content)
+      None -> rd.to_loaded(rd.NotInitialized, "")
+    },
+    draft: None,
+  )
+}
+
+fn get_article_from_cache_by_slug(model: Model, slug: String) -> Option(Article) {
+  case
+    list.find(dict.values(model.article_cache), fn(article_response) {
+      article_response.slug == slug
+    })
+  {
+    Ok(article_response) ->
+      Some(convert_article_response_to_article(article_response))
+    Error(Nil) -> None
+  }
 }
 
 fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
   let route = routes.from_uri(uri)
   case route {
     routes.About -> {
-      #(Model(..model, route:), effect.none())
+      let model = recompute_bindings_for_current_page(Model(..model, route:))
+      #(model, effect.none())
     }
     routes.Article(slug) -> {
-      #(Model(..model, route:), effect.none())
+      // First check if we have articles in the cache
+      case get_article_from_cache_by_slug(model, slug) {
+        Some(cached_article) -> {
+          // Use cached article data
+          let model = Model(..model, route:)
+          #(model |> recompute_bindings_for_current_page, effect.none())
+        }
+        None -> {
+          // Fall back to HTTP API
+          case model.articles {
+            NotInitialized -> #(
+              Model(
+                ..model,
+                route:,
+                articles: model.articles |> rd.to_pending(None),
+              ),
+              article.article_metadata_get(ArticleMetaGot, model.base_uri),
+            )
+            Loaded(articles, _, _) -> {
+              let #(effect, articles_updated) =
+                list.map_fold(
+                  over: articles,
+                  from: effect.none(),
+                  with: fn(eff, art) {
+                    case art.slug == slug, art.content {
+                      True, NotInitialized -> #(
+                        effect.batch([
+                          eff,
+                          article.article_get(
+                            ArticleGot(art.id, _),
+                            art.id,
+                            model.base_uri,
+                          ),
+                        ]),
+                        ArticleV1(
+                          ..art,
+                          content: art.content |> rd.to_pending(None),
+                        ),
+                      )
+                      _, _ -> #(eff, art)
+                    }
+                  },
+                )
+              let model =
+                Model(
+                  ..model,
+                  route:,
+                  articles: model.articles |> rd.to_loaded(articles_updated),
+                )
+                |> recompute_bindings_for_current_page
+              #(model, effect)
+            }
+            _ -> {
+              let model =
+                recompute_bindings_for_current_page(Model(..model, route:))
+              #(model, effect.none())
+            }
+          }
+        }
+      }
     }
     routes.ArticleEdit(id) ->
-      case model.article_kv.data |> dict.get(id) {
-        Ok(article) -> {
-          #(Model(..model, route:), effect.none())
+      case model.articles {
+        NotInitialized -> #(
+          Model(
+            ..model,
+            route:,
+            articles: model.articles |> rd.to_pending(None),
+          ),
+          article.article_metadata_get(ArticleMetaGot, model.base_uri),
+        )
+        Loaded(articles, _, _) -> {
+          let #(effect, articles_updated) =
+            list.map_fold(
+              over: articles,
+              from: effect.none(),
+              with: fn(eff, art) {
+                let art = case art.draft {
+                  Some(_) -> art
+                  None -> ArticleV1(..art, draft: article.to_draft(art))
+                }
+                case art.id == id, art.content {
+                  True, NotInitialized -> #(
+                    effect.batch([
+                      eff,
+                      article.article_get(
+                        ArticleGot(art.id, _),
+                        art.id,
+                        model.base_uri,
+                      ),
+                    ]),
+                    ArticleV1(
+                      ..art,
+                      draft: article.to_draft(art),
+                      content: art.content |> rd.to_pending(None),
+                    ),
+                  )
+                  _, _ -> #(eff, art)
+                }
+              },
+            )
+          echo routes.to_string(route)
+          let model =
+            Model(
+              ..model,
+              route:,
+              articles: model.articles |> rd.to_loaded(articles_updated),
+            )
+            |> recompute_bindings_for_current_page
+          #(model, effect)
         }
-        Error(Nil) -> {
-          #(Model(..model, route:), effect.none())
+        _ -> {
+          let model =
+            recompute_bindings_for_current_page(Model(..model, route:))
+          #(model, effect.none())
         }
       }
     routes.Articles -> {
-      #(Model(..model, route:), effect.none())
+      case model.articles {
+        NotInitialized -> #(
+          Model(
+            ..model,
+            route:,
+            articles: model.articles |> rd.to_pending(None),
+          ),
+          article.article_metadata_get(ArticleMetaGot, model.base_uri),
+        )
+        _ -> {
+          let model =
+            recompute_bindings_for_current_page(Model(..model, route:))
+          #(model, effect.none())
+        }
+      }
     }
     routes.Index -> {
-      #(Model(..model, route:), effect.none())
+      let model = recompute_bindings_for_current_page(Model(..model, route:))
+      #(model, effect.none())
     }
     routes.UrlShortIndex -> {
       case model.short_urls {
@@ -1472,21 +1839,27 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
           short_url.list_short_urls(ShortUrlListGot, model.base_uri, 10, 0),
         )
         _ -> {
-          #(Model(..model, route:), effect.none())
+          let model =
+            recompute_bindings_for_current_page(Model(..model, route:))
+          #(model, effect.none())
         }
       }
     }
     routes.UrlShortInfo(_short_code) -> {
-      #(Model(..model, route:), effect.none())
+      let model = recompute_bindings_for_current_page(Model(..model, route:))
+      #(model, effect.none())
     }
     routes.DjotDemo -> {
-      #(Model(..model, route:), effect.none())
+      let model = recompute_bindings_for_current_page(Model(..model, route:))
+      #(model, effect.none())
     }
     routes.UiComponents -> {
-      #(Model(..model, route:), effect.none())
+      let model = recompute_bindings_for_current_page(Model(..model, route:))
+      #(model, effect.none())
     }
     routes.Notifications -> {
-      #(Model(..model, route:), effect.none())
+      let model = recompute_bindings_for_current_page(Model(..model, route:))
+      #(model, effect.none())
     }
     routes.Profile -> {
       case session.subject(model.session) {
@@ -1499,15 +1872,55 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
           user.user_get(ProfileMeGot, model.base_uri, subject),
         )
         None -> {
-          #(Model(..model, route:), effect.none())
+          let model =
+            recompute_bindings_for_current_page(Model(..model, route:))
+          #(model, effect.none())
         }
       }
     }
     routes.Debug -> {
-      #(Model(..model, route:), effect.none())
+      let model = recompute_bindings_for_current_page(Model(..model, route:))
+      #(model, effect.none())
     }
     routes.NotFound(_uri) -> {
-      #(Model(..model, route:), effect.none())
+      let model = recompute_bindings_for_current_page(Model(..model, route:))
+      #(model, effect.none())
+    }
+  }
+}
+
+fn update_chord(
+  ev: p_event.Event(p_event.UIEvent(p_event.KeyboardEvent)),
+  model: Model,
+) -> #(Model, Effect(Msg)) {
+  let key_parsed = key.parse_key(p_event.code(ev), p_event.key(ev))
+  let model = Model(..model, keys_down: set.insert(model.keys_down, key_parsed))
+
+  case key.triggered_chord(model.keys_down, model.chords_available) {
+    None -> #(model, effect.none())
+    Some(chord) -> {
+      let binding_opt =
+        list.find(model.chord_bindings, fn(b) { chord_equals(b.chord, chord) })
+      case binding_opt {
+        Error(_) -> #(model, effect.none())
+        Ok(binding) -> {
+          // Prevent default if requested
+          case binding.block_default {
+            True -> p_event.prevent_default(ev)
+            False -> Nil
+          }
+
+          // Clear pressed chord keys
+          let keys = case chord {
+            key.Chord(keys) -> keys
+          }
+          let model =
+            Model(..model, keys_down: set.difference(model.keys_down, keys))
+
+          // Dispatch the bound message through the regular update
+          update(model, binding.msg)
+        }
+      }
     }
   }
 }
@@ -1515,18 +1928,13 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
 // VIEW ------------------------------------------------------------------------
 
 fn view(model: Model) -> Element(Msg) {
-  let page =
-    page.from_route(
-      loading: False,
-      route: model.route,
-      session: model.session,
-      articles: model.article_kv,
-    )
+  let page = page_from_model(model)
   let content: List(Element(Msg)) = case page {
     page.Loading(_) -> view_loading()
     page.PageIndex -> index.view(UserMouseDownNavigation)
-    page.PageArticleList(in_sync, articles, session) ->
-      article_list.view(in_sync, articles, session)
+    page.PageArticleList(articles, _session) ->
+      article_list.view(articles, model.session)
+    page.PageArticleListLoading -> view_article_listing_loading()
     page.PageArticle(article, session) ->
       view_article.view_article_page(article, session)
     page.PageArticleEdit(article, _) -> view_article_edit(model, article)
@@ -1535,7 +1943,7 @@ fn view(model: Model) -> Element(Msg) {
         page.ArticleNotFound(slug, _) ->
           view_article.view_article_not_found(slug)
         page.ArticleEditNotFound(id) ->
-          view_article_edit_not_found(model.article_kv.data, id)
+          view_article_edit_not_found(model.articles, id)
         page.HttpError(error, _) -> [view_error(error_string.http_error(error))]
         page.AuthenticationRequired(action) -> [
           view_error("Authentication required: " <> action),
@@ -1544,7 +1952,7 @@ fn view(model: Model) -> Element(Msg) {
       }
     }
     page.PageAbout -> about.view()
-    page.PageUrlShortIndex ->
+    page.PageUrlShortIndex(_) ->
       url_index.view(url_list.list(
         model.short_urls,
         model.expanded_urls,
@@ -1561,13 +1969,18 @@ fn view(model: Model) -> Element(Msg) {
       ))
     page.PageUrlShortInfo(short, _) -> view_url_info_page(model, short)
     page.PageDjotDemo(_, content) -> view_djot_demo(content)
-    page.PageUiComponents -> view_ui_components()
-    page.PageNotifications -> view_notifications(model)
+    page.PageUiComponents(_) -> view_ui_components()
+    page.PageNotifications(_) -> view_notifications(model)
     page.PageProfile(_) -> view_profile(model)
-    page.PageDebug -> todo as "view debug page"
+    page.PageDebug -> view_debug_realtime(model)
     page.PageNotFound(uri) -> view_not_found(uri)
   }
-  let nav_hints_overlay = element.none()
+  let nav_hints_overlay = case
+    set.contains(model.keys_down, key.Captured(key.Alt))
+  {
+    True -> view_nav_hints_from_bindings(model)
+    False -> element.none()
+  }
   let layout = case page {
     page.PageDjotDemo(_, _) | page.PageArticleEdit(_, _) -> {
       fn(content) {
@@ -1578,7 +1991,7 @@ fn view(model: Model) -> Element(Msg) {
             ),
           ],
           [
-            // view_notice(model.notice),
+            view_notice(model.notice),
             view_header(model),
             html.main(
               [
@@ -1602,7 +2015,7 @@ fn view(model: Model) -> Element(Msg) {
             ),
           ],
           [
-            // view_notice(model.notice),
+            view_notice(model.notice),
             view_header(model),
             html.main(
               [
@@ -1621,7 +2034,7 @@ fn view(model: Model) -> Element(Msg) {
   html.div([], [
     nav_hints_overlay,
     layout(content),
-    // view_status_bar_with_cmds(model),
+    view_status_bar_with_cmds(model),
   ])
 }
 
@@ -1693,185 +2106,185 @@ type ArticleKvUpdate {
   )
 }
 
-// // fn view_nav_hints_from_bindings(model: Model) -> Element(Msg) {
-// //   let shift = set.contains(model.keys_down, key.Captured(key.Shift))
-// //   let nav_items =
-// //     model.chord_bindings
-// //     |> list.filter(fn(b) { b.group == Nav && b.label != "" })
-// //     |> list.map(fn(b) {
-// //       let combo = case b.chord {
-// //         key.Chord(keys_set) ->
-// //           keys_set
-// //           |> set.to_list
-// //           |> list.map(fn(k) {
-// //             case k {
-// //               key.Captured(c) -> key.to_string(c, shift)
-// //               key.Unhandled(code) -> code
-// //             }
-// //           })
-// //           |> string.join("+")
-// //       }
-// //       #(b.label, combo)
-// //     })
+fn view_nav_hints_from_bindings(model: Model) -> Element(Msg) {
+  let shift = set.contains(model.keys_down, key.Captured(key.Shift))
+  let nav_items =
+    model.chord_bindings
+    |> list.filter(fn(b) { b.group == Nav && b.label != "" })
+    |> list.map(fn(b) {
+      let combo = case b.chord {
+        key.Chord(keys_set) ->
+          keys_set
+          |> set.to_list
+          |> list.map(fn(k) {
+            case k {
+              key.Captured(c) -> key.to_string(c, shift)
+              key.Unhandled(code) -> code
+            }
+          })
+          |> string.join("+")
+      }
+      #(b.label, combo)
+    })
 
-// //   html.div([attr.class("fixed inset-0 z-50 flex items-center justify-center")], [
-// //     // Dark overlay background
-// //     html.div(
-// //       [attr.class("absolute inset-0 bg-black bg-opacity-50 backdrop-blur-sm")],
-// //       [],
-// //     ),
-// //     // Quick nav content
-// //     html.div(
-// //       [
-// //         attr.class(
-// //           "relative bg-zinc-900 bg-opacity-95 text-white rounded-xl px-12 py-8 shadow-2xl border border-zinc-700 backdrop-blur-sm max-w-md",
-// //         ),
-// //       ],
-// //       [
-// //         html.div(
-// //           [
-// //             attr.class(
-// //               "text-2xl font-semibold text-pink-400 mb-6 text-center font-mono",
-// //             ),
-// //           ],
-// //           [html.text("Quick Navigation")],
-// //         ),
-// //         html.div([attr.class("text-base text-zinc-400 mb-6 text-center")], [
-// //           html.text("Hold Alt and press highlighted keys to navigate"),
-// //         ]),
-// //         html.ul(
-// //           [attr.class("space-y-4")],
-// //           list.map(nav_items, fn(item) {
-// //             case item {
-// //               #(name, shortcut) ->
-// //                 html.li(
-// //                   [
-// //                     attr.class(
-// //                       "flex items-center justify-between bg-zinc-800 rounded-lg px-6 py-4 border border-zinc-700 hover:border-pink-600 transition-colors",
-// //                     ),
-// //                   ],
-// //                   [
-// //                     html.span(
-// //                       [attr.class("text-zinc-300 font-medium text-lg")],
-// //                       [html.text(name)],
-// //                     ),
-// //                     html.span(
-// //                       [
-// //                         attr.class(
-// //                           "bg-zinc-700 text-zinc-200 px-3 py-2 rounded text-sm font-mono border border-zinc-600",
-// //                         ),
-// //                       ],
-// //                       [html.text(shortcut)],
-// //                     ),
-// //                   ],
-// //                 )
-// //             }
-// //           }),
-// //         ),
-// //       ],
-// //     ),
-// //   ])
-// // }
+  html.div([attr.class("fixed inset-0 z-50 flex items-center justify-center")], [
+    // Dark overlay background
+    html.div(
+      [attr.class("absolute inset-0 bg-black bg-opacity-50 backdrop-blur-sm")],
+      [],
+    ),
+    // Quick nav content
+    html.div(
+      [
+        attr.class(
+          "relative bg-zinc-900 bg-opacity-95 text-white rounded-xl px-12 py-8 shadow-2xl border border-zinc-700 backdrop-blur-sm max-w-md",
+        ),
+      ],
+      [
+        html.div(
+          [
+            attr.class(
+              "text-2xl font-semibold text-pink-400 mb-6 text-center font-mono",
+            ),
+          ],
+          [html.text("Quick Navigation")],
+        ),
+        html.div([attr.class("text-base text-zinc-400 mb-6 text-center")], [
+          html.text("Hold Alt and press highlighted keys to navigate"),
+        ]),
+        html.ul(
+          [attr.class("space-y-4")],
+          list.map(nav_items, fn(item) {
+            case item {
+              #(name, shortcut) ->
+                html.li(
+                  [
+                    attr.class(
+                      "flex items-center justify-between bg-zinc-800 rounded-lg px-6 py-4 border border-zinc-700 hover:border-pink-600 transition-colors",
+                    ),
+                  ],
+                  [
+                    html.span(
+                      [attr.class("text-zinc-300 font-medium text-lg")],
+                      [html.text(name)],
+                    ),
+                    html.span(
+                      [
+                        attr.class(
+                          "bg-zinc-700 text-zinc-200 px-3 py-2 rounded text-sm font-mono border border-zinc-600",
+                        ),
+                      ],
+                      [html.text(shortcut)],
+                    ),
+                  ],
+                )
+            }
+          }),
+        ),
+      ],
+    ),
+  ])
+}
 
-// fn view_status_bar_with_cmds(model: Model) -> Element(Msg) {
-//   let keys = model.keys_down
-//   let session_ = model.session
-//   let shift = set.contains(keys, key.Captured(key.Shift))
-//   let ctrl = set.contains(keys, key.Captured(key.Ctrl))
-//   let alt = set.contains(keys, key.Captured(key.Alt))
+fn view_status_bar_with_cmds(model: Model) -> Element(Msg) {
+  let keys = model.keys_down
+  let session_ = model.session
+  let shift = set.contains(keys, key.Captured(key.Shift))
+  let ctrl = set.contains(keys, key.Captured(key.Ctrl))
+  let alt = set.contains(keys, key.Captured(key.Alt))
 
-//   let cmd_hints = case ctrl {
-//     True -> {
-//       model.chord_bindings
-//       |> list.filter(fn(b) { b.group == Cmd && b.label != "" })
-//       |> list.map(fn(b) {
-//         let key_names = case b.chord {
-//           key.Chord(keys_set) ->
-//             keys_set
-//             |> set.to_list
-//             |> list.map(fn(k) {
-//               case k {
-//                 key.Captured(c) -> key.to_string(c, shift)
-//                 key.Unhandled(code) -> code
-//               }
-//             })
-//             |> string.join("+")
-//         }
-//         #(b.label, key_names)
-//       })
-//     }
-//     False -> []
-//   }
+  let cmd_hints = case ctrl {
+    True -> {
+      model.chord_bindings
+      |> list.filter(fn(b) { b.group == Cmd && b.label != "" })
+      |> list.map(fn(b) {
+        let key_names = case b.chord {
+          key.Chord(keys_set) ->
+            keys_set
+            |> set.to_list
+            |> list.map(fn(k) {
+              case k {
+                key.Captured(c) -> key.to_string(c, shift)
+                key.Unhandled(code) -> code
+              }
+            })
+            |> string.join("+")
+        }
+        #(b.label, key_names)
+      })
+    }
+    False -> []
+  }
 
-//   case session_ {
-//     session.Authenticated(_) -> {
-//       let key_list = set.to_list(keys)
-//       html.div(
-//         [
-//           attr.class(
-//             "fixed bottom-0 left-0 right-0 bg-gray-800 text-white px-4 py-2 text-sm font-mono border-t border-gray-700",
-//           ),
-//         ],
-//         [
-//           html.div([attr.class("flex justify-between items-center")], [
-//             html.div([attr.class("flex items-center space-x-4")], [
-//               html.span([attr.class("flex items-center space-x-2")], [
-//                 html.span([], [html.text("Ctrl")]),
-//                 html.div(
-//                   [
-//                     attr.class(case ctrl {
-//                       True -> "w-3 h-3 bg-green-500 rounded-full"
-//                       False -> "w-3 h-3 bg-gray-500 rounded-full"
-//                     }),
-//                   ],
-//                   [],
-//                 ),
-//               ]),
-//               html.span([], [html.text("Alt")]),
-//               html.div(
-//                 [
-//                   attr.class(case alt {
-//                     True -> "w-3 h-3 bg-green-500 rounded-full"
-//                     False -> "w-3 h-3 bg-gray-500 rounded-full"
-//                   }),
-//                 ],
-//                 [],
-//               ),
-//               ..list.map(key_list, fn(key) {
-//                 let text = case key {
-//                   key.Captured(key) -> key.to_string(key, shift)
-//                   key.Unhandled(code) -> "(" <> code <> ")"
-//                 }
-//                 html.span([], [html.text(text)])
-//               })
-//             ]),
-//             html.div([attr.class("flex items-center space-x-6")], [
-//               html.div([attr.class("text-gray-400")], [html.text("JST Lustre")]),
-//               case cmd_hints {
-//                 [] -> element.none()
-//                 _ ->
-//                   html.div(
-//                     [
-//                       attr.class(
-//                         "flex items-center space-x-4 text-xs text-zinc-300",
-//                       ),
-//                     ],
-//                     list.map(cmd_hints, fn(tuple) {
-//                       case tuple {
-//                         #(label, combo) ->
-//                           html.span([], [html.text(label <> ": " <> combo)])
-//                       }
-//                     }),
-//                   )
-//               },
-//             ]),
-//           ]),
-//         ],
-//       )
-//     }
-//     session.Unauthenticated | session.Pending -> element.none()
-//   }
-// }
+  case session_ {
+    session.Authenticated(_) -> {
+      let key_list = set.to_list(keys)
+      html.div(
+        [
+          attr.class(
+            "fixed bottom-0 left-0 right-0 bg-gray-800 text-white px-4 py-2 text-sm font-mono border-t border-gray-700",
+          ),
+        ],
+        [
+          html.div([attr.class("flex justify-between items-center")], [
+            html.div([attr.class("flex items-center space-x-4")], [
+              html.span([attr.class("flex items-center space-x-2")], [
+                html.span([], [html.text("Ctrl")]),
+                html.div(
+                  [
+                    attr.class(case ctrl {
+                      True -> "w-3 h-3 bg-green-500 rounded-full"
+                      False -> "w-3 h-3 bg-gray-500 rounded-full"
+                    }),
+                  ],
+                  [],
+                ),
+              ]),
+              html.span([], [html.text("Alt")]),
+              html.div(
+                [
+                  attr.class(case alt {
+                    True -> "w-3 h-3 bg-green-500 rounded-full"
+                    False -> "w-3 h-3 bg-gray-500 rounded-full"
+                  }),
+                ],
+                [],
+              ),
+              ..list.map(key_list, fn(key) {
+                let text = case key {
+                  key.Captured(key) -> key.to_string(key, shift)
+                  key.Unhandled(code) -> "(" <> code <> ")"
+                }
+                html.span([], [html.text(text)])
+              })
+            ]),
+            html.div([attr.class("flex items-center space-x-6")], [
+              html.div([attr.class("text-gray-400")], [html.text("JST Lustre")]),
+              case cmd_hints {
+                [] -> element.none()
+                _ ->
+                  html.div(
+                    [
+                      attr.class(
+                        "flex items-center space-x-4 text-xs text-zinc-300",
+                      ),
+                    ],
+                    list.map(cmd_hints, fn(tuple) {
+                      case tuple {
+                        #(label, combo) ->
+                          html.span([], [html.text(label <> ": " <> combo)])
+                      }
+                    }),
+                  )
+              },
+            ]),
+          ]),
+        ],
+      )
+    }
+    session.Unauthenticated | session.Pending -> element.none()
+  }
+}
 
 // PROFILE VIEW -----------------------------------------------------------------
 fn view_profile(model: Model) -> List(Element(Msg)) {
@@ -2018,6 +2431,171 @@ fn view_profile(model: Model) -> List(Element(Msg)) {
   [header, ..content]
 }
 
+fn page_from_model(model: Model) -> page.Page {
+  case model.route {
+    routes.Index -> page.PageIndex
+    routes.Articles -> {
+      // First check if we have articles in the cache
+      case dict.size(model.article_cache) > 0 {
+        True -> {
+          let cached_articles = get_articles_from_cache(model)
+          page.PageArticleList(cached_articles, model.session)
+        }
+        False -> {
+          // Fall back to HTTP API
+          case model.articles {
+            Pending(_, _) -> page.PageArticleListLoading
+            NotInitialized ->
+              page.PageError(page.Other("articles not initialized"))
+            Errored(error, _) ->
+              page.PageError(page.HttpError(
+                error,
+                "Failed to load article list",
+              ))
+            Loaded(articles_list, _, _) ->
+              page.PageArticleList(articles_list, model.session)
+          }
+        }
+      }
+    }
+    routes.Article(slug) -> {
+      // First check if we have articles in the cache
+      case get_article_from_cache_by_slug(model, slug) {
+        Some(cached_article) -> page.PageArticle(cached_article, model.session)
+        None -> {
+          // Fall back to HTTP API
+          case model.articles {
+            Pending(_, _) -> page.PageArticleListLoading
+            NotInitialized ->
+              page.PageError(page.Other("articles not initialized"))
+            Errored(error, _) ->
+              page.PageError(page.HttpError(error, "Failed to load articles"))
+            Loaded(articles_list, _, _) -> {
+              case list.find(articles_list, fn(art) { art.slug == slug }) {
+                Ok(article) -> page.PageArticle(article, model.session)
+                Error(_) ->
+                  page.PageError(page.ArticleNotFound(
+                    slug,
+                    page.get_available_slugs(articles_list),
+                  ))
+              }
+            }
+          }
+        }
+      }
+    }
+    routes.ArticleEdit(id) -> {
+      case model.articles {
+        Pending(_, _) -> page.PageArticleListLoading
+        NotInitialized -> page.PageError(page.Other("articles not initialized"))
+        Errored(error, _) ->
+          page.PageError(page.HttpError(
+            error,
+            "Failed to load articles for editing",
+          ))
+        Loaded(articles_list, _, _) -> {
+          case list.find(articles_list, fn(art) { art.id == id }) {
+            Ok(article) -> {
+              case article.can_edit(article, model.session), article.draft {
+                // TODO: this should be refactored.. the draft should be on the actual article and not on the one in the Page
+                True, Some(_) -> {
+                  case model.session {
+                    session.Authenticated(session_auth) ->
+                      page.PageArticleEdit(article, session_auth)
+                    _ ->
+                      page.PageError(page.AuthenticationRequired("edit article"))
+                  }
+                }
+                True, None -> {
+                  case model.session {
+                    session.Authenticated(session_auth) ->
+                      page.PageArticleEdit(
+                        article.ArticleV1(
+                          ..article,
+                          draft: article.to_draft(article),
+                        ),
+                        session_auth,
+                      )
+                    _ ->
+                      page.PageError(page.AuthenticationRequired("edit article"))
+                  }
+                }
+                False, _ ->
+                  page.PageError(page.AuthenticationRequired("edit article"))
+              }
+            }
+            Error(_) -> page.PageError(page.ArticleEditNotFound(id))
+          }
+        }
+      }
+    }
+    routes.UrlShortIndex -> {
+      case model.session {
+        session.Authenticated(session_auth) ->
+          page.PageUrlShortIndex(session_auth)
+        _ -> page.PageError(page.AuthenticationRequired("access URL shortener"))
+      }
+    }
+    routes.UrlShortInfo(short_code) -> {
+      case model.session {
+        session.Authenticated(session_auth) ->
+          page.PageUrlShortInfo(short_code, session_auth)
+        _ ->
+          page.PageError(page.AuthenticationRequired(
+            "access URL shortener info",
+          ))
+      }
+    }
+    routes.DjotDemo ->
+      case model.session {
+        session.Authenticated(session_auth) ->
+          page.PageDjotDemo(session_auth, model.djot_demo_content)
+        _ -> page.PageError(page.AuthenticationRequired("access DJOT demo"))
+      }
+    routes.About -> page.PageAbout
+    routes.UiComponents -> {
+      case model.session {
+        session.Authenticated(session_auth) ->
+          page.PageUiComponents(session_auth)
+        _ -> page.PageError(page.AuthenticationRequired("access UI components"))
+      }
+    }
+    routes.Notifications -> {
+      case model.session {
+        session.Authenticated(session_auth) ->
+          page.PageNotifications(session_auth)
+        _ -> page.PageError(page.AuthenticationRequired("access notifications"))
+      }
+    }
+    routes.Profile -> {
+      case model.session {
+        session.Authenticated(session_auth) -> page.PageProfile(session_auth)
+        _ -> page.PageError(page.AuthenticationRequired("access profile"))
+      }
+    }
+    routes.Debug -> page.PageDebug
+    routes.NotFound(uri) -> page.PageNotFound(uri)
+  }
+}
+
+fn view_notice(_notice: String) -> Element(Msg) {
+  // echo notice
+  element.none()
+  // case notice {
+  //   "" -> element.none()
+  //  notice ->
+  //   html.div(
+  //    [
+  //     event.on_click(NoticeCleared),
+  //    attr.class(
+  //     "h-5 w-full cursor-pointer bg-zinc-700 text-mono text-zinc-200 text-xs px-8",
+  //  ),
+  //  ],
+  // [html.text(notice)],
+  // )
+  // }
+}
+
 fn view_modals(model: Model) -> Element(Msg) {
   case model.login_form_open {
     True -> view_login_modal(model)
@@ -2116,30 +2694,30 @@ fn view_header(model: Model) -> Element(Msg) {
                     attributes: [],
                   ),
                   view_header_link(
-                    target: routes.UrlShortIndex,
+                    target: routes.Debug,
                     current: model.route,
-                    label: "URLs",
-                    attributes: [],
-                  ),
-                  view_header_link(
-                    target: routes.UiComponents,
-                    current: model.route,
-                    label: "UI",
-                    attributes: [],
-                  ),
-                  view_header_link(
-                    target: routes.Notifications,
-                    current: model.route,
-                    label: "ntfy",
+                    label: "Debug",
                     attributes: [],
                   ),
                 ],
                 case model.session {
                   session.Authenticated(_) -> [
                     view_header_link(
-                      target: routes.Debug,
+                      target: routes.UrlShortIndex,
                       current: model.route,
-                      label: "Debug",
+                      label: "URLs",
+                      attributes: [],
+                    ),
+                    view_header_link(
+                      target: routes.UiComponents,
+                      current: model.route,
+                      label: "UI",
+                      attributes: [],
+                    ),
+                    view_header_link(
+                      target: routes.Notifications,
+                      current: model.route,
+                      label: "ntfy",
                       attributes: [],
                     ),
                   ]
@@ -2195,30 +2773,30 @@ fn view_header(model: Model) -> Element(Msg) {
                                 attributes: top_nav_attributes_small,
                               ),
                               view_header_link(
-                                target: routes.UrlShortIndex,
+                                target: routes.Debug,
                                 current: model.route,
-                                label: "URLs",
-                                attributes: top_nav_attributes_small,
-                              ),
-                              view_header_link(
-                                target: routes.UiComponents,
-                                current: model.route,
-                                label: "UI",
-                                attributes: top_nav_attributes_small,
-                              ),
-                              view_header_link(
-                                target: routes.Notifications,
-                                current: model.route,
-                                label: "ntfy",
+                                label: "Debug",
                                 attributes: top_nav_attributes_small,
                               ),
                             ],
                             case model.session {
                               session.Authenticated(_) -> [
                                 view_header_link(
-                                  target: routes.Debug,
+                                  target: routes.UrlShortIndex,
                                   current: model.route,
-                                  label: "Debug",
+                                  label: "URLs",
+                                  attributes: top_nav_attributes_small,
+                                ),
+                                view_header_link(
+                                  target: routes.UiComponents,
+                                  current: model.route,
+                                  label: "UI",
+                                  attributes: top_nav_attributes_small,
+                                ),
+                                view_header_link(
+                                  target: routes.Notifications,
+                                  current: model.route,
+                                  label: "ntfy",
                                   attributes: top_nav_attributes_small,
                                 ),
                                 view_header_link(
@@ -2268,38 +2846,38 @@ fn view_header(model: Model) -> Element(Msg) {
                             )
                           _ -> html.text("")
                         },
-                        // case model.debug_use_local_storage {
-                      //   True ->
-                      //     ui.button_menu_custom(
-                      //       [
-                      //         html.div([attr.class("flex justify-between")], [
-                      //           html.text("LocalStorage"),
-                      //           icon.view(
-                      //             [attr.class("w-6 text-green-400")],
-                      //             icon.Checkmark,
-                      //           ),
-                      //         ]),
-                      //       ],
-                      //       ui.ColorNeutral,
-                      //       ui.ButtonStateNormal,
-                      //       DebugToggleLocalStorage,
-                      //     )
-                      //   False ->
-                      //     ui.button_menu_custom(
-                      //       [
-                      //         html.div([attr.class("flex justify-between ")], [
-                      //           html.text("LocalStorage"),
-                      //           icon.view(
-                      //             [attr.class("w-6 text-orange-400")],
-                      //             icon.Close,
-                      //           ),
-                      //         ]),
-                      //       ],
-                      //       ui.ColorNeutral,
-                      //       ui.ButtonStateNormal,
-                      //       DebugToggleLocalStorage,
-                      //     )
-                      // },
+                        case model.debug_use_local_storage {
+                          True ->
+                            ui.button_menu_custom(
+                              [
+                                html.div([attr.class("flex justify-between")], [
+                                  html.text("LocalStorage"),
+                                  icon.view(
+                                    [attr.class("w-6 text-green-400")],
+                                    icon.Checkmark,
+                                  ),
+                                ]),
+                              ],
+                              ui.ColorNeutral,
+                              ui.ButtonStateNormal,
+                              DebugToggleLocalStorage,
+                            )
+                          False ->
+                            ui.button_menu_custom(
+                              [
+                                html.div([attr.class("flex justify-between ")], [
+                                  html.text("LocalStorage"),
+                                  icon.view(
+                                    [attr.class("w-6 text-orange-400")],
+                                    icon.Close,
+                                  ),
+                                ]),
+                              ],
+                              ui.ColorNeutral,
+                              ui.ButtonStateNormal,
+                              DebugToggleLocalStorage,
+                            )
+                        },
                       ]),
                     ],
                   )
@@ -2338,6 +2916,8 @@ fn view_loading() -> List(Element(Msg)) {
   [ui.loading_state("Loading page...", None, ui.ColorNeutral)]
 }
 
+// removed unused old view function; replaced by page/article_list_view.gleam
+
 fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
   case article.draft {
     None -> [view_error("no draft..")]
@@ -2352,7 +2932,7 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
           published_at: article.published_at,
           tags: article.tags,
           title: article.draft_title(draft),
-          content: preview_content,
+          content: article.content |> rd.to_loaded(preview_content),
           draft: None,
           id: article.id,
           leading: article.draft_leading(draft),
@@ -2624,7 +3204,7 @@ fn view_djot_quick_reference() -> Element(Msg) {
 }
 
 fn view_article_edit_not_found(
-  _available_articles: Dict(String, Article),
+  _available_articles: RemoteData(List(Article), HttpError),
   id: String,
 ) -> List(Element(Msg)) {
   [
@@ -4316,18 +4896,19 @@ fn init(_) -> #(Model, Effect(Msg)) {
     Error(_) -> routes.to_uri(routes.Index)
   }
 
-  // let local_storage_effect =
-  //   persist.localstorage_get(
-  //     persist.model_localstorage_key,
-  //     persist.decoder(),
-  //     GotLocalModelResult,
-  //   )
-  // let #(rt_model, rt_init) = realtime.init("/ws")
+  let local_storage_effect =
+    persist.localstorage_get(
+      persist.model_localstorage_key,
+      persist.decoder(),
+      GotLocalModelResult,
+    )
+  let #(rt_model, rt_init) = realtime.init("/ws")
 
   let base_model =
     Model(
       route: routes.from_uri(uri),
       session: session.Unauthenticated,
+      articles: NotInitialized,
       short_urls: NotInitialized,
       short_url_form_short_code: "",
       short_url_form_target_url: "",
@@ -4336,7 +4917,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
       edit_view_mode: EditViewModeEdit,
       profile_menu_open: False,
       notice: "",
-      debug_use_local_storage: False,
+      debug_use_local_storage: True,
       delete_confirmation: None,
       copy_feedback: None,
       expanded_urls: set.new(),
@@ -4344,6 +4925,10 @@ fn init(_) -> #(Model, Effect(Msg)) {
       login_username: "",
       login_password: "",
       login_loading: False,
+      // Keyboard
+      keys_down: set.new(),
+      chords_available: set.new(),
+      chord_bindings: [],
       // Notification form fields
       notification_form_title: "",
       notification_form_message: "",
@@ -4371,25 +4956,12 @@ fn init(_) -> #(Model, Effect(Msg)) {
       debug_ws_status: "Disconnected",
       debug_ws_msg_count: 0,
       // realtime
-      // realtime: rt_model,
-      // realtime_time: "",
+      realtime: rt_model,
+      realtime_time: "",
       // Article cache from WebSocket KV stream
-      // article_cache: dict.new(),
-      // Sync
-      ws: None,
-      article_kv: sync.new_kv(
-        id: "article_kv",
-        bucket: "article",
-        filter: None,
-        encoder_key: json.string,
-        encoder_value: article.encoder,
-        decoder_key: decode.string,
-        decoder_value: article.decoder(),
-        start_revision: 0,
-      ),
+      article_cache: dict.new(),
     )
-  let model = base_model
-  // let model = recompute_bindings_for_current_page(base_model)
+  let model = recompute_bindings_for_current_page(base_model)
   // Connect debug websocket
   let effect_modem =
     modem.init(fn(uri) {
@@ -4401,37 +4973,222 @@ fn init(_) -> #(Model, Effect(Msg)) {
 
   // Set up global keyboard listener
 
-  // let subscribe_time =
-  //   effect.from(fn(dispatch) {
-  //     dispatch(RealtimeMsg(realtime.subscribe("time.seconds")))
-  //   })
+  let subscribe_time =
+    effect.from(fn(dispatch) {
+      dispatch(RealtimeMsg(realtime.subscribe("time.seconds")))
+    })
 
-  // let subscribe_article_kv =
-  //   effect.from(fn(dispatch) {
-  //     dispatch(RealtimeMsg(realtime.kv_subscribe("article")))
-  //   })
+  let subscribe_article_kv =
+    effect.from(fn(dispatch) {
+      dispatch(RealtimeMsg(realtime.kv_subscribe("article")))
+    })
 
-  // let request_article_list =
-  //   effect.from(fn(dispatch) { dispatch(RealtimeMsg(realtime.article_list())) })
+  let request_article_list =
+    effect.from(fn(dispatch) { dispatch(RealtimeMsg(realtime.article_list())) })
 
   #(
     model,
     effect.batch([
       effect_modem,
-      ws.init("/ws", WebSocketMsg),
-      // local_storage_effect,
+      local_storage_effect,
       // effect_nav,
       session.auth_check(AuthCheckResponse, model.base_uri),
-      // subscribe_time,
-      // subscribe_article_kv,
-      // request_article_list,
-      // key.setup(
-      //   should_prevent_keydown(model.chords_available),
-      //   KeyboardDown,
-      //   KeyboardUp,
-      // ),
+      subscribe_time,
+      subscribe_article_kv,
+      request_article_list,
+      key.setup(
+        should_prevent_keydown(model.chords_available),
+        KeyboardDown,
+        KeyboardUp,
+      ),
       window_events.setup(WindowUnfocused),
-      // effect.map(rt_init, RealtimeMsg),
+      effect.map(rt_init, RealtimeMsg),
     ]),
   )
+}
+
+fn view_debug_realtime(model: Model) -> List(Element(Msg)) {
+  let targets =
+    model.debug_targets
+    |> set.to_list
+    |> list.sort(string.compare)
+
+  [
+    html.div([attr.class("max-w-3xl mx-auto p-4 space-y-4")], [
+      html.h2([attr.class("text-xl font-bold")], [html.text("Realtime Debug")]),
+      html.div([attr.class("text-sm text-zinc-300 space-y-1")], [
+        html.div([], [
+          html.text("Connection: "),
+          html.span(
+            [
+              attr.class(case realtime.is_connected(model.realtime) {
+                True -> "text-green-400"
+                False -> "text-red-400"
+              }),
+            ],
+            [
+              html.text(case realtime.is_connected(model.realtime) {
+                True -> "Connected"
+                False -> "Disconnected"
+              }),
+            ],
+          ),
+        ]),
+        html.div([], [
+          case realtime.is_connected(model.realtime) {
+            True -> element.none()
+            False ->
+              html.span([], [
+                html.text("Failed "),
+                html.code([], [
+                  html.text(int.to_string(realtime.retries(model.realtime))),
+                ]),
+                html.text(" times: retrying in "),
+                html.code([], [
+                  html.text(
+                    int.to_string(realtime.next_retry_ms(model.realtime) / 1000)
+                    <> " s",
+                  ),
+                ]),
+              ])
+          },
+        ]),
+        html.div([], [
+          html.text("Messages received: "),
+          html.code([], [html.text(int.to_string(model.debug_ws_msg_count))]),
+        ]),
+        html.div([attr.class("pt-1")], [
+          html.text("Current time: "),
+          html.code([], [html.text(format_unix_locale(model.realtime_time))]),
+        ]),
+        html.div([attr.class("pt-1")], [
+          html.text("Client - server time diff: "),
+          html.code([], [
+            html.text(client_server_time_diff_ms(model.realtime_time)),
+          ]),
+        ]),
+        html.div([attr.class("pt-1")], [
+          html.text("KV buckets: "),
+          html.code([], [
+            html.text(
+              realtime.kv_buckets(model.realtime)
+              |> list.map(fn(bucket) { bucket })
+              |> string.join(", "),
+            ),
+          ]),
+        ]),
+      ]),
+      html.div([], [
+        html.h3([attr.class("font-semibold mb-2")], [
+          html.text("Active Subscriptions"),
+        ]),
+        html.ul(
+          [attr.class("space-y-2")],
+          list.map(targets, fn(tgt) {
+            let latest = case dict.get(model.debug_latest, tgt) {
+              Ok(v) -> v
+              Error(Nil) -> ""
+            }
+            let count = case dict.get(model.debug_counts, tgt) {
+              Ok(c) -> c
+              Error(Nil) -> 0
+            }
+            let is_open = set.contains(model.debug_expanded, tgt)
+
+            // Try to parse article KV updates for better display
+            let parsed_content = case tgt {
+              "article" -> {
+                case json.parse(from: latest, using: article_kv_decoder()) {
+                  Ok(update) -> {
+                    html.div([attr.class("space-y-2")], [
+                      html.div(
+                        [attr.class("flex justify-between items-center")],
+                        [
+                          html.span(
+                            [attr.class("text-sm font-medium text-blue-300")],
+                            [html.text("Article Update: " <> update.operation)],
+                          ),
+                          html.span([attr.class("text-xs text-zinc-400")], [
+                            html.text("Rev " <> int.to_string(update.revision)),
+                          ]),
+                        ],
+                      ),
+                      html.div([attr.class("text-xs space-y-1")], [
+                        html.div([], [
+                          html.text("Key: "),
+                          html.code([attr.class("text-blue-400")], [
+                            html.text(update.key),
+                          ]),
+                        ]),
+                        case update.value {
+                          Some(article) -> {
+                            html.div(
+                              [attr.class("mt-2 p-2 bg-zinc-900 rounded")],
+                              [
+                                html.div(
+                                  [attr.class("font-medium text-blue-300")],
+                                  [html.text(article.title)],
+                                ),
+                                html.div(
+                                  [attr.class("text-xs text-zinc-400 mt-1")],
+                                  [html.text("Slug: " <> article.slug)],
+                                ),
+                                html.div([attr.class("text-xs text-zinc-400")], [
+                                  html.text("Author: " <> article.author),
+                                ]),
+                                html.div([attr.class("text-xs text-zinc-400")], [
+                                  html.text(
+                                    "Tags: " <> string.join(article.tags, ", "),
+                                  ),
+                                ]),
+                              ],
+                            )
+                          }
+                          None -> {
+                            html.div([attr.class("text-red-400 text-xs")], [
+                              html.text("Article deleted"),
+                            ])
+                          }
+                        },
+                      ]),
+                    ])
+                  }
+                  Error(_) -> {
+                    html.pre([attr.class("whitespace-pre-wrap text-xs")], [
+                      html.text(latest),
+                    ])
+                  }
+                }
+              }
+              _ -> {
+                html.pre([attr.class("whitespace-pre-wrap text-xs")], [
+                  html.text(latest),
+                ])
+              }
+            }
+
+            html.li([attr.class("border border-zinc-700 rounded p-2")], [
+              html.details(
+                [
+                  attr.attribute("open", case is_open {
+                    True -> "open"
+                    False -> ""
+                  }),
+                ],
+                [
+                  html.summary([event.on_click(DebugToggleExpanded(tgt))], [
+                    html.code([], [html.text(tgt)]),
+                    html.span([attr.class("ml-2 text-zinc-400")], [
+                      html.text("(" <> int.to_string(count) <> ")"),
+                    ]),
+                  ]),
+                  html.div([attr.class("mt-2")], [parsed_content]),
+                ],
+              ),
+            ])
+          }),
+        ),
+      ]),
+    ]),
+  ]
 }

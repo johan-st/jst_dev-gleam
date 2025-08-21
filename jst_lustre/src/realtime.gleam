@@ -43,9 +43,12 @@ pub opaque type Msg {
   ArticleHistory(String)
   ArticleRevision(String, Int)
   // Article real-time updates
-  ArticleUpdated(String, ArticleResponse) // id, article
-  ArticleCreated(String, ArticleResponse) // id, article
-  ArticleDeleted(String) // id
+  ArticleUpdated(String, ArticleResponse)
+  // id, article
+  ArticleCreated(String, ArticleResponse)
+  // id, article
+  ArticleDeleted(String)
+  // id
   // target, raw json
   Noop
 }
@@ -104,7 +107,14 @@ pub type ArticleHistoryResponse {
 // ---------- Public API ----------
 
 pub fn init(path: String) -> #(Model, Effect(Msg)) {
-  let model = Model(path: path, socket: None, retries: 0, subjects: set.new(), kv_buckets: set.new())
+  let model =
+    Model(
+      path: path,
+      socket: None,
+      retries: 0,
+      subjects: set.new(),
+      kv_buckets: set.new(),
+    )
   #(model, ws.init(path, handle_ws_event))
 }
 
@@ -170,11 +180,21 @@ pub fn update(msg: Msg, model: Model) -> #(Model, Effect(Msg)) {
         |> list.map(fn(bucket) {
           encode_envelope("kv_sub", bucket, None, json.object([]))
         })
-      
+
       // Auto-subscribe to article KV updates for real-time data
-      let article_sub = encode_envelope("kv_sub", "article", None, json.object([#("pattern", json.string(">"))]))
-      
-      let all_messages = list.append(resend_subjects, list.append(resend_kv_buckets, [article_sub]))
+      let article_sub =
+        encode_envelope(
+          "kv_sub",
+          "article",
+          None,
+          json.object([#("pattern", json.string(">"))]),
+        )
+
+      let all_messages =
+        list.append(
+          resend_subjects,
+          list.append(resend_kv_buckets, [article_sub]),
+        )
       let send_effect = case all_messages {
         [] -> effect.none()
         msgs ->
@@ -240,7 +260,15 @@ pub fn update(msg: Msg, model: Model) -> #(Model, Effect(Msg)) {
     ArticleList -> {
       let send_eff = case model.socket {
         Some(sock) ->
-          ws.send(sock, encode_envelope("article_list", "", Some("list_articles_1"), json.object([])))
+          ws.send(
+            sock,
+            encode_envelope(
+              "article_list",
+              "",
+              Some("list_articles_1"),
+              json.object([]),
+            ),
+          )
         None -> effect.none()
       }
       #(model, send_eff)
@@ -251,7 +279,12 @@ pub fn update(msg: Msg, model: Model) -> #(Model, Effect(Msg)) {
         Some(sock) ->
           ws.send(
             sock,
-            encode_envelope("article_get", "", None, json.object([#("id", json.string(id))])),
+            encode_envelope(
+              "article_get",
+              "",
+              None,
+              json.object([#("id", json.string(id))]),
+            ),
           )
         None -> effect.none()
       }
@@ -259,14 +292,15 @@ pub fn update(msg: Msg, model: Model) -> #(Model, Effect(Msg)) {
     }
 
     ArticleCreate(req) -> {
-      let data = json.object([
-        #("title", json.string(req.title)),
-        #("subtitle", json.string(req.subtitle)),
-        #("leading", json.string(req.leading)),
-        #("content", json.string(req.content)),
-                        #("tags", json.array(from: req.tags, of: json.string)),
-        #("published_at", json.int(req.published_at)),
-      ])
+      let data =
+        json.object([
+          #("title", json.string(req.title)),
+          #("subtitle", json.string(req.subtitle)),
+          #("leading", json.string(req.leading)),
+          #("content", json.string(req.content)),
+          #("tags", json.array(from: req.tags, of: json.string)),
+          #("published_at", json.int(req.published_at)),
+        ])
       let send_eff = case model.socket {
         Some(sock) ->
           ws.send(sock, encode_envelope("article_create", "", None, data))
@@ -276,13 +310,17 @@ pub fn update(msg: Msg, model: Model) -> #(Model, Effect(Msg)) {
     }
 
     ArticleUpdate(id, req) -> {
-      let update_data = json.object([
-        #("id", json.string(id)),
-        #("data", encode_update_request(req)),
-      ])
+      let update_data =
+        json.object([
+          #("id", json.string(id)),
+          #("data", encode_update_request(req)),
+        ])
       let send_eff = case model.socket {
         Some(sock) ->
-          ws.send(sock, encode_envelope("article_update", "", None, update_data))
+          ws.send(
+            sock,
+            encode_envelope("article_update", "", None, update_data),
+          )
         None -> effect.none()
       }
       #(model, send_eff)
@@ -293,7 +331,12 @@ pub fn update(msg: Msg, model: Model) -> #(Model, Effect(Msg)) {
         Some(sock) ->
           ws.send(
             sock,
-            encode_envelope("article_delete", "", None, json.object([#("id", json.string(id))])),
+            encode_envelope(
+              "article_delete",
+              "",
+              None,
+              json.object([#("id", json.string(id))]),
+            ),
           )
         None -> effect.none()
       }
@@ -305,7 +348,12 @@ pub fn update(msg: Msg, model: Model) -> #(Model, Effect(Msg)) {
         Some(sock) ->
           ws.send(
             sock,
-            encode_envelope("article_history", "", None, json.object([#("id", json.string(id))])),
+            encode_envelope(
+              "article_history",
+              "",
+              None,
+              json.object([#("id", json.string(id))]),
+            ),
           )
         None -> effect.none()
       }
@@ -343,19 +391,25 @@ pub fn update(msg: Msg, model: Model) -> #(Model, Effect(Msg)) {
               None,
               json.object([
                 #("id", json.string(id)),
-                #("article", json.object([
-                  #("id", json.string(article.id)),
-                  #("slug", json.string(article.slug)),
-                  #("title", json.string(article.title)),
-                  #("subtitle", json.string(article.subtitle)),
-                  #("leading", json.string(article.leading)),
-                  #("author", json.string(article.author)),
-                  #("published_at", json.int(article.published_at)),
-                  #("tags", json.array(from: article.tags, of: json.string)),
-                  #("content", json.string(article.content |> option.unwrap(""))),
-                  #("revision", json.int(article.revision)),
-                  #("struct_version", json.int(article.struct_version)),
-                ])),
+                #(
+                  "article",
+                  json.object([
+                    #("id", json.string(article.id)),
+                    #("slug", json.string(article.slug)),
+                    #("title", json.string(article.title)),
+                    #("subtitle", json.string(article.subtitle)),
+                    #("leading", json.string(article.leading)),
+                    #("author", json.string(article.author)),
+                    #("published_at", json.int(article.published_at)),
+                    #("tags", json.array(from: article.tags, of: json.string)),
+                    #(
+                      "content",
+                      json.string(article.content |> option.unwrap("")),
+                    ),
+                    #("revision", json.int(article.revision)),
+                    #("struct_version", json.int(article.struct_version)),
+                  ]),
+                ),
               ]),
             ),
           )
@@ -375,19 +429,25 @@ pub fn update(msg: Msg, model: Model) -> #(Model, Effect(Msg)) {
               None,
               json.object([
                 #("id", json.string(id)),
-                #("article", json.object([
-                  #("id", json.string(article.id)),
-                  #("slug", json.string(article.slug)),
-                  #("title", json.string(article.title)),
-                  #("subtitle", json.string(article.subtitle)),
-                  #("leading", json.string(article.leading)),
-                  #("author", json.string(article.author)),
-                  #("published_at", json.int(article.published_at)),
-                  #("tags", json.array(from: article.tags, of: json.string)),
-                  #("content", json.string(article.content |> option.unwrap(""))),
-                  #("revision", json.int(article.revision)),
-                  #("struct_version", json.int(article.struct_version)),
-                ])),
+                #(
+                  "article",
+                  json.object([
+                    #("id", json.string(article.id)),
+                    #("slug", json.string(article.slug)),
+                    #("title", json.string(article.title)),
+                    #("subtitle", json.string(article.subtitle)),
+                    #("leading", json.string(article.leading)),
+                    #("author", json.string(article.author)),
+                    #("published_at", json.int(article.published_at)),
+                    #("tags", json.array(from: article.tags, of: json.string)),
+                    #(
+                      "content",
+                      json.string(article.content |> option.unwrap("")),
+                    ),
+                    #("revision", json.int(article.revision)),
+                    #("struct_version", json.int(article.struct_version)),
+                  ]),
+                ),
               ]),
             ),
           )
@@ -447,16 +507,14 @@ pub fn article_create(
   tags: List(String),
   published_at: Int,
 ) -> Msg {
-  ArticleCreate(
-    ArticleCreateRequest(
-      title: title,
-      subtitle: subtitle,
-      leading: leading,
-      content: content,
-      tags: tags,
-      published_at: published_at,
-    )
-  )
+  ArticleCreate(ArticleCreateRequest(
+    title: title,
+    subtitle: subtitle,
+    leading: leading,
+    content: content,
+    tags: tags,
+    published_at: published_at,
+  ))
 }
 
 pub fn article_update(
@@ -477,7 +535,7 @@ pub fn article_update(
       content: content,
       tags: tags,
       published_at: published_at,
-    )
+    ),
   )
 }
 
@@ -544,26 +602,45 @@ fn handle_incoming_text(text: String, model: Model) -> #(Model, Effect(Msg)) {
                   // Article created or updated
                   case decode_article_response(value_data) {
                     Ok(article) -> {
-                      #(model, effect.from(fn(dispatch) { 
-                        dispatch(ArticleUpdated(key, article)) 
-                      }))
+                      #(
+                        model,
+                        effect.from(fn(dispatch) {
+                          dispatch(ArticleUpdated(key, article))
+                        }),
+                      )
                     }
                     Error(_) -> {
-                      #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
+                      #(
+                        model,
+                        effect.from(fn(dispatch) {
+                          dispatch(Incoming(target, text))
+                        }),
+                      )
                     }
                   }
                 }
                 "delete" -> {
                   // Article deleted
-                  #(model, effect.from(fn(dispatch) { dispatch(ArticleDeleted(key)) }))
+                  #(
+                    model,
+                    effect.from(fn(dispatch) { dispatch(ArticleDeleted(key)) }),
+                  )
                 }
                 _ -> {
-                  #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
+                  #(
+                    model,
+                    effect.from(fn(dispatch) {
+                      dispatch(Incoming(target, text))
+                    }),
+                  )
                 }
               }
             }
             Error(_) -> {
-              #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
+              #(
+                model,
+                effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }),
+              )
             }
           }
         }
@@ -583,9 +660,10 @@ fn handle_incoming_text(text: String, model: Model) -> #(Model, Effect(Msg)) {
                   case inbox {
                     Some("list_articles_1") -> {
                       // This is the article list response
-                                              case decode_article_list_response(data) {
-                          Ok(articles) -> {
-                            let articles_json = json.array(from: articles, of: fn(article) {
+                      case decode_article_list_response(data) {
+                        Ok(articles) -> {
+                          let articles_json =
+                            json.array(from: articles, of: fn(article) {
                               json.object([
                                 #("id", json.string(article.id)),
                                 #("slug", json.string(article.slug)),
@@ -593,35 +671,77 @@ fn handle_incoming_text(text: String, model: Model) -> #(Model, Effect(Msg)) {
                                 #("subtitle", json.string(article.subtitle)),
                                 #("leading", json.string(article.leading)),
                                 #("author", json.string(article.author)),
-                                #("published_at", json.int(article.published_at)),
-                                #("tags", json.array(from: article.tags, of: json.string)),
-                                #("content", json.string(article.content |> option.unwrap(""))),
+                                #(
+                                  "published_at",
+                                  json.int(article.published_at),
+                                ),
+                                #(
+                                  "tags",
+                                  json.array(
+                                    from: article.tags,
+                                    of: json.string,
+                                  ),
+                                ),
+                                #(
+                                  "content",
+                                  json.string(
+                                    article.content |> option.unwrap(""),
+                                  ),
+                                ),
                                 #("revision", json.int(article.revision)),
-                                #("struct_version", json.int(article.struct_version))
+                                #(
+                                  "struct_version",
+                                  json.int(article.struct_version),
+                                ),
                               ])
                             })
-                            let response_data = json.object([#("articles", articles_json)])
-                            #(model, effect.from(fn(dispatch) { 
-                              dispatch(Incoming(target, json.to_string(response_data))) 
-                            }))
-                          }
-                          Error(_) -> {
-                            #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
-                          }
+                          let response_data =
+                            json.object([#("articles", articles_json)])
+                          #(
+                            model,
+                            effect.from(fn(dispatch) {
+                              dispatch(Incoming(
+                                target,
+                                json.to_string(response_data),
+                              ))
+                            }),
+                          )
                         }
+                        Error(_) -> {
+                          #(
+                            model,
+                            effect.from(fn(dispatch) {
+                              dispatch(Incoming(target, text))
+                            }),
+                          )
+                        }
+                      }
                     }
                     _ -> {
-                      #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
+                      #(
+                        model,
+                        effect.from(fn(dispatch) {
+                          dispatch(Incoming(target, text))
+                        }),
+                      )
                     }
                   }
                 }
                 _ -> {
-                  #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
+                  #(
+                    model,
+                    effect.from(fn(dispatch) {
+                      dispatch(Incoming(target, text))
+                    }),
+                  )
                 }
               }
             }
             Error(_) -> {
-              #(model, effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }))
+              #(
+                model,
+                effect.from(fn(dispatch) { dispatch(Incoming(target, text)) }),
+              )
             }
           }
         }
@@ -648,7 +768,9 @@ fn encode_envelope(
 
 // no id needed in Elm-style API
 
-fn decode_article_response(data: dynamic.Dynamic) -> Result(ArticleResponse, String) {
+fn decode_article_response(
+  data: dynamic.Dynamic,
+) -> Result(ArticleResponse, String) {
   // Parse from dynamic data directly
   case decode_article_from_dynamic(data) {
     Ok(article) -> Ok(article)
@@ -656,7 +778,9 @@ fn decode_article_response(data: dynamic.Dynamic) -> Result(ArticleResponse, Str
   }
 }
 
-fn decode_article_from_dynamic(data: dynamic.Dynamic) -> Result(ArticleResponse, String) {
+fn decode_article_from_dynamic(
+  data: dynamic.Dynamic,
+) -> Result(ArticleResponse, String) {
   let decoder = {
     use id <- decode.field("id", decode.string)
     use slug <- decode.field("slug", decode.string)
@@ -669,36 +793,39 @@ fn decode_article_from_dynamic(data: dynamic.Dynamic) -> Result(ArticleResponse,
     use content <- decode.field("content", decode.optional(decode.string))
     use revision <- decode.field("revision", decode.int)
     use struct_version <- decode.field("struct_version", decode.int)
-    
-    decode.success(
-      ArticleResponse(
-        id: id,
-        slug: slug,
-        title: title,
-        subtitle: subtitle,
-        leading: leading,
-        author: author,
-        published_at: published_at,
-        tags: tags,
-        content: content,
-        revision: revision,
-        struct_version: struct_version,
-      )
-    )
+
+    decode.success(ArticleResponse(
+      id: id,
+      slug: slug,
+      title: title,
+      subtitle: subtitle,
+      leading: leading,
+      author: author,
+      published_at: published_at,
+      tags: tags,
+      content: content,
+      revision: revision,
+      struct_version: struct_version,
+    ))
   }
-  
+
   case decode.run(data, decoder) {
     Ok(article) -> Ok(article)
     Error(e) -> Error("Decode error: " <> string.inspect(e))
   }
 }
 
-fn decode_article_list_response(data: dynamic.Dynamic) -> Result(List(ArticleResponse), String) {
+fn decode_article_list_response(
+  data: dynamic.Dynamic,
+) -> Result(List(ArticleResponse), String) {
   let decoder = {
-    use articles <- decode.field("articles", decode.list(article_response_decoder()))
+    use articles <- decode.field(
+      "articles",
+      decode.list(article_response_decoder()),
+    )
     decode.success(articles)
   }
-  
+
   case decode.run(data, decoder) {
     Ok(articles) -> Ok(articles)
     Error(e) -> Error("Decode error: " <> string.inspect(e))
@@ -717,60 +844,59 @@ fn article_response_decoder() -> decode.Decoder(ArticleResponse) {
   use content <- decode.field("content", decode.optional(decode.string))
   use revision <- decode.field("revision", decode.int)
   use struct_version <- decode.field("struct_version", decode.int)
-  
-  decode.success(
-    ArticleResponse(
-      id: id,
-      slug: slug,
-      title: title,
-      subtitle: subtitle,
-      leading: leading,
-      author: author,
-      published_at: published_at,
-      tags: tags,
-      content: content,
-      revision: revision,
-      struct_version: struct_version,
-    )
-  )
+
+  decode.success(ArticleResponse(
+    id: id,
+    slug: slug,
+    title: title,
+    subtitle: subtitle,
+    leading: leading,
+    author: author,
+    published_at: published_at,
+    tags: tags,
+    content: content,
+    revision: revision,
+    struct_version: struct_version,
+  ))
 }
 
 fn encode_update_request(req: ArticleUpdateRequest) -> json.Json {
-  let fields = list.append(
+  let fields =
     list.append(
       list.append(
         list.append(
           list.append(
-            case req.title {
-              Some(title) -> [#("title", json.string(title))]
+            list.append(
+              case req.title {
+                Some(title) -> [#("title", json.string(title))]
+                None -> []
+              },
+              case req.subtitle {
+                Some(subtitle) -> [#("subtitle", json.string(subtitle))]
+                None -> []
+              },
+            ),
+            case req.leading {
+              Some(leading) -> [#("leading", json.string(leading))]
               None -> []
             },
-            case req.subtitle {
-              Some(subtitle) -> [#("subtitle", json.string(subtitle))]
-              None -> []
-            }
           ),
-          case req.leading {
-            Some(leading) -> [#("leading", json.string(leading))]
+          case req.content {
+            Some(content) -> [#("content", json.string(content))]
             None -> []
-          }
+          },
         ),
-        case req.content {
-          Some(content) -> [#("content", json.string(content))]
+        case req.tags {
+          Some(tags) -> [#("tags", json.array(from: tags, of: json.string))]
           None -> []
-        }
+        },
       ),
-      case req.tags {
-        Some(tags) -> [#("tags", json.array(from: tags, of: json.string))]
+      case req.published_at {
+        Some(published_at) -> [#("published_at", json.int(published_at))]
         None -> []
-      }
-    ),
-    case req.published_at {
-      Some(published_at) -> [#("published_at", json.int(published_at))]
-      None -> []
-    }
-  )
-  
+      },
+    )
+
   json.object(fields)
 }
 

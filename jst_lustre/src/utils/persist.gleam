@@ -19,7 +19,7 @@ pub fn encode(model: PersistentModel) -> String {
     PersistentModelV1(articles) -> {
       json.object([
         #("version", json.int(1)),
-        #("articles", json.array(articles, article.article_encoder)),
+        #("articles", json.array(articles, article.encoder)),
       ])
     }
   }
@@ -31,10 +31,7 @@ pub fn decoder() -> Decoder(PersistentModel) {
   case version {
     0 -> decode.success(PersistentModelV0)
     1 -> {
-      use articles <- decode.field(
-        "articles",
-        decode.list(article.article_decoder()),
-      )
+      use articles <- decode.field("articles", decode.list(article.decoder()))
       decode.success(PersistentModelV1(articles))
     }
     _ -> decode.success(PersistentModelV0)

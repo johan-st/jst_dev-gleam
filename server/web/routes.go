@@ -30,13 +30,13 @@ const (
 
 func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc *nats.Conn, embeddedFS fs.FS, jwtSecret string, dev bool) {
 	// Add routes with their respective handlers
-	mux.Handle("GET /api/articles", handleArticleList(l, repo))
-	mux.Handle("POST /api/articles", handleArticleNew(l, repo, nc))
-	mux.Handle("GET /api/articles/{id}", handleArticle(l, repo))
-	mux.Handle("PUT /api/articles/{id}", handleArticleUpdate(l, repo))
-	mux.Handle("DELETE /api/articles/{id}", handleArticleDelete(l, repo))
-	mux.Handle("GET /api/articles/{id}/revisions", handleArticleRevisions(l, repo))
-	mux.Handle("GET /api/articles/{id}/revisions/{revision}", handleArticleRevision(l, repo))
+	mux.Handle("GET /api/article", handleArticleList(l, repo))
+	mux.Handle("POST /api/article", handleArticleNew(l, repo, nc))
+	mux.Handle("GET /api/article/{id}", handleArticle(l, repo))
+	mux.Handle("PUT /api/article/{id}", handleArticleUpdate(l, repo))
+	mux.Handle("DELETE /api/article/{id}", handleArticleDelete(l, repo))
+	mux.Handle("GET /api/article/{id}/revisions", handleArticleRevisions(l, repo))
+	mux.Handle("GET /api/article/{id}/revisions/{revision}", handleArticleRevision(l, repo))
 
 	// auth
 	mux.Handle("POST /api/auth", handleAuth(l, nc, jwtSecret))
@@ -597,7 +597,7 @@ func handleArticleList(l *jst_log.Logger, repo articles.ArticleRepo) http.Handle
 
 // handleArticle creates a handler for getting a single article by slug
 func handleArticle(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
-	logger := l.WithBreadcrumb("articles").WithBreadcrumb("get")
+	logger := l.WithBreadcrumb("article").WithBreadcrumb("get")
 	logger.Debug("ready")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -631,7 +631,7 @@ func handleArticle(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 // We do not use any information from the Post request body when
 // creating the new article.
 func handleArticleNew(l *jst_log.Logger, repo articles.ArticleRepo, nc *nats.Conn) http.Handler {
-	logger := l.WithBreadcrumb("articles").WithBreadcrumb("new")
+	logger := l.WithBreadcrumb("article").WithBreadcrumb("new")
 	logger.Debug("ready")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var (
@@ -708,7 +708,7 @@ func handleArticleNew(l *jst_log.Logger, repo articles.ArticleRepo, nc *nats.Con
 
 // handleArticleUpdate creates a handler for updating an existing article
 func handleArticleUpdate(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
-	logger := l.WithBreadcrumb("articles").WithBreadcrumb("save")
+	logger := l.WithBreadcrumb("article").WithBreadcrumb("save")
 	logger.Debug("ready")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -784,7 +784,7 @@ func handleArticleUpdate(l *jst_log.Logger, repo articles.ArticleRepo) http.Hand
 
 // handleArticleDelete creates a handler for deleting an article
 func handleArticleDelete(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
-	logger := l.WithBreadcrumb("articles").WithBreadcrumb("delete")
+	logger := l.WithBreadcrumb("article").WithBreadcrumb("delete")
 	logger.Debug("ready")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

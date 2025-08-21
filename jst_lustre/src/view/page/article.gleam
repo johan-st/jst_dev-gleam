@@ -15,15 +15,7 @@ pub fn view_article_page(
   article: Article,
   _sess: session.Session,
 ) -> List(Element(msg)) {
-  let content: List(Element(msg)) = case article.content {
-    NotInitialized -> [parts.view_error("content not initialized")]
-    Pending(_, _) -> [
-      ui.loading_bar(ui.ColorTeal),
-      ui.loading("Loading article...", ui.ColorNeutral),
-    ]
-    Loaded(content_string, _, _) -> jot_to_lustre.to_lustre(content_string)
-    Errored(error, _) -> [parts.view_error(error_string.http_error(error))]
-  }
+  let content: List(Element(msg)) = jot_to_lustre.to_lustre(article.content)
 
   [
     html.article([], [
