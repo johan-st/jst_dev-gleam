@@ -122,6 +122,47 @@ pub fn can_publish(_article: Article, session: Session) -> Bool {
   |> session.permission_any(["post_edit_any"])
 }
 
+pub fn with_draft(article: Article) -> #(Article, Draft) {
+  case article {
+    ArticleV1(
+      id: _,
+      slug: _,
+      revision: _,
+      author: _,
+      tags: _,
+      published_at: _,
+      title: _,
+      subtitle: _,
+      leading: _,
+      content: _,
+      draft: Some(draft),
+    ) -> #(article, draft)
+    ArticleV1(
+      id: _,
+      slug: _,
+      revision: _,
+      author: _,
+      tags: _,
+      published_at: _,
+      title: _,
+      subtitle: _,
+      leading: _,
+      content: _,
+      draft: None,
+    ) -> {
+      let draft =
+        draft_new(
+          article.slug,
+          article.title,
+          article.subtitle,
+          article.leading,
+          article.content,
+        )
+      #(ArticleV1(..article, draft: Some(draft)), draft)
+    }
+  }
+}
+
 // HTTP -------------------------------------------------------------------------
 
 // pub fn article_get(msg, id: String, base_uri: Uri) -> Effect(a) {
@@ -153,16 +194,16 @@ pub fn article_update(msg, article: Article, base_uri: Uri) -> Effect(a) {
   http.send(request, http.expect_json(decoder(), msg))
 }
 
-// pub fn article_create(msg, article: Article, base_uri: Uri) -> Effect(a) {
-//   let request =
-//     request.new()
-//     |> request.set_method(gleam_http.Post)
-//     |> request.set_path("/api/article")
-//     |> request.set_body(article_encoder(article) |> json.to_string)
-//     |> add_base_uri(base_uri)
+pub fn article_create(msg, article: Article, base_uri: Uri) -> Effect(a) {
+  let request =
+    request.new()
+    |> request.set_method(gleam_http.Post)
+    |> request.set_path("/api/article")
+    |> request.set_body(encoder(article) |> json.to_string)
+    |> add_base_uri(base_uri)
 
-//   http.send(request, http.expect_json(article_decoder(), msg))
-// }
+  http.send(request, http.expect_json(decoder(), msg))
+}
 
 // pub fn article_update_(msg, article: Article, base_uri: Uri) -> Effect(a) {
 //   let request =
@@ -175,15 +216,15 @@ pub fn article_update(msg, article: Article, base_uri: Uri) -> Effect(a) {
 //   http.send(request, http.expect_json(article_decoder(), msg))
 // }
 
-// pub fn article_delete(msg, id: String, base_uri: Uri) -> Effect(a) {
-//   let request =
-//     request.new()
-//     |> request.set_method(gleam_http.Delete)
-//     |> request.set_path("/api/article/" <> id)
-//     |> add_base_uri(base_uri)
+pub fn article_delete(msg, id: String, base_uri: Uri) -> Effect(a) {
+  let request =
+    request.new()
+    |> request.set_method(gleam_http.Delete)
+    |> request.set_path("/api/article/" <> id)
+    |> add_base_uri(base_uri)
 
-//   http.send(request, http.expect_text(msg))
-// }
+  http.send(request, http.expect_text(msg))
+}
 
 fn add_base_uri(req, base_uri: Uri) {
   let req = case base_uri.scheme {

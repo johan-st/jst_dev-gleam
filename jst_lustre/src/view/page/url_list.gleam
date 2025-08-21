@@ -30,7 +30,7 @@ pub type Callbacks(msg) {
 pub fn list(
   urls: RemoteData(List(ShortUrl), HttpError),
   expanded_ids: Set(String),
-  delete_confirmation: Option(String),
+  delete_confirmation: Option(#(String, msg)),
   copy_feedback: Option(String),
   cbs: Callbacks(msg),
 ) -> Element(msg) {
@@ -70,7 +70,7 @@ pub fn list(
             ]),
             html.ul([attr.class("space-y-2"), attr.role("list")], url_elements),
             case delete_confirmation {
-              Some(delete_id) ->
+              Some(#(delete_id, _)) ->
                 delete_confirmation_modal(delete_id, short_urls, cbs)
               None -> html.div([], [])
             },

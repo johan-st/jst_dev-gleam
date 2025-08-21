@@ -75,7 +75,7 @@ type Model {
     profile_menu_open: Bool,
     notice: String,
     debug_use_local_storage: Bool,
-    delete_confirmation: Option(String),
+    delete_confirmation: Option(#(String, Msg)),
     copy_feedback: Option(String),
     expanded_urls: Set(String),
     login_form_open: Bool,
@@ -149,6 +149,8 @@ pub type Msg {
   ArticleCreateClicked
   ArticleCreateResponse(result: Result(Article, HttpError))
   ArticleDeleteClicked(article: Article)
+  ArticleDeleteConfirmClicked(article: Article)
+  ArticleDeleteCancelClicked
   ArticleDeleteResponse(id: String, result: Result(String, HttpError))
   ArticlePublishClicked(article: Article)
   ArticleUnpublishClicked(article: Article)
@@ -760,15 +762,14 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           content: "",
           draft: None,
         )
-      // #(
-      //   model,
-      //   article.article_create(
-      //     ArticleCreateResponse,
-      //     new_article,
-      //     model.base_uri,
-      //   ),
-      // )
-      todo as "article_create"
+      #(
+        model,
+        article.article_create(
+          ArticleCreateResponse,
+          new_article,
+          model.base_uri,
+        ),
+      )
     }
     ArticleCreateResponse(result) -> {
       case result {
@@ -802,23 +803,36 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       }
     }
     ArticleDeleteClicked(article) -> {
-      echo "article delete clicked"
-      // #(
-      //   model,
-      //   effect.batch([
-      //     article.article_delete(
-      //       ArticleDeleteResponse(article.id, _),
-      //       article.id,
-      //       model.base_uri,
-      //     ),
-      //     modem.push(
-      //       routes.Articles |> routes.to_uri |> uri.to_string,
-      //       None,
-      //       None,
-      //     ),
-      //   ]),
-      // )
-      todo as "article_delete"
+      #(
+        Model(
+          ..model,
+          delete_confirmation: Some(#(
+            article.id,
+            ArticleDeleteConfirmClicked(article),
+          )),
+        ),
+        effect.none(),
+      )
+    }
+    ArticleDeleteConfirmClicked(article) -> {
+      #(
+        Model(..model, delete_confirmation: None),
+        effect.batch([
+          article.article_delete(
+            ArticleDeleteResponse(article.id, _),
+            article.id,
+            model.base_uri,
+          ),
+          modem.push(
+            routes.Articles |> routes.to_uri |> uri.to_string,
+            None,
+            None,
+          ),
+        ]),
+      )
+    }
+    ArticleDeleteCancelClicked -> {
+      #(Model(..model, delete_confirmation: None), effect.none())
     }
     ArticleDeleteResponse(id, result) -> {
       case result {
@@ -844,27 +858,25 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ArticlePublishClicked(article) -> {
       echo "article publish clicked"
       let updated_article = ArticleV1(..article, published_at: Some(birl.now()))
-      // #(
-      //   model,
-      //   article.article_update(
-      //     ArticleUpdateResponse(article.id, _),
-      //     updated_article,
-      //     model.base_uri,
-      //   ),
-      // )
-      todo as "article_update"
+      #(
+        model,
+        article.article_update(
+          ArticleUpdateResponse(article.id, _),
+          updated_article,
+          model.base_uri,
+        ),
+      )
     }
     ArticleUnpublishClicked(article) -> {
       echo "article unpublish clicked"
-      // #(
-      //   model,
-      //   article.article_update(
-      //     ArticleUpdateResponse(article.id, _),
-      //     ArticleV1(..article, published_at: None),
-      //     model.base_uri,
-      //   ),
-      // )
-      todo as "article_update"
+      #(
+        model,
+        article.article_update(
+          ArticleUpdateResponse(article.id, _),
+          ArticleV1(..article, published_at: None),
+          model.base_uri,
+        ),
+      )
     }
     // SHORT URLS
     ShortUrlCreateClicked(short_code, target_url) -> {
@@ -927,7 +939,13 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       }
     }
     ShortUrlDeleteClicked(id) -> {
-      #(Model(..model, delete_confirmation: Some(id)), effect.none())
+      #(
+        Model(
+          ..model,
+          delete_confirmation: Some(#(id, ShortUrlDeleteConfirmClicked(id))),
+        ),
+        effect.none(),
+      )
     }
     ShortUrlDeleteConfirmClicked(id) -> {
       #(
@@ -1428,11 +1446,7 @@ fn fetch_articles_model(model_effect_touple) -> #(Model, Effect(Msg)) {
 
   let model =
     Model(..model, article_kv: model.article_kv |> sync.set_data(dict.new()))
-  let effect =
-    effect.batch([
-      effect,
-      // article.article_metadata_get(ArticleMetaGot, model.base_uri),
-    ])
+  let effect = effect.batch([effect])
 
   #(model, effect)
 }
@@ -1440,27 +1454,31 @@ fn fetch_articles_model(model_effect_touple) -> #(Model, Effect(Msg)) {
 fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
   let route = routes.from_uri(uri)
   case route {
-    routes.About -> {
-      #(Model(..model, route:), effect.none())
-    }
-    routes.Article(slug) -> {
-      #(Model(..model, route:), effect.none())
-    }
     routes.ArticleEdit(id) ->
       case model.article_kv.data |> dict.get(id) {
         Ok(article) -> {
-          #(Model(..model, route:), effect.none())
+          case article.draft {
+            Some(_) -> #(Model(..model, route:), effect.none())
+            None -> {
+              let #(updated_article, _draft) = article.with_draft(article)
+              let updated_articles =
+                model.article_kv.data |> dict.insert(id, updated_article)
+              #(
+                Model(
+                  ..model,
+                  route:,
+                  article_kv: model.article_kv
+                    |> sync.set_data(updated_articles),
+                ),
+                effect.none(),
+              )
+            }
+          }
         }
         Error(Nil) -> {
           #(Model(..model, route:), effect.none())
         }
       }
-    routes.Articles -> {
-      #(Model(..model, route:), effect.none())
-    }
-    routes.Index -> {
-      #(Model(..model, route:), effect.none())
-    }
     routes.UrlShortIndex -> {
       case model.short_urls {
         NotInitialized -> #(
@@ -1475,18 +1493,6 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
           #(Model(..model, route:), effect.none())
         }
       }
-    }
-    routes.UrlShortInfo(_short_code) -> {
-      #(Model(..model, route:), effect.none())
-    }
-    routes.DjotDemo -> {
-      #(Model(..model, route:), effect.none())
-    }
-    routes.UiComponents -> {
-      #(Model(..model, route:), effect.none())
-    }
-    routes.Notifications -> {
-      #(Model(..model, route:), effect.none())
     }
     routes.Profile -> {
       case session.subject(model.session) {
@@ -1503,12 +1509,7 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
         }
       }
     }
-    routes.Debug -> {
-      #(Model(..model, route:), effect.none())
-    }
-    routes.NotFound(_uri) -> {
-      #(Model(..model, route:), effect.none())
-    }
+    _ -> #(Model(..model, route:), effect.none())
   }
 }
 
@@ -1526,9 +1527,19 @@ fn view(model: Model) -> Element(Msg) {
     page.Loading(_) -> view_loading()
     page.PageIndex -> index.view(UserMouseDownNavigation)
     page.PageArticleList(in_sync, articles, session) ->
-      article_list.view(in_sync, articles, session)
+      article_list.view(in_sync, articles, session, ArticleCreateClicked)
     page.PageArticle(article, session) ->
-      view_article.view_article_page(article, session)
+      view_article.view_article_page(
+        article,
+        session,
+        UserMouseDownNavigation,
+        ArticlePublishClicked,
+        ArticleUnpublishClicked,
+        ArticleDeleteClicked,
+        ArticleDeleteConfirmClicked,
+        fn() { ArticleDeleteCancelClicked },
+        model.delete_confirmation,
+      )
     page.PageArticleEdit(article, _) -> view_article_edit(model, article)
     page.PageError(error) -> {
       case error {
@@ -2361,7 +2372,17 @@ fn view_article_edit(model: Model, article: Article) -> List(Element(Msg)) {
           subtitle: article.draft_subtitle(draft),
         )
       let preview =
-        view_article.view_article_page(draft_article, session.Unauthenticated)
+        view_article.view_article_page(
+          draft_article,
+          session.Unauthenticated,
+          fn(_uri) { NoOp },
+          fn(_article) { NoOp },
+          fn(_article) { NoOp },
+          fn(_article) { NoOp },
+          fn(_article) { NoOp },
+          fn() { NoOp },
+          None,
+        )
 
       [
         // Toggle button for mobile

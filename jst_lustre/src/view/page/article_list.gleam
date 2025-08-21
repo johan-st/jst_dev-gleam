@@ -18,6 +18,7 @@ pub fn view(
   in_sync: Bool,
   articles: List(Article),
   sess: session.Session,
+  create_article_msg: msg,
 ) -> List(Element(msg)) {
   let filtered_articles = case sess {
     session.Unauthenticated ->
@@ -44,7 +45,16 @@ pub fn view(
     |> list.map(parts.view_article_card)
 
   let header_section = [
-    ui.flex_between(ui.page_title("Articles"), element.none()),
+    ui.flex_between(ui.page_title("Articles"), case sess {
+      session.Authenticated(_) ->
+        ui.button(
+          "Create Article",
+          ui.ColorPink,
+          ui.ButtonStateNormal,
+          create_article_msg,
+        )
+      _ -> element.none()
+    }),
   ]
 
   let content_section = case articles_elements {
