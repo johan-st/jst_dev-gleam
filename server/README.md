@@ -2,41 +2,40 @@
 title: Server README
 ---
 
-## TODOs
+## Development Status
 
-- [ ] have local logging be disconnected from nats
-- [ ] implement optimistic updates (with visual feedback in UI)
-- [ ] clean up architecture from superflous code and logic
+### Current Focus
+- [ ] Clean up architecture from superfluous code and logic
+- [ ] Implement optimistic updates (with visual feedback in UI)
+- [ ] Disconnect local logging from NATS for better development experience
 
-### done-TODOs
+### Completed
+- [x] NATS global supercluster integration
+- [x] JWT/NKEY authentication (replaced .creds file)
 
-- [x] make a version that works with the nats global supercluster
-- [x] (!) Reevaluate including the .creds file.
-  - Will not include. Using jwt and nkey in env
+### `v0` - Core Features
 
-### `v0`
+- [ ] Fix article editing functionality
+- [ ] Clean up and secure API endpoints
+- [ ] Implement proper auth and permissions on API endpoints
+- [ ] Ensure slug uniqueness validation on updates
+- [ ] Handle deleted article history visibility for authenticated users
 
-- [ ] fix editing of articles
-- [ ] clean up and protect api endpoints
-- [ ] check auth and permissions on api endpoints
-- [ ] fail update if slug is not unique.
-- [ ] after delete, we can still access the article history (revisions). Should we show deleted articles to logged in users?
+#### Completed
+- [x] Initial admin user seeding via environment configuration
+  - Use: `cat usersCreate.json | nats req svc.who.users.create`
 
-#### done-v0
+### `v0.1` - Enhanced Features
 
-- [x] seed initial admin somehow (from environment?)
-  - `cat usersCreate.json | nats req svc.who.users.create
-
-### `v0.1`
-
-- [ ] updates to an article should not reset the draft.
-- [ ] build some tests for critical functionality
-  - [ ] testdata should be populated from a series of json files in the testdata directory that are to be used with the nats cli. We could then have a script that requests each service to create the data we want for local development.
-- [ ] add "new" article button
-- [ ] support publish/unpublish
-- [ ] add a "delete" button
-- [ ] add a "history" button
-- [ ] Reevaluate `whoApi`/`who/api`. It could be more intuitive.
+- [ ] Preserve draft state during article updates
+- [ ] Add comprehensive testing for critical functionality
+  - [ ] Create testdata JSON files for NATS CLI testing
+  - [ ] Build development data seeding scripts
+- [ ] Add "New Article" button to UI
+- [ ] Implement publish/unpublish functionality
+- [ ] Add article delete button
+- [ ] Add article history button
+- [ ] Refactor `whoApi`/`who/api` for better intuitiveness
 
 
 ### `later`

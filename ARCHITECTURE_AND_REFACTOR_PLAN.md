@@ -1,91 +1,47 @@
-## ARCHITECTURE_AND_REFACTOR_PLAN
+# Architecture & Refactor Plan
 
-### Overview
-We are building a real-time SPA architecture using:
+## Overview
+Real-time SPA: Gleam+Lustre frontend + Go WebSocket server + NATS (Core, JetStream, KV).
 
-- **Frontend**: Gleam + Lustre SPA with a `realtime.gleam` infrastructure module.
-- **Backend**: Go WebSocket server bridging to NATS (Core, JetStream, KV).
-- **Transport**: Single WebSocket connection for all commands, subscriptions, and KV/stream updates.
-- **Data Flow**:
-  - Client subscribes to NATS subjects, KV buckets, or JetStream streams via WebSocket messages.
-  - Backend enforces capabilities (auth-based access control) with pattern matching.
-  - Backend pushes updates to the client in real time.
-  - Client sends commands (NATS requests) and receives replies correlated via an inbox token.
+**Architecture**: 
+- **WebSocket**: Real-time data sync only (sub, kv_sub, js_sub)
+- **HTTP REST API**: Request-response operations (CRUD, commands)
+- **Data Flow**: HTTP API → Backend → WebSocket → Frontend state update
 
-### Goals
-1. Unified protocol for all operations.
-2. Capabilities with pattern-based access control (`*` and `>` wildcards).
-3. KV subscriptions with optional key patterns.
-4. JetStream subscriptions with optional filter subjects.
-5. Resumeability for JetStream via sequence numbers.
-6. Backpressure handling with connection close on timeout.
-7. Auth change handling via Auth KV watch.
-8. Frontend helpers for commands, KV, and JetStream resume.
+## Goals
+- **WebSocket**: Real-time subscriptions with pattern-based access control (`*`, `>` wildcards)
+- **HTTP REST API**: CRUD operations, commands, JWT auth (no frontend state updates)
 
 ---
 
 ### Protocol Specification
-All messages are JSON objects with the following envelope:
 
+#### WebSocket (Real-time Subscriptions)
 ```json
 {
-  "op": "sub" | "unsub" | "kv_sub" | "js_sub" | "cmd" | "msg" | "reply" | "cap_update" | "error",
+  "op": "sub" | "unsub" | "kv_sub" | "js_sub" | "cap_update" | "error",
   "target": "subject-or-bucket-or-stream",
   "inbox": "optional-correlation-id",
   "data": { }
 }
 ```
 
-- **sub**: Subscribe to a NATS subject. `data` can include `{ "queue": "optional-queue-group" }`.
-- **unsub**: Unsubscribe from a previously created subscription. `data` includes `{ "id": "server-sub-id" }` if needed.
-- **kv_sub**: Subscribe to a KV bucket. `data` can include `{ "pattern": "keys.pattern.*" }`.
-- **js_sub**: Subscribe to a JetStream stream. `data` can include `{ "start_seq": 0, "batch": 100, "filter": "optional.subject" }`.
-- **cmd**: Send a command (NATS request) with `inbox` for correlation. `data` is the request payload.
-- **msg**: Server → client message for a subscription/KV/stream update. `data` contains the event payload and metadata.
-- **reply**: Server → client reply to a `cmd`, echoes `inbox`.
-- **cap_update**: Server → client capabilities update; `data` contains the full effective capabilities after change.
-- **error**: Server → client error message; `data` includes `{ "code": "string", "message": "string", "context": { } }`.
+**Operations**: `sub`, `unsub`, `kv_sub`, `js_sub`
+**Messages**: `sub_msg`, `kv_msg`, `js_msg`, `cap_update`, `error`
+**Note**: No `cmd`/`reply` - commands use HTTP REST API
 
-Recommended server message payloads:
+#### HTTP REST API
+- **Articles**: `GET/POST/PUT/DELETE /api/articles`
+- **Auth**: `POST /api/auth/login`, `POST /api/auth/logout`
+- **Users**: `GET/POST/PUT/DELETE /api/users`
+- **Commands**: `POST /api/commands/{command}`
 
-- For subject messages:
-```json
-{
-  "op": "msg",
-  "target": "chat.room.123",
-  "data": {
-    "payload": { },
-    "meta": { "ts": 1710000000 }
-  }
-}
-```
+**Note**: WebSocket for data sync only. HTTP for operations. Frontend state updated ONLY from WebSocket.
 
-- For KV events:
-```json
-{
-  "op": "msg",
-  "target": "kv:todos",
-  "data": {
-    "key": "user.123.task.1",
-    "revision": 42,
-    "op": "put" | "delete" | "purge",
-    "value": { }
-  }
-}
-```
-
-- For JetStream events:
-```json
-{
-  "op": "msg",
-  "target": "js:chat.stream",
-  "data": {
-    "seq": 12345,
-    "subject": "chat.room.123",
-    "payload": { }
-  }
-}
-```
+**Message Examples**:
+- **Subject**: `{ "op": "sub_msg", "target": "chat.room.123", "data": { "payload": {} } }`
+- **KV**: `{ "op": "kv_msg", "target": "todos", "data": { "key": "user.123.task.1", "op": "put", "value": {} } }`
+- **JetStream**: `{ "op": "js_msg", "target": "chat.stream", "data": { "seq": 12345, "payload": {} } }`
 
 ---
 
@@ -141,8 +97,10 @@ Implementation notes:
 - Consider at-least-once delivery with explicit acks where necessary.
 
 #### 6) Commands
-- On `cmd`, check `isAllowedCommand(target)`.
-- Use `nats.RequestWithContext` and echo `inbox` in a `reply` message along with the response payload.
+**Architecture Decision**: Commands will use HTTP REST API, not WebSocket
+- WebSocket handles real-time subscriptions only
+- HTTP API handles all CRUD operations and commands
+- Frontend state updated through WebSocket subscriptions
 
 #### 7) Backpressure
 - Outbound send queue `sendCh` with bounded buffer.
@@ -159,39 +117,45 @@ Implementation notes:
 
 ### Frontend (Gleam) Implementation Plan
 
-#### 1) `realtime.gleam` Model
+#### 1) `sync.gleam` Model (Current Implementation)
 ```gleam
-pub type Model {
-  Model(
-    socket: Option(websocket.Connection),
-    subs: List(String),
-    kv_subs: List(String),
-    js_subs: List(#(String, Int, Int, String)), // stream, start_seq, batch, filter
-    pending_cmds: map.Map(String, fn(json.Json) -> Msg)
+pub type KV(key, value) {
+  KV(
+    id: String,
+    state: KVState,
+    bucket: String,
+    filter: Option(String),
+    revision: Int,
+    data: Dict(key, value),
+    encoder_key: fn(key) -> Json,
+    encoder_value: fn(value) -> Json,
+    decoder_key: Decoder(key),
+    decoder_value: Decoder(value)
   )
 }
 ```
 
-- Track last-seen JetStream sequence per domain to support resume.
-- Maintain connection state and exponential backoff reconnection.
+**Current Status**: KV-focused WebSocket subscription and data management
+**Features**: Automatic state management, revision tracking, error handling
+**Missing**: Subject subscriptions, JetStream subscriptions, capabilities
 
-#### 2) Helpers
-- `subscribe(subject: String)`
-- `kv_subscribe(bucket: String)`
-- `kv_subscribe_pattern(bucket: String, pattern: String)`
-- `js_subscribe(stream: String, start_seq: Int, batch: Int, filter: String)`
-- `js_resume(stream: String, last_seq: Int, batch: Int, filter: String)`
-- `send_command(target: String, payload: json.Json, cb: fn(json.Json) -> Msg)`
+#### 2) Current Helpers
+- ✅ `new_kv()` - Create new KV subscription
+- ✅ `ws_text_message()` - Handle WebSocket messages
+- ✅ `ws_open()` - Handle WebSocket connection
+- ❌ Subject subscriptions - Not implemented
+- ❌ JetStream subscriptions - Not implemented
 
-#### 3) Resumeability
-- Store `last_seq` in the domain model.
-- On reconnect, call `js_resume` with `last_seq` to pick up where left off.
-- If `last_seq == 0`, fall back to time-based resume (see Next Steps).
+#### 3) Article Operations (Current)
+- **Frontend Messages**: `ArticleCreate`, `ArticleUpdate`, `ArticleDelete`, etc.
+- **Implementation**: These will use HTTP REST API, not WebSocket
+- **Real-time Updates**: WebSocket subscriptions for data sync only
 
-#### 4) Command Replies
-- Client generates a unique `inbox` for each command.
-- Stores callback in `pending_cmds` keyed by `inbox`.
-- On `reply`, looks up callback by `inbox` and dispatches the message.
+#### 4) Future Implementation
+- Subject subscriptions (NATS Core)
+- JetStream subscriptions with resume support
+- Capability handling
+- Command operations via HTTP REST API
 
 ---
 
@@ -203,13 +167,15 @@ pub type Model {
     "todos": ["user.123.*"],
     "articles": [">"]
   },
-  "commands": ["articles.create", "todos.add"],
+  "commands": [],
   "streams": {
     "chat.stream": ["chat.room.123", "chat.room.456"],
     "audit.stream": [">"]
   }
 }
 ```
+
+**Note**: `commands` field exists but is unused. All operations use HTTP REST API.
 
 ---
 
@@ -233,25 +199,23 @@ sequenceDiagram
     C->>W: { op: "sub", target: "chat.room.123" }
     W->>N: SUB chat.room.123
     N-->>W: msg(payload)
-    W-->>C: { op: "msg", target: "chat.room.123", data: { payload } }
+    W-->>C: { op: "sub_msg", target: "chat.room.123", data: { payload } }
 
     Note over C,W: KV subscription
     C->>W: { op: "kv_sub", target: "todos", data: { pattern: "user.123.*" } }
     W->>K: WatchKeys(todos, pattern)
     K-->>W: KV event (put/delete)
-    W-->>C: { op: "msg", target: "kv:todos", data: { key, op, value } }
+    W-->>C: { op: "kv_msg", target: "todos", data: { op: "put", key: "user.123.task1", value: "..." } }
 
     Note over C,W: JetStream subscription with resume
     C->>W: { op: "js_sub", target: "chat.stream", data: { start_seq: 12345, filter: "chat.room.123", batch: 100 } }
     W->>J: Create/Bind consumer (filter, start_seq)
     J-->>W: Messages (seq >= 12345)
-    W-->>C: { op: "msg", target: "js:chat.stream", data: { seq, subject, payload } }
+    W-->>C: { op: "js_msg", target: "chat.stream", data: { payload } }
 
-    Note over C,W: Command/Reply
+    Note over C,W: Command/Reply (HTTP REST API)
     C->>W: { op: "cmd", target: "articles.create", inbox: "abc123", data: { ... } }
-    W->>N: REQ articles.create
-    N-->>W: RPY payload
-    W-->>C: { op: "reply", inbox: "abc123", data: { ... } }
+    W-->>C: { op: "error", data: { "reason": "use HTTP POST /api/articles" } }
 
     Note over C,W: Backpressure guard
     W-->>C: error{ code: "backpressure" }
@@ -260,7 +224,24 @@ sequenceDiagram
 
 ---
 
+### Data Flow and State Management
+
+#### Frontend State Update Rules
+1. **WebSocket Only**: All data model updates come through WebSocket subscriptions
+2. **HTTP Acknowledgment**: HTTP responses confirm operation success but don't modify frontend state
+3. **Real-time Sync**: Changes made via HTTP API automatically appear through WebSocket subscriptions
+4. **Consistent State**: Single source of truth from WebSocket ensures data consistency
+
+#### Fallback Strategy
+- **Primary**: WebSocket for real-time updates
+- **Fallback**: Long polling if WebSocket connection issues arise
+- **Graceful Degradation**: App remains functional with slightly delayed updates during fallback
+
+---
+
 ### Testing Checklist
+
+#### WebSocket (Real-time Subscriptions)
 - [ ] Connect with valid capabilities.
 - [ ] Subscribe to allowed subject → success.
 - [ ] Subscribe to disallowed subject → denied.
@@ -268,16 +249,30 @@ sequenceDiagram
 - [ ] KV subscribe with disallowed pattern → denied.
 - [ ] JS subscribe with allowed filter → success.
 - [ ] JS subscribe with disallowed filter → denied.
-- [ ] Command with allowed target → reply received.
-- [ ] Command with disallowed target → denied.
 - [ ] Auth KV update removes access → unsubscribed + `cap_update` sent.
 - [ ] Backpressure test: block `sendCh` → connection closed after 250ms.
+
+#### HTTP REST API (Request-Response)
+- [ ] CRUD operations for articles
+- [ ] Authentication endpoints
+- [ ] User management endpoints
+- [ ] Command endpoints
+- [ ] JWT authorization and permissions
 
 ---
 
 ### Next Steps
-- Implement time-based resume for JetStream as a fallback when `last_seq` is `0` (e.g., start from `time_delta` seconds ago).
+
+#### WebSocket Enhancements
+- Implement time-based resume for JetStream when `last_seq == 0` (e.g., start from `time_delta` seconds ago).
 - Add durable consumer support for long-lived JetStream subscriptions (naming per user/session).
 - Add per-message ack support for at-least-once delivery in critical streams.
 - Consider heartbeat `ping/pong` at the protocol level for faster dead-connection detection.
 - Add protocol versioning in the envelope (e.g., `v: 1`) to allow non-breaking evolution.
+
+#### HTTP REST API Implementation
+- Implement full CRUD operations for articles
+- Add authentication and user management endpoints
+- Implement command endpoints for business operations
+- Add comprehensive JWT authorization and permission system
+- Consider implementing WebSocket command protocol in the future for real-time commands

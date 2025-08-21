@@ -9,19 +9,24 @@ gleam test
 
 ```
 
-## TODO
+## Development Priorities
 
-- Clean up routes/pages code. I have duplicate code and it is unclear if all is used
-- try listening to nats for articles
-- add states for initial load of article meta and local storage data
-- make sure load and navigation are handled the same way. There are currentlly some inconsistencies. (e.g. navigating by link to "/article/test-article#booop" vs loading the same page)
-- Navigation to a page with a hash should scroll to the corresponding anchor. (html: `<a href="#boop">` should scroll to the tag `<a id="boop">`)
-- Enable LocalStorage
-- Add retry mechanism for failed article fetches. currently we retry on reload or navigation to the article.
-- Add proper error messages for article loading failures. (MID)
-- Consider adding timestamps to article. (LOW)
-- Consider implementing progressive loading or article metadata. (LOW)
-- history is duplicated and not handled well. (i.e. when navigating to the current page) (LOW)
+### High Priority
+- [ ] Clean up routes/pages code (remove duplicates, clarify usage)
+- [ ] Implement NATS article listening
+- [ ] Add proper states for initial article meta and localStorage data loading
+- [ ] Fix navigation inconsistencies (direct links vs page loads)
+- [ ] Implement hash-based anchor scrolling
+
+### Medium Priority
+- [ ] Enable LocalStorage functionality
+- [ ] Add retry mechanism for failed article fetches
+- [ ] Improve error messages for article loading failures
+
+### Low Priority
+- [ ] Add timestamps to articles
+- [ ] Implement progressive loading for article metadata
+- [ ] Fix history duplication and navigation handling
 
 ### Done
 

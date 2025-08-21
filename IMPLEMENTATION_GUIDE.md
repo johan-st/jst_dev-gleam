@@ -45,161 +45,271 @@ Runtime flags (see `server/conf.go`):
 
 ## Backend implementation (Go)
 
-The current WebSocket implementation in `server/web/socket.go` provides a hub with simple message types (`connect|subscribe|unsubscribe|auth|sync|data|error`). We will evolve it to the unified protocol described in `ARCHITECTURE_AND_REFACTOR_PLAN.md` while preserving the hub model and integrating NATS Core, KV, and JetStream.
+The current WebSocket implementation in `server/web/socket.go` provides the unified protocol described in `ARCHITECTURE_AND_REFACTOR_PLAN.md` with NATS Core, KV, and JetStream integration.
 
-### 1) Files to add/modify
+**Architecture Decision**: 
+- **WebSocket**: Real-time data synchronization and updates only
+- **HTTP REST API**: Request-response operations (CRUD, commands, queries)
+- **Frontend State**: Updated ONLY from WebSocket subscriptions, never from HTTP responses
+- **Fallback**: Long polling if WebSocket issues arise
 
-- Modify: `server/web/socket.go`
-- Modify: `server/web/routes.go` (ensure WS endpoint mounted)
-- Add: `server/web/realtime_protocol.go` (protocol envelopes, validation, helpers)
-- Add: `server/web/capabilities.go` (capability model + matching)
-- Optional: `server/web/js_bridge.go` (JetStream helpers)
-- Optional: `server/web/kv_bridge.go` (KV helpers)
+### 1) Current Implementation Status
+
+- ✅ `server/web/socket.go` - Full WebSocket protocol implementation
+- ✅ `server/web/routes.go` - WebSocket endpoint mounted
+- ✅ Protocol envelopes and validation implemented
+- ✅ Capability model and matching implemented
+- ✅ JetStream integration implemented
+- ✅ KV integration implemented
+
+**Missing**: Command/reply operations (`cmd`/`reply`) - These will be implemented via HTTP REST API instead
+**Note**: HTTP responses won't update frontend state - all updates come through WebSocket
 
 ### 2) Protocol envelope and operations
 
-Add a canonical envelope type and operation-specific payloads.
+The protocol envelope is fully implemented with operation-specific payloads.
 
-- Envelope:
-  - `op`: `"sub" | "unsub" | "kv_sub" | "js_sub" | "cmd" | "msg" | "reply" | "cap_update" | "error"`
+- **Envelope** (implemented):
+  - `op`: `"sub" | "unsub" | "kv_sub" | "js_sub" | "cap_update" | "error"`
   - `target`: subject/bucket/stream
-  - `inbox`: correlation id (for `cmd`/`reply`)
+  - `inbox`: correlation id (currently unused, planned for future)
   - `data`: operation-specific object
 
-- Parsing/validation:
-  - Validate allowed operations and required fields; return `error` if invalid.
-  - Include a small `version` (e.g. `v: 1`) for forward-compat.
+- **Server Operations** (implemented):
+  - `sub_msg`: NATS subject messages
+  - `kv_msg`: KV update messages with `{op, rev, key, value}`
+  - `js_msg`: JetStream messages
+  - `cap_update`: Capability updates
+  - `error`: Error messages
 
-- Backward compatibility:
-  - Optionally continue accepting legacy `type` messages for a deprecation window.
+- **Missing**: `cmd`/`reply` operations for request/response pattern - These will be implemented via HTTP REST API
+- **Note**: HTTP responses won't update frontend state - all updates come through WebSocket
 
 ### 3) Capabilities
 
-Create `server/web/capabilities.go`:
+Fully implemented in `server/web/socket.go`:
 
-- Struct:
-  - `Subjects []string`
-  - `Buckets map[string][]string` // bucket pattern -> allowed key patterns
-  - `Commands []string`
-  - `Streams map[string][]string` // stream pattern -> allowed filter subject patterns
+- **Struct** (implemented):
+  - `Subjects []string` - Allowed NATS subjects
+  - `Buckets map[string][]string` - bucket pattern → allowed key patterns
+  - `Commands []string` - Allowed command targets (currently unused)
+  - `Streams map[string][]string` - stream pattern → allowed filter subject patterns
 
-- Matching:
-  - Use NATS-style wildcard matcher (`*`, `>`). You can implement with `nats.Match`-like semantics. For buckets/streams, treat keys and filter subjects as subjects.
+- **Matching** (implemented):
+  - Custom NATS-style wildcard matcher (`*`, `>`) implemented in `subjectMatch()` function
+  - Pattern matching for subjects, KV buckets, and streams
 
-- Source:
-  - Upon WS connect, derive user subject from JWT via `authJwt` middleware context (see `routes.go`, `whoApi.JwtVerify`).
-  - Fetch JSON capability from NATS KV (e.g., bucket `auth.users` key `<subject>`). If absent, default deny.
-  - Watch the capability key for updates; on change, compute diff, revoke disallowed subs, then send `cap_update`.
+- **Source** (implemented):
+  - JWT-based user identification via `whoApi.JwtVerify` middleware
+  - Capabilities fetched from NATS KV bucket `auth.users` key `<user_id>`
+  - Real-time capability updates via `watchAuthKV()` with automatic subscription revocation
 
 ### 4) Client lifecycle & backpressure
 
-Extend `Client` in `socket.go`:
+Fully implemented in `rtClient` struct:
 
-- Fields: `ctx`, `cancel`, `sendCh chan []byte` (bounded), `subs` registry (core, kv, js), `lastActive` timestamp
-- Writer goroutine:
-  - Writes from `sendCh` with a 10s write deadline (already present)
-  - Backpressure: if enqueue blocks > 250ms, send an `error` frame and close the connection
+- **Fields** (implemented):
+  - `ctx`, `cancel` - Context for lifecycle management
+  - `sendCh chan serverMsg` (bounded to 256) - Outbound message queue
+  - `subs` registry - NATS subscriptions
+  - `kvWatchers` registry - KV watchers
 
-Cleanup on disconnect:
-- Cancel context, drain/close all NATS subscriptions, KV watchers, and JS consumers
+- **Writer goroutine** (implemented):
+  - `writeLoop()` processes messages from `sendCh`
+  - Backpressure: 250ms timeout, then connection closed with error
+
+- **Cleanup** (implemented):
+  - Context cancellation on disconnect
+  - Automatic cleanup of all NATS subscriptions and KV watchers
+  - Proper resource cleanup in `unsubscribeAll()`
 
 ### 5) Core subjects (sub/unsub)
 
-- On `sub`:
-  - Check `isAllowedSubject(target)`
-  - Create NATS Core subscription and store handle under `client.subs.core[target]`
-  - Forward each message as `msg` with `target` and payload bytes (or JSON decoded if you standardize)
+Fully implemented:
 
-- On `unsub`:
-  - Find and drain/Unsubscribe handle; remove from registry
+- **On `sub`** (implemented):
+  - `isAllowedSubject(target)` capability check
+  - NATS Core subscription created and stored in `client.subs[target]`
+  - Messages forwarded as `sub_msg` with `target` and payload
+
+- **On `unsub`** (implemented):
+  - Subscription found and properly unsubscribed
+  - Registry cleaned up automatically
 
 ### 6) Commands (cmd/reply)
 
-- On `cmd`:
-  - Check `isAllowedCommand(target)`
-  - Use `nats.RequestWithContext` to send to `target`
-  - On reply, emit `reply` with the same `inbox` and the response payload
-  - On timeout/error, emit `error` with context and matching `inbox`
+**Architecture Decision**: Commands will be implemented via HTTP REST API, not WebSocket.
+
+- **Rationale**: WebSocket is for real-time data synchronization only
+- **Implementation**: Standard REST endpoints for all CRUD operations and commands
+- **Benefits**: Simpler protocol, better tooling support, standard HTTP semantics
+- **Frontend State**: HTTP responses acknowledged but don't update frontend data models
+- **Data Flow**: HTTP API → Backend → WebSocket → Frontend state update
+
+**Current status**: Command handling code is commented out in `socket.go`. HTTP REST API will handle all request-response operations.
 
 ### 7) KV subscriptions (kv_sub)
 
-- Check `isAllowedKV(bucket, pattern)`
-- Acquire KV bucket via JetStream API (`js.KeyValue(bucket)`) and create a watcher:
-  - If `pattern` provided, use `WatchKeys(pattern)`; else `WatchAll()`
-- For each event, emit `msg` with `target: "kv:<bucket>"` and `data: { key, revision, op, value }`
-- Store watcher cancel in registry `client.subs.kv[bucket:pattern]`
+Fully implemented:
+
+- **Capability check**: `isAllowedKV(bucket, pattern)` enforced
+- **KV bucket acquisition**: Via JetStream API (`js.KeyValue(bucket)`)
+- **Pattern support**: `WatchKeys(pattern)` if pattern provided, else `WatchAll()`
+- **Event emission**: `kv_msg` with `target: bucket` and `data: {op, rev, key, value}`
+- **Registry management**: Watchers stored in `client.kvWatchers[bucket]`
+- **Operations supported**: `put`, `delete`, `purge`, `in_sync`
 
 ### 8) JetStream subscriptions (js_sub)
 
-- Check `isAllowedStream(stream, filter)`
-- Create a consumer (durable or ephemeral); set:
-  - `FilterSubject` if `filter` provided
-  - Start position by `start_seq` (sequence start) or default to latest
-  - Pull with `batch` size; loop fetch and forward messages
-- Emit `msg` frames with `{ seq, subject, payload }`
-- If using at-least-once, `Ack()` after successful send
-- Store consumer context in `client.subs.js[stream:filter]`, including last delivered `seq` for resume
+Fully implemented:
+
+- **Capability check**: `isAllowedStream(stream, filter)` enforced
+- **Consumer creation**: Durable consumer with `BindStream(stream)`
+- **Filter support**: `FilterSubject` required (no default fallback)
+- **Start position**: `start_seq` support for resume functionality
+- **Batch processing**: Configurable batch size (default 50)
+- **Message emission**: `js_msg` with `target: stream` and raw message data
+- **Acknowledgment**: Automatic `Ack()` after successful send
+- **Registry management**: Stored in `client.subs[stream]`
+- **Resume support**: Durable consumer naming per user/stream/filter
 
 ### 9) Mounting the WebSocket route
 
-- Ensure a WS handler is mounted (either legacy or new). Example:
-  - `mux.HandleFunc("GET /ws", func(w,r){ HandleWebSocket(hub, w, r) })`
-- `web.New` already sets up a `SyncService`/hub; you can migrate that hub to use the new protocol types and handlers.
+Fully implemented:
+
+- **Route**: `GET /ws` endpoint mounted in routes
+- **Handler**: `HandleRealtimeWebSocket()` function processes connections
+- **Integration**: Direct integration with NATS connection and JetStream context
+- **No legacy hub**: Modern implementation without deprecated hub structure
+
+---
+
+## HTTP REST API Implementation
+
+### Overview
+All request-response operations (CRUD, commands, queries) will use standard HTTP REST API endpoints instead of WebSocket commands.
+
+### Planned Endpoints
+
+#### Articles
+- `GET /api/articles` - List all articles
+- `GET /api/articles/{id}` - Get specific article
+- `POST /api/articles` - Create new article
+- `PUT /api/articles/{id}` - Update article
+- `DELETE /api/articles/{id}` - Delete article
+- `GET /api/articles/{id}/revisions` - Get article revision history
+- `GET /api/articles/{id}/revisions/{revision}` - Get specific revision
+
+#### Authentication
+- `POST /api/auth/login` - User login
+- `POST /api/auth/logout` - User logout
+- `GET /api/auth/me` - Get current user info
+
+#### User Management
+- `GET /api/users` - List users (admin only)
+- `POST /api/users` - Create user (admin only)
+- `PUT /api/users/{id}` - Update user
+- `DELETE /api/users/{id}` - Delete user (admin only)
+
+#### Commands
+- `POST /api/commands/{command}` - Execute business command
+  - Example: `POST /api/commands/publish-article` with article ID in body
+
+### Benefits of HTTP REST API
+- **Standard Semantics**: Familiar HTTP methods and status codes
+- **Better Tooling**: Standard HTTP clients, testing tools, documentation
+- **Caching**: HTTP caching headers and CDN support
+- **Security**: Standard HTTP security practices and middleware
+- **Monitoring**: Standard HTTP metrics and logging
+
+---
+
+## Data Flow and State Management
+
+### Architecture Principles
+1. **WebSocket Only for State Updates**: All frontend data model changes come through WebSocket subscriptions
+2. **HTTP for Operations**: HTTP REST API handles all CRUD operations and commands
+3. **No HTTP State Updates**: HTTP responses confirm success but don't modify frontend data
+4. **Real-time Sync**: Changes made via HTTP automatically appear through WebSocket
+
+### Implementation Pattern
+```
+User Action → HTTP API → Backend → Database → WebSocket → Frontend State Update
+```
+
+### Benefits
+- **Consistent State**: Single source of truth from WebSocket
+- **Real-time Updates**: Immediate UI updates without manual state management
+- **Clean Separation**: HTTP for operations, WebSocket for data sync
+- **Fallback Ready**: Can implement long polling if WebSocket issues arise
 
 ---
 
 ## Frontend implementation (Gleam/Lustre)
 
-Create `src/realtime.gleam` as a small infrastructure module and wire it into the app model.
+`src/sync.gleam` exists and provides KV-focused WebSocket functionality.
 
 ### 1) Model and API
 
-- Model fields (suggested):
-  - `socket: Option(websocket.Connection)`
-  - `subs: List(String)` (core subjects)
-  - `kv_subs: List(String)` (bucket or bucket:pattern)
-  - `js_subs: List(#(String, Int, Int, String))` // stream, start_seq, batch, filter
-  - `pending_cmds: map.Map(String, fn(json.Json) -> Msg)` // inbox -> callback
-  - `caps: Option(json.Json)` (or a typed capability struct)
+- **Model fields** (implemented):
+  - `id: String` - Unique subscription identifier
+  - `state: KVState` - Connection and sync state
+  - `bucket: String` - KV bucket name
+  - `filter: Option(String)` - Optional key pattern filter
+  - `revision: Int` - Current revision number
+  - `data: Dict(key, value)` - Local data cache
+  - **Missing**: Subject subscriptions, JetStream subscriptions, capabilities
 
-- Public helpers:
-  - `connect(base_uri: Uri) -> Effect(Msg)`
-  - `subscribe(subject: String) -> Effect(Msg)`
-  - `kv_subscribe(bucket: String) -> Effect(Msg)`
-  - `kv_subscribe_pattern(bucket: String, pattern: String) -> Effect(Msg)`
-  - `js_subscribe(stream: String, start_seq: Int, batch: Int, filter: String) -> Effect(Msg)`
-  - `js_resume(stream: String, last_seq: Int, batch: Int, filter: String) -> Effect(Msg)`
-  - `send_command(target: String, payload: json.Json, cb: fn(json.Json) -> Msg) -> Effect(Msg)`
+**Note**: This module handles KV data synchronization. HTTP operations are handled separately.
 
-- Message handling:
-  - On `msg` from server: route by `target` prefix (`kv:` / `js:` / subject) and decode payload into domain messages
-  - On `reply`: `lookup inbox` in `pending_cmds` and dispatch callback
-  - On `cap_update`: update local capabilities, optionally prompt UI
-  - On `error`: dispatch a global error notification
+- **Public helpers** (current implementation):
+  - ✅ `connect(path: String) -> Effect(Msg)` - Connect to WebSocket
+  - ✅ `subscribe(subject: String) -> Effect(Msg)` - Subscribe to NATS subject
+  - ✅ `kv_subscribe(bucket: String) -> Effect(Msg)` - Subscribe to KV bucket
+  - ❌ `kv_subscribe_pattern(bucket: String, pattern: String)` - Not implemented
+  - ❌ `js_subscribe(stream: String, start_seq: Int, batch: Int, filter: String)` - Not implemented
+  - ❌ `js_resume(stream: String, last_seq: Int, batch: Int, filter: String)` - Not implemented
+  - ❌ `send_command(target: String, payload: json.Json, cb: fn(json.Json) -> Msg)` - **Will use HTTP REST API instead**
+  - **Note**: HTTP operations handled separately, WebSocket only for data sync
+
+- **Message handling** (partially implemented):
+  - ✅ WebSocket text message parsing
+  - ✅ Basic message routing
+  - ❌ `reply` handling - Not implemented (no `pending_cmds`) - **Will use HTTP REST API instead**
+- **Note**: No reply handling needed - WebSocket only for data sync
+  - ❌ `cap_update` handling - Not implemented (no capabilities field)
+  - ❌ `error` handling - Basic error dispatch exists
 
 ### 2) Socket lifecycle
 
-- Connect to `ws(s)://<host>/ws`. Cookies include the JWT set by the server auth.
-- On open, optionally send a small `hello` if you choose to keep a client-initiated auth or sync message; otherwise wait for `cap_update` from server.
-- Reconnect with exponential backoff; on reconnect, resubscribe core subjects and resume JetStream with `last_seq` per stream.
+Fully implemented:
+
+- **Connection**: `ws://<host>/ws` with JWT cookies
+- **Auto-subscription**: On connect, automatically resubscribes to all subjects and KV buckets
+- **Reconnection**: Exponential backoff with automatic retry
+- **Resubscription**: Core subjects and KV buckets automatically resubscribed on reconnect
+- **Missing**: JetStream resume with `last_seq` not implemented
+- **Fallback Strategy**: Long polling can be implemented if WebSocket connection issues persist
 
 ### 3) Integration into current app
 
-- `src/jst_lustre.gleam` is monolithic; start by:
-  - Adding `realtime.Model` inside the app `Model`
-  - Initializing it in `init`
-  - Mapping socket events to app `Msg` via a small adapter
-  - Storing per-domain `last_seq` as needed (e.g., chat, audit)
+Partially implemented:
 
-- For TEA refactor (see `TEA.md` and `REFACTOR.md`):
-  - If you adopt the page-as-child structure, expose a `subscriptions(model)` per page that needs realtime and `Effect.map` to shell.
+- **Model integration**: `sync.gleam` KV types used for data synchronization
+- **Initialization**: Basic KV subscription initialization in place
+- **Event mapping**: WebSocket message handling for KV updates implemented
+- **Missing**: Subject subscriptions integration not implemented
+- **Missing**: JetStream subscriptions integration not implemented
 
 ### 4) Encoding/decoding
 
-- Create JSON encoders for the envelope:
-  - `op`, `target`, `inbox` (when `cmd`), and `data`
-- Create decoders for server `msg`, `reply`, `cap_update`, `error`
-- Use `gleam/json` for codec definitions and keep them unit tested with fixtures
+Partially implemented:
+
+- **Envelope encoding**: Basic envelope creation for `sub`, `kv_sub` operations
+- **Message parsing**: WebSocket text message parsing implemented
+- **Missing**: Full envelope encoding/decoding for all operations
+- **Missing**: `reply`, `cap_update` message handling
+- **Missing**: Unit tests for codec definitions
 
 ---
 
@@ -222,38 +332,48 @@ Create `src/realtime.gleam` as a small infrastructure module and wire it into th
 
 ## Testing and validation
 
-- Core subject subscription
-  - Use NATS CLI: `nats sub test.subject` and `nats pub test.subject '{"hello":"world"}'`
-  - From client, send `{ op:"sub", target:"test.subject" }` and verify `msg` delivery
+- **Core subject subscription** ❌ Not implemented
+  - Subject subscriptions not yet implemented in frontend
+  - Backend supports it but frontend uses `sync.gleam` for KV only
 
-- Command/reply
-  - Implement a simple service that replies to `svc.echo` and test `cmd` → `reply`
+- **Command/reply** ❌ Not implemented
+  - Command handling code is commented out in `socket.go`
+  - **Architecture**: Commands will use HTTP REST API instead of WebSocket
 
-- KV subscription
+- **KV subscription** ✅ Testable
   - Create bucket: `nats kv add todos`
-  - Frontend: `{ op:"kv_sub", target:"todos", data:{"pattern":"user.123.*"} }`
-  - CLI: `nats kv put TODOS user.123.task1 '{"done":false}'` and verify event
+  - Frontend: Uses `sync.gleam` KV types for subscription
+  - CLI: `nats kv put TODOS user.123.task1 '{"done":false}'` and verify `kv_msg` event
 
-- JetStream subscription
-  - Create stream: `nats stream add CHAT --subjects 'chat.room.*'`
-  - Publish: `nats pub chat.room.123 '{"msg":"hi"}'`
-  - Frontend: `{ op:"js_sub", target:"CHAT", data:{"start_seq":0, "batch":100, "filter":"chat.room.123"} }`
-  - Verify events and `seq` increments; test resume with last seen `seq`
+- **JetStream subscription** ❌ Not implemented
+  - Backend supports it but frontend not yet implemented
+  - Will need to extend `sync.gleam` or create separate module
 
 - Backpressure
   - Temporarily reduce `sendCh` buffer and inject large bursts; verify connection closes after the configured timeout with an `error`
 
-- Capabilities
-  - Seed capabilities into KV (e.g., bucket `auth.users`, key `<subject>`)
+- **Capabilities** ✅ Testable
+  - Seed capabilities into KV (e.g., bucket `auth.users`, key `<user_id>`)
   - Connect as the user; verify allowed vs denied operations and that `cap_update` triggers revocations
+
+---
+
+## HTTP REST API Testing
+
+- **CRUD Operations** - Test all article endpoints
+- **Authentication** - Test login/logout and JWT validation
+- **Authorization** - Test permission-based access control
+- **User Management** - Test user CRUD operations
+- **Commands** - Test business command endpoints
 
 ---
 
 ## Migration notes (from current WS types)
 
-- The existing `WebSocketMessage{ Type, Topic, Data, ... }` and `MsgType*` constants will be replaced by the unified envelope (`op`, `target`, `data`, ...)
-- Preserve the hub structure (`Hub`, `Client`, `readPump`, `writePump`) but update parsing/dispatch in `handleMessage`
-- Keep legacy `Type: "subscribe"|"unsubscribe"` handling during a transition, translating them into `sub|unsub` internally
+- ✅ **Completed**: The existing `WebSocketMessage{ Type, Topic, Data, ... }` and `MsgType*` constants have been replaced by the unified envelope (`op`, `target`, `data`, ...)
+- ✅ **Completed**: Modern implementation without deprecated hub structure (`Hub`, `Client`, `readPump`, `writePump`)
+- ✅ **Completed**: Protocol parsing/dispatch implemented in `readLoop()` and `handleMessage` functions
+- ✅ **Completed**: No legacy handling needed - clean implementation
 
 ---
 
@@ -261,20 +381,27 @@ Create `src/realtime.gleam` as a small infrastructure module and wire it into th
 
 - Backend entrypoint: `server/main.go`
 - HTTP server and routing: `server/web/web.go`, `server/web/routes.go`
-- WebSocket hub: `server/web/socket.go`
+- WebSocket implementation: `server/web/socket.go`
 - Frontend entry HTML: `jst_lustre/index.html`
 - Frontend app: `jst_lustre/src/jst_lustre.gleam`
+- Frontend sync: `jst_lustre/src/sync.gleam`
 - Frontend session/auth: `jst_lustre/src/session.gleam`
 
 ---
 
 ## Future work
 
+### WebSocket Enhancements
 - Time-based resume for JetStream when `last_seq == 0`
 - Durable consumer naming per user/session and stream
 - At-least-once delivery with explicit acks and retry loops
 - Protocol versioning in envelope to allow incremental evolution
 - Heartbeat ops (`ping/pong`) at the protocol level for fast dead-connection detection
+
+### HTTP REST API
+- Implement all planned endpoints (articles, auth, users, commands)
+- Add comprehensive JWT authorization and permission system
+- Consider implementing WebSocket commands in the future for real-time command execution
 
 ---
 
