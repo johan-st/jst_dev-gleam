@@ -45,7 +45,7 @@ pub fn view(
     |> list.map(parts.view_article_card)
 
   let header_section = [
-    ui.flex_between(ui.page_title("Articles"), case sess {
+    ui.flex_between(ui.page_title("Articles", "article-list-title"), case sess {
       session.Authenticated(_) ->
         ui.button(
           "Create Article",
@@ -172,7 +172,10 @@ pub fn view_article_listing(
     })
 
   let header_section = [
-    ui.flex_between(ui.page_title("Articles"), html.div([], [])),
+    ui.flex_between(
+      ui.page_title("Articles", "article-list-title"),
+      html.div([], []),
+    ),
   ]
 
   let content_section = case articles_elements {

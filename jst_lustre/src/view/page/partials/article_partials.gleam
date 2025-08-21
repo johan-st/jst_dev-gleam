@@ -76,18 +76,6 @@ pub fn view_article_tags(tags: List(String)) -> Element(msg) {
   }
 }
 
-pub fn view_title(title: String, slug: String) -> Element(msg) {
-  html.h1(
-    [
-      attr.id("article-title-" <> slug),
-      attr.class(
-        "text-2xl sm:text-3xl sm:h-10 md:text-4xl md:h-12 font-bold text-pink-700",
-      ),
-    ],
-    [html.text(title)],
-  )
-}
-
 pub fn view_subtitle(title: String, slug: String) -> Element(msg) {
   html.h2(
     [

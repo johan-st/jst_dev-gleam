@@ -2,43 +2,21 @@ import gleam/dynamic/decode.{type Decoder}
 import gleam/http as gleam_http
 import gleam/http/request
 import gleam/json.{type Json}
-import gleam/list
 import gleam/option.{None, Some}
 import gleam/uri.{type Uri}
 import lustre/effect.{type Effect}
 import utils/http
 
 pub type NotificationRequest {
-  NotificationRequest(
-    title: String,
-    message: String,
-    category: String,
-    priority: String,
-    ntfy_topic: String,
-    data: List(#(String, String)),
-  )
+  NotificationRequest(message: String)
 }
 
 pub type NotificationResponse {
   NotificationResponse(status: String, message: String, id: String)
 }
 
-pub fn create_notification_request(
-  title: String,
-  message: String,
-  category: String,
-  priority: String,
-  ntfy_topic: String,
-  data: List(#(String, String)),
-) -> NotificationRequest {
-  NotificationRequest(
-    title: title,
-    message: message,
-    category: category,
-    priority: priority,
-    ntfy_topic: ntfy_topic,
-    data: data,
-  )
+pub fn create_notification_request(message: String) -> NotificationRequest {
+  NotificationRequest(message: message)
 }
 
 pub fn send_notification(
@@ -57,27 +35,7 @@ pub fn send_notification(
 }
 
 fn encode_request(request: NotificationRequest) -> Json {
-  let data_object = case request.data {
-    [] -> json.object([])
-    data -> {
-      let data_pairs =
-        list.map(data, fn(pair) {
-          case pair {
-            #(key, value) -> #(key, json.string(value))
-          }
-        })
-      json.object(data_pairs)
-    }
-  }
-
-  json.object([
-    #("title", json.string(request.title)),
-    #("message", json.string(request.message)),
-    #("category", json.string(request.category)),
-    #("priority", json.string(request.priority)),
-    #("ntfy_topic", json.string(request.ntfy_topic)),
-    #("data", data_object),
-  ])
+  json.object([#("message", json.string(request.message))])
 }
 
 fn notification_response_decoder() -> Decoder(NotificationResponse) {

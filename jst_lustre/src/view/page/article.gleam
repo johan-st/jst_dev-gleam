@@ -48,7 +48,7 @@ pub fn view_article_page(
       html.div([attr.class("flex flex-col justify-between group")], [
         html.div([attr.class("flex gap-2 justify-between")], [
           html.div([attr.class("flex flex-col justify-between")], [
-            parts.view_title(article.title, article.slug),
+            ui.page_title(article.title, "article-title-" <> article.slug),
             parts.view_subtitle(article.subtitle, article.slug),
           ]),
           html.div([attr.class("flex flex-col items-end ")], [
@@ -69,7 +69,7 @@ pub fn view_article_page(
 
 pub fn view_article_not_found(slug: String) -> List(Element(msg)) {
   [
-    parts.view_title("Article not found", slug),
+    ui.page_title("Article not found", "article-not-found-title"),
     parts.view_simple_paragraph(
       "The article you are looking for does not exist.",
     ),

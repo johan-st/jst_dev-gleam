@@ -83,12 +83,7 @@ type Model {
     login_password: String,
     login_loading: Bool,
     // Notification form fields
-    notification_form_title: String,
     notification_form_message: String,
-    notification_form_category: String,
-    notification_form_priority: String,
-    notification_form_ntfy_topic: String,
-    notification_form_data: List(#(String, String)),
     notification_sending: Bool,
     // Profile page state
     profile_user: RemoteData(user.UserFull, HttpError),
@@ -193,12 +188,7 @@ pub type Msg {
   WindowUnfocused
 
   // Notifications
-  NotificationFormTitleUpdated(String)
   NotificationFormMessageUpdated(String)
-  NotificationFormCategoryUpdated(String)
-  NotificationFormPriorityUpdated(String)
-  NotificationFormNtfyTopicUpdated(String)
-  NotificationFormDataUpdated(List(#(String, String)))
   NotificationSendClicked
   NotificationSendResponse(Result(NotificationResponse, HttpError))
 
@@ -1053,41 +1043,14 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(Model(..model, expanded_urls: updated_expanded_urls), effect.none())
     }
     // NOTIFICATION HANDLERS
-    NotificationFormTitleUpdated(title) -> {
-      #(Model(..model, notification_form_title: title), effect.none())
-    }
     NotificationFormMessageUpdated(message) -> {
       #(Model(..model, notification_form_message: message), effect.none())
     }
-    NotificationFormCategoryUpdated(category) -> {
-      #(Model(..model, notification_form_category: category), effect.none())
-    }
-    NotificationFormPriorityUpdated(priority) -> {
-      #(Model(..model, notification_form_priority: priority), effect.none())
-    }
-    NotificationFormNtfyTopicUpdated(topic) -> {
-      #(Model(..model, notification_form_ntfy_topic: topic), effect.none())
-    }
-    NotificationFormDataUpdated(data) -> {
-      #(Model(..model, notification_form_data: data), effect.none())
-    }
     NotificationSendClicked -> {
-      case
-        model.notification_form_title,
-        model.notification_form_message,
-        model.notification_form_category
-      {
-        "", _, _ | _, "", _ | _, _, "" -> #(model, effect.none())
-        title, message, category -> {
-          let request =
-            notification.create_notification_request(
-              title,
-              message,
-              category,
-              model.notification_form_priority,
-              model.notification_form_ntfy_topic,
-              model.notification_form_data,
-            )
+      case model.notification_form_message {
+        "" -> #(model, effect.none())
+        message -> {
+          let request = notification.create_notification_request(message)
           #(
             Model(..model, notification_sending: True),
             notification.send_notification(
@@ -1106,12 +1069,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             Model(
               ..model,
               notification_sending: False,
-              notification_form_title: "",
               notification_form_message: "",
-              notification_form_category: "",
-              notification_form_priority: "normal",
-              notification_form_ntfy_topic: "",
-              notification_form_data: [],
               notice: "Notification sent successfully!",
             ),
             effect.none(),
@@ -2649,8 +2607,8 @@ fn view_article_edit_not_found(
   id: String,
 ) -> List(Element(Msg)) {
   [
-    view_title("Article not found", id),
-    view_simple_paragraph("The article you are looking for does not exist."),
+    ui.page_title("Article not found", id),
+    ui.simple_paragraph("The article you are looking for does not exist."),
   ]
 }
 
@@ -3120,13 +3078,13 @@ fn view_url_info_page(model: Model, short_code: String) -> List(Element(Msg)) {
         ]
         Error(_) -> [
           view_title("URL Not Found", "url-not-found"),
-          view_simple_paragraph("The requested URL was not found."),
+          ui.simple_paragraph("The requested URL was not found."),
         ]
       }
     }
     _ -> [
       view_title("URL Info", "url-info"),
-      view_simple_paragraph("Loading URL information..."),
+      ui.simple_paragraph("Loading URL information..."),
     ]
   }
 }
@@ -3135,7 +3093,7 @@ fn view_not_found(requested_uri: Uri) -> List(Element(Msg)) {
   [
     view_title("404 - Page Not Found", "not-found"),
     view_subtitle("The page you're looking for doesn't exist.", "not-found"),
-    view_simple_paragraph(
+    ui.simple_paragraph(
       "The page at " <> uri.to_string(requested_uri) <> " could not be found.",
     ),
   ]
@@ -3236,20 +3194,13 @@ fn view_subtitle(title: String, slug: String) -> Element(msg) {
   ])
 }
 
-// removed: moved to partials/article_partials.gleam
-
-// moved to partials/article_partials.gleam
-fn view_simple_paragraph(text: String) -> Element(Msg) {
-  html.p([attr.class("pt-8")], [html.text(text)])
-}
-
 fn view_error(error_string: String) -> Element(Msg) {
   ui.error_state(ui.ErrorGeneric, "Something went wrong", error_string, None)
 }
 
 fn view_article_listing_loading() -> List(Element(Msg)) {
   [
-    ui.page_title("Articles"),
+    ui.page_title("Articles", "article-list-title"),
     ui.loading_state("Loading articles...", None, ui.ColorNeutral),
   ]
 }
@@ -4113,7 +4064,7 @@ fn view_ui_components() -> List(Element(Msg)) {
         html.h3([attr.class("text-lg font-medium text-zinc-100 mb-4 mt-8")], [
           html.text("Page Title Only"),
         ]),
-        ui.page_title("Simple Page Title"),
+        ui.page_title("Simple Page Title", "simple-page-title"),
       ]),
     ]),
     // Typography & Links Section
@@ -4164,160 +4115,46 @@ fn view_ui_components() -> List(Element(Msg)) {
 
 fn view_notifications(model: Model) -> List(Element(Msg)) {
   [
-    view_title("Send Notification", "notifications"),
-    view_simple_paragraph(
-      "Send push notifications to your devices via ntfy.sh. Configure your ntfy topic to receive notifications on your mobile device or desktop.",
+    ui.page_title("Push notifications", "title-notifications"),
+    ui.card_with_title(
+      key: "want-to-get-in-touch",
+      title: "Want to get in touch?",
+      content: [
+        ui.simple_paragraph(
+          "You can send push notifications to my phone. I trust you, whoever you are to be respectfull. I am looking forward to hearing from you all!",
+        ),
+        html.div([attr.class("h-16")], []),
+        view_notification_form(model),
+      ],
     ),
-    view_notification_help(),
-    view_notification_form(model),
   ]
 }
 
-fn view_notification_help() -> Element(Msg) {
-  html.div(
-    [attr.class("mt-6 p-4 bg-teal-900/30 border border-teal-600/40 rounded-lg")],
-    [
-      html.h4([attr.class("text-teal-400 font-medium mb-2")], [
-        html.text("How to use:"),
-      ]),
-      html.ul([attr.class("text-sm text-zinc-300 space-y-1")], [
-        html.li([attr.class("flex items-start")], [
-          html.span([attr.class("text-teal-400 mr-2")], [html.text("•")]),
-          html.text(
-            "Download the ntfy app on your phone or subscribe to a topic on ntfy.sh",
-          ),
-        ]),
-        html.li([attr.class("flex items-start")], [
-          html.span([attr.class("text-teal-400 mr-2")], [html.text("•")]),
-          html.text(
-            "Enter your custom topic or leave empty to use your default user topic",
-          ),
-        ]),
-        html.li([attr.class("flex items-start")], [
-          html.span([attr.class("text-teal-400 mr-2")], [html.text("•")]),
-          html.text(
-            "Choose priority: Low (silent), Normal (default sound), High (louder), Urgent (critical alert)",
-          ),
-        ]),
-        html.li([attr.class("flex items-start")], [
-          html.span([attr.class("text-teal-400 mr-2")], [html.text("•")]),
-          html.text(
-            "Categories help organize your notifications (e.g., 'system', 'alerts', 'reminders')",
-          ),
-        ]),
-      ]),
-    ],
-  )
-}
-
 fn view_notification_form(model: Model) -> Element(Msg) {
-  html.div(
-    [attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")],
-    [
-      html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
-        html.text("Send Notification"),
-      ]),
-      html.div([attr.class("space-y-4")], [
-        ui.form_input(
-          "Title",
-          model.notification_form_title,
-          "Enter notification title",
-          "text",
-          True,
-          None,
-          NotificationFormTitleUpdated,
-        ),
-        ui.form_input(
-          "Message",
-          model.notification_form_message,
-          "Enter notification message",
-          "text",
-          True,
-          None,
-          NotificationFormMessageUpdated,
-        ),
-        ui.form_input(
-          "Category",
-          model.notification_form_category,
-          "e.g., system, alerts, reminders, info",
-          "text",
-          True,
-          None,
-          NotificationFormCategoryUpdated,
-        ),
-        html.div([attr.class("space-y-2")], [
-          html.label([attr.class("block text-sm font-medium text-zinc-400")], [
-            html.text("Priority"),
-          ]),
-          html.select(
-            [
-              attr.class(
-                "w-full bg-zinc-800 border border-zinc-600 rounded-md p-2 text-zinc-100 focus:border-pink-700 focus:ring-1 focus:ring-pink-700 focus:outline-none transition-colors duration-200",
-              ),
-              event.on_input(NotificationFormPriorityUpdated),
-            ],
-            [
-              html.option(
-                [
-                  attr.value("low"),
-                  attr.selected(model.notification_form_priority == "low"),
-                ],
-                "Low",
-              ),
-              html.option(
-                [
-                  attr.value("normal"),
-                  attr.selected(model.notification_form_priority == "normal"),
-                ],
-                "Normal",
-              ),
-              html.option(
-                [
-                  attr.value("high"),
-                  attr.selected(model.notification_form_priority == "high"),
-                ],
-                "High",
-              ),
-              html.option(
-                [
-                  attr.value("urgent"),
-                  attr.selected(model.notification_form_priority == "urgent"),
-                ],
-                "Urgent",
-              ),
-            ],
-          ),
-        ]),
-        ui.form_input(
-          "Ntfy Topic (optional)",
-          model.notification_form_ntfy_topic,
-          "Custom topic name or leave empty for user_{your_id}",
-          "text",
-          False,
-          None,
-          NotificationFormNtfyTopicUpdated,
-        ),
-        ui.button(
-          case model.notification_sending {
-            True -> "Sending..."
-            False -> "Send Notification"
-          },
-          ui.ColorTeal,
-          case
-            model.notification_sending,
-            model.notification_form_title == ""
-            || model.notification_form_message == ""
-            || model.notification_form_category == ""
-          {
-            True, _ -> ui.ButtonStatePending
-            False, True -> ui.ButtonStateDisabled
-            _, _ -> ui.ButtonStateNormal
-          },
-          NotificationSendClicked,
-        ),
-      ]),
-    ],
-  )
+  html.div([attr.class("space-y-4")], [
+    ui.form_input(
+      "Message",
+      model.notification_form_message,
+      "Enter notification message",
+      "text",
+      True,
+      None,
+      NotificationFormMessageUpdated,
+    ),
+    ui.button(
+      case model.notification_sending {
+        True -> "Sending..."
+        False -> "Send Notification"
+      },
+      ui.ColorTeal,
+      case model.notification_sending, model.notification_form_message == "" {
+        True, _ -> ui.ButtonStatePending
+        False, True -> ui.ButtonStateDisabled
+        _, _ -> ui.ButtonStateNormal
+      },
+      NotificationSendClicked,
+    ),
+  ])
 }
 
 // MAIN ------------------------------------------------------------------------
@@ -4366,12 +4203,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
       login_password: "",
       login_loading: False,
       // Notification form fields
-      notification_form_title: "",
       notification_form_message: "",
-      notification_form_category: "",
-      notification_form_priority: "normal",
-      notification_form_ntfy_topic: "",
-      notification_form_data: [],
       notification_sending: False,
       // profile state
       profile_user: NotInitialized,

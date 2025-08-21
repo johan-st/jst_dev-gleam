@@ -1427,23 +1427,34 @@ func handleShortUrlRedirect(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 
 func handleNotificationSend(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var (
+			user     whoApi.User
+			category string
+		)
 		logger := l.WithBreadcrumb("handleNotificationSend")
 
 		// Get user from context
 		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
 		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
+			category = "public"
+			user = whoApi.User{
+				ID:       "-",
+				Username: "guest",
+			}
+			// http.Error(w, "unauthorized", http.StatusUnauthorized)
+			// return
+		} else {
+			category = "private"
 		}
 
 		// Parse request body
 		var req struct {
-			Title     string                 `json:"title"`
-			Message   string                 `json:"message"`
-			Category  string                 `json:"category"`
-			Priority  ntfy.Priority          `json:"priority"`
-			NtfyTopic string                 `json:"ntfy_topic"`
-			Data      map[string]interface{} `json:"data,omitempty"`
+			// Title     string                 `json:"title"`
+			Message string `json:"message"`
+			// Category  string                 `json:"category"`
+			// Priority  ntfy.Priority          `json:"priority"`
+			// NtfyTopic string                 `json:"ntfy_topic"`
+			// Data      map[string]interface{} `json:"data,omitempty"`
 		}
 
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1453,29 +1464,29 @@ func handleNotificationSend(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		}
 
 		// Validate required fields
-		if req.Title == "" {
-			http.Error(w, "title is required", http.StatusBadRequest)
-			return
-		}
+		// if req.Title == "" {
+		// 	http.Error(w, "title is required", http.StatusBadRequest)
+		// 	return
+		// }
 		if req.Message == "" {
 			http.Error(w, "message is required", http.StatusBadRequest)
 			return
 		}
-		if req.Category == "" {
-			http.Error(w, "category is required", http.StatusBadRequest)
-			return
-		}
+		// if req.Category == "" {
+		// 	http.Error(w, "category is required", http.StatusBadRequest)
+		// 	return
+		// }
 
 		// Create notification
 		notification := ntfy.Notification{
 			ID:        uuid.New().String(),
 			UserID:    user.ID,
-			Title:     req.Title,
+			Title:     user.Username + "@jst.dev",
 			Message:   req.Message,
-			Category:  req.Category,
-			Priority:  req.Priority,
-			NtfyTopic: req.NtfyTopic,
-			Data:      req.Data,
+			Category:  category,
+			Priority:  ntfy.PriorityNormal,
+			NtfyTopic: "jst",
+			Data:      map[string]interface{}{},
 			CreatedAt: time.Now(),
 		}
 
