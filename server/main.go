@@ -110,7 +110,7 @@ func run(
 			nats.MaxReconnects(60),
 			nats.ReconnectWait(1*time.Second),
 			nats.ReconnectJitter(100*time.Millisecond, 1*time.Second),
-			nats.Timeout(2*time.Second), 
+			nats.Timeout(2*time.Second),
 			nats.PingInterval(2*time.Second),
 			nats.MaxPingsOutstanding(2),
 		)
@@ -222,9 +222,9 @@ func run(
 				// Get Fly.io environment variables
 				flyAppName := os.Getenv("FLY_APP_NAME")
 				flyRegion := os.Getenv("FLY_REGION")
-				
+
 				// Create payload with Fly.io identifiers
-				payload := fmt.Sprintf(`{"unixMilli": %d, "fly_app_name": "%s", "fly_region": "%s"}`, 
+				payload := fmt.Sprintf(`{"unixMilli": %d, "fly_app_name": "%s", "fly_region": "%s"}`,
 					t.UnixMilli(), flyAppName, flyRegion)
 				_ = nc.Publish("time.seconds", []byte(payload))
 			}
@@ -257,7 +257,7 @@ func run(
 	if err != nil {
 		l.Error("Failed to drain connections: %v", err)
 	}
-	
+
 	// Check final connection status
 	if nc.Status() != nats.CLOSED {
 		l.Debug("closing NATS connection")

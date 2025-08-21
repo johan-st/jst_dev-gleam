@@ -32,7 +32,7 @@ pub fn model_encoder_and_decoder_test() {
         leading: "leading",
         title: "test",
         subtitle: "subtitle",
-        content: Loaded("# test\n\ntest", birl.from_unix(0), birl.from_unix(0)),
+        content: "# test\n\ntest",
         author: "author",
         published_at: None,
         tags: [],
@@ -45,7 +45,7 @@ pub fn model_encoder_and_decoder_test() {
         leading: "leading",
         title: "test2",
         subtitle: "subtitle",
-        content: Errored(NotFound, birl.from_unix(0)),
+        content: "error",
         author: "author",
         published_at: None,
         tags: [],
@@ -58,7 +58,7 @@ pub fn model_encoder_and_decoder_test() {
         leading: "leading",
         title: "test3",
         subtitle: "subtitle",
-        content: Pending(None, birl.from_unix(0)),
+        content: "loading...",
         author: "author",
         published_at: None,
         tags: [],
@@ -71,7 +71,7 @@ pub fn model_encoder_and_decoder_test() {
         leading: "leading",
         title: "test4",
         subtitle: "subtitle",
-        content: NotInitialized,
+        content: "",
         author: "author",
         published_at: None,
         tags: [],
@@ -131,7 +131,7 @@ pub fn model_encoder_and_decoder_test() {
               subtitle |> should.equal("subtitle")
               draft |> should.equal(None)
               case content {
-                Loaded(loaded_content, _, _) -> {
+                loaded_content -> {
                   loaded_content
                   |> should.equal("# test\n\ntest")
                 }
@@ -165,7 +165,7 @@ pub fn model_encoder_and_decoder_test() {
               leading |> should.equal("leading")
               subtitle |> should.equal("subtitle")
               draft |> should.equal(None)
-              content |> should.equal(NotInitialized)
+              content |> should.equal("error")
             }
           }
 
@@ -194,7 +194,7 @@ pub fn model_encoder_and_decoder_test() {
               leading |> should.equal("leading")
               subtitle |> should.equal("subtitle")
               draft |> should.equal(None)
-              content |> should.equal(NotInitialized)
+              content |> should.equal("loading...")
             }
           }
 
@@ -223,7 +223,7 @@ pub fn model_encoder_and_decoder_test() {
               leading |> should.equal("leading")
               subtitle |> should.equal("subtitle")
               draft |> should.equal(None)
-              content |> should.equal(NotInitialized)
+              content |> should.equal("")
             }
           }
         }

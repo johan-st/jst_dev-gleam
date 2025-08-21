@@ -10,7 +10,6 @@ import gleam/uri.{type Uri}
 import lustre/effect.{type Effect}
 import session.{type Session, Authenticated}
 import utils/http.{type HttpError}
-import utils/remote_data.{type RemoteData} as rd
 
 pub type Article {
   ArticleV1(
@@ -23,7 +22,7 @@ pub type Article {
     title: String,
     subtitle: String,
     leading: String,
-    content: RemoteData(String, HttpError),
+    content: String,
     draft: Option(Draft),
   )
 }
@@ -96,11 +95,7 @@ pub fn to_draft(article: Article) -> Option(Draft) {
       leading:,
       content:,
       draft: _,
-    ) ->
-      rd.data(content)
-      |> option.unwrap("")
-      |> draft_new(slug, title, subtitle, leading)
-      |> Some
+    ) -> Some(draft_new(slug, title, subtitle, leading, content))
   }
 }
 
@@ -129,66 +124,66 @@ pub fn can_publish(_article: Article, session: Session) -> Bool {
 
 // HTTP -------------------------------------------------------------------------
 
-pub fn article_get(msg, id: String, base_uri: Uri) -> Effect(a) {
-  let request =
-    request.new()
-    |> request.set_method(gleam_http.Get)
-    |> request.set_path("/api/articles/" <> id)
-    |> add_base_uri(base_uri)
-  http.send(request, http.expect_json(article_decoder(), msg))
-}
+// pub fn article_get(msg, id: String, base_uri: Uri) -> Effect(a) {
+//   let request =
+//     request.new()
+//     |> request.set_method(gleam_http.Get)
+//     |> request.set_path("/api/article/" <> id)
+//     |> add_base_uri(base_uri)
+//   http.send(request, http.expect_json(article_decoder(), msg))
+// }
 
-pub fn article_metadata_get(msg, base_uri: Uri) -> Effect(a) {
-  let request =
-    request.new()
-    |> request.set_method(gleam_http.Get)
-    |> request.set_path("/api/articles")
-    |> add_base_uri(base_uri)
-  http.send(request, http.expect_json(metadata_decoder(), msg))
-}
+// pub fn article_metadata_get(msg, base_uri: Uri) -> Effect(a) {
+//   let request =
+//     request.new()
+//     |> request.set_method(gleam_http.Get)
+//     |> request.set_path("/api/article")
+//     |> add_base_uri(base_uri)
+//   http.send(request, http.expect_json(metadata_decoder(), msg))
+// }
 
 pub fn article_update(msg, article: Article, base_uri: Uri) -> Effect(a) {
   let request =
     request.new()
     |> request.set_method(gleam_http.Put)
-    |> request.set_path("/api/articles/" <> article.id)
-    |> request.set_body(article_encoder(article) |> json.to_string)
+    |> request.set_path("/api/article/" <> article.id)
+    |> request.set_body(encoder(article) |> json.to_string)
     |> add_base_uri(base_uri)
 
-  http.send(request, http.expect_json(article_decoder(), msg))
+  http.send(request, http.expect_json(decoder(), msg))
 }
 
-pub fn article_create(msg, article: Article, base_uri: Uri) -> Effect(a) {
-  let request =
-    request.new()
-    |> request.set_method(gleam_http.Post)
-    |> request.set_path("/api/articles")
-    |> request.set_body(article_encoder(article) |> json.to_string)
-    |> add_base_uri(base_uri)
+// pub fn article_create(msg, article: Article, base_uri: Uri) -> Effect(a) {
+//   let request =
+//     request.new()
+//     |> request.set_method(gleam_http.Post)
+//     |> request.set_path("/api/article")
+//     |> request.set_body(article_encoder(article) |> json.to_string)
+//     |> add_base_uri(base_uri)
 
-  http.send(request, http.expect_json(article_decoder(), msg))
-}
+//   http.send(request, http.expect_json(article_decoder(), msg))
+// }
 
-pub fn article_update_(msg, article: Article, base_uri: Uri) -> Effect(a) {
-  let request =
-    request.new()
-    |> request.set_method(gleam_http.Put)
-    |> request.set_path("/api/articles/" <> article.id)
-    |> request.set_body(article_encoder(article) |> json.to_string)
-    |> add_base_uri(base_uri)
+// pub fn article_update_(msg, article: Article, base_uri: Uri) -> Effect(a) {
+//   let request =
+//     request.new()
+//     |> request.set_method(gleam_http.Put)
+//     |> request.set_path("/api/article/" <> article.id)
+//     |> request.set_body(article_encoder(article) |> json.to_string)
+//     |> add_base_uri(base_uri)
 
-  http.send(request, http.expect_json(article_decoder(), msg))
-}
+//   http.send(request, http.expect_json(article_decoder(), msg))
+// }
 
-pub fn article_delete(msg, id: String, base_uri: Uri) -> Effect(a) {
-  let request =
-    request.new()
-    |> request.set_method(gleam_http.Delete)
-    |> request.set_path("/api/articles/" <> id)
-    |> add_base_uri(base_uri)
+// pub fn article_delete(msg, id: String, base_uri: Uri) -> Effect(a) {
+//   let request =
+//     request.new()
+//     |> request.set_method(gleam_http.Delete)
+//     |> request.set_path("/api/article/" <> id)
+//     |> add_base_uri(base_uri)
 
-  http.send(request, http.expect_text(msg))
-}
+//   http.send(request, http.expect_text(msg))
+// }
 
 fn add_base_uri(req, base_uri: Uri) {
   let req = case base_uri.scheme {
@@ -212,15 +207,15 @@ fn add_base_uri(req, base_uri: Uri) {
 
 // DECODE ----------------------------------------------------------------------
 
-fn metadata_decoder() -> decode.Decoder(List(Article)) {
-  use articles <- decode.field(
-    "articles",
-    decode.one_of(decode.list(article_decoder()), [decode.success([])]),
-  )
-  decode.success(articles)
-}
+// fn metadata_decoder() -> decode.Decoder(List(Article)) {
+//   use articles <- decode.field(
+//     "articles",
+//     decode.one_of(decode.list(article_decoder()), [decode.success([])]),
+//   )
+//   decode.success(articles)
+// }
 
-pub fn article_decoder() -> decode.Decoder(Article) {
+pub fn decoder() -> decode.Decoder(Article) {
   use _version <- decode.optional_field("version", 0, decode.int)
   use id <- decode.field("id", decode.string)
   use author <- decode.field("author", decode.string)
@@ -243,12 +238,7 @@ pub fn article_decoder() -> decode.Decoder(Article) {
   use title <- decode.field("title", decode.string)
   use leading <- decode.field("leading", decode.string)
   use subtitle <- decode.field("subtitle", decode.string)
-  use content_string <- decode.optional_field("content", "", decode.string)
-
-  let content = case content_string {
-    "" -> rd.NotInitialized
-    content_string -> rd.to_loaded(rd.NotInitialized, content_string)
-  }
+  use content <- decode.field("content", decode.string)
 
   decode.success(ArticleV1(
     id: id,
@@ -267,7 +257,7 @@ pub fn article_decoder() -> decode.Decoder(Article) {
 
 // ENCODE ----------------------------------------------------------------------
 
-pub fn article_encoder(article: Article) -> json.Json {
+pub fn encoder(article: Article) -> json.Json {
   case article {
     ArticleV1(
       id:,
@@ -282,11 +272,6 @@ pub fn article_encoder(article: Article) -> json.Json {
       content:,
       draft: _,
     ) -> {
-      let content_string =
-        rd.data(content)
-        |> option.unwrap("")
-        |> json.string
-
       let published_at_timestamp =
         published_at
         |> option.map(birl.to_unix_milli)
@@ -304,7 +289,7 @@ pub fn article_encoder(article: Article) -> json.Json {
         #("author", json.string(author)),
         #("published_at", published_at_timestamp),
         #("tags", json.array(tags, json.string)),
-        #("content", content_string),
+        #("content", json.string(content)),
         // #("draft", draft |> draft_encoder),
       ])
     }
@@ -346,7 +331,7 @@ pub fn loading_article() -> Article {
     title: "fetching articles..",
     subtitle: "articles have not been fetched yet",
     leading: "This is a placeholder article. At the moment, the articles are being fetched from the server.. please wait.",
-    content: rd.Pending(None, birl.now()),
+    content: "loading...",
     draft: None,
   )
 }

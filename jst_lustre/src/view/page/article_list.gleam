@@ -15,6 +15,7 @@ import view/page/partials/article_partials as parts
 import view/ui
 
 pub fn view(
+  in_sync: Bool,
   articles: List(Article),
   sess: session.Session,
 ) -> List(Element(msg)) {

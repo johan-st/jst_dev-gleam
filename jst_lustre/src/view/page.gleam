@@ -1,9 +1,11 @@
 import article.{type Article}
+import gleam/dict
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/uri.{type Uri}
 import routes.{type Route}
 import session.{type Session}
+import sync.{type KV, type KVState}
 import utils/http.{type HttpError}
 import utils/remote_data as rd
 
@@ -25,21 +27,20 @@ pub type Page {
     article: Article,
     session_authenticated: session.SessionAuthenticated,
   )
-  PageArticleList(articles: List(Article), session: Session)
-  PageArticleListLoading
+  PageArticleList(in_sync: Bool, articles: List(Article), session: Session)
 
   // Url Shortener page
-  PageUrlShortIndex(session_authenticated: session.SessionAuthenticated)
+  PageUrlShortIndex
   PageUrlShortInfo(
     short: String,
     session_authenticated: session.SessionAuthenticated,
   )
 
   // UI Components showcase
-  PageUiComponents(session_authenticated: session.SessionAuthenticated)
+  PageUiComponents
 
   // Notifications
-  PageNotifications(session_authenticated: session.SessionAuthenticated)
+  PageNotifications
 
   // Profile
   PageProfile(session_authenticated: session.SessionAuthenticated)
@@ -77,11 +78,7 @@ pub fn to_uri(page: Page) -> Uri {
       let assert Ok(uri) = uri.parse("/")
       uri
     }
-    PageArticleList(_, _) -> {
-      let assert Ok(uri) = uri.parse("/articles")
-      uri
-    }
-    PageArticleListLoading -> {
+    PageArticleList(_, _, _) -> {
       let assert Ok(uri) = uri.parse("/articles")
       uri
     }
@@ -93,7 +90,7 @@ pub fn to_uri(page: Page) -> Uri {
       let assert Ok(uri) = uri.parse("/article/" <> article.id <> "/edit")
       uri
     }
-    PageUrlShortIndex(_) -> {
+    PageUrlShortIndex -> {
       let assert Ok(uri) = uri.parse("/url/")
       uri
     }
@@ -101,11 +98,11 @@ pub fn to_uri(page: Page) -> Uri {
       let assert Ok(uri) = uri.parse("/url/")
       uri
     }
-    PageUiComponents(_) -> {
+    PageUiComponents -> {
       let assert Ok(uri) = uri.parse("/ui-components")
       uri
     }
-    PageNotifications(_) -> {
+    PageNotifications -> {
       let assert Ok(uri) = uri.parse("/notifications")
       uri
     }
@@ -159,162 +156,80 @@ pub fn to_uri(page: Page) -> Uri {
 // Note: Rendering for page lives under `page/*_view.gleam` modules
 
 pub fn from_route(
-  loading: Bool,
-  route: Route,
-  session: Session,
-  articles: rd.RemoteData(List(Article), HttpError),
+  loading _loading: Bool,
+  route route: Route,
+  session session: Session,
+  articles articles: sync.KV(String, Article),
 ) -> Page {
-  case loading {
-    True -> Loading(route)
-    False -> {
-      case route {
-        routes.Index -> PageIndex
-        routes.Articles -> {
-          case articles {
-            rd.Pending(_, _) -> PageArticleListLoading
-            rd.NotInitialized -> PageArticleListLoading
-            rd.Errored(error, _) ->
-              PageError(HttpError(error, "Failed to load article list"))
-            rd.Loaded(articles_list, _, _) -> {
-              let allowed_articles =
-                articles_list
-                |> list.filter(article.can_view(_, session))
-              PageArticleList(allowed_articles, session)
-            }
-          }
+  case route {
+    routes.Index -> PageIndex
+    routes.Articles -> {
+      case articles.state {
+        sync.NotInitialized -> PageError(Other("articles not initialized"))
+        sync.Connecting -> PageError(Other("articles connecting"))
+        sync.CatchingUp -> PageArticleList(False, [], session)
+        sync.InSync -> {
+          let articles_list = articles.data |> dict.values()
+          PageArticleList(True, articles_list, session)
         }
-        routes.Article(slug) -> {
-          case articles {
-            rd.Pending(_, _) -> PageArticleListLoading
-            rd.NotInitialized -> PageError(Other("articles not initialized"))
-            rd.Errored(error, _) ->
-              PageError(HttpError(error, "Failed to load articles"))
-            rd.Loaded(articles_list, _, _) -> {
-              let allowed_articles =
-                articles_list
-                |> list.filter(article.can_view(_, session))
-              case find_article_by_slug(allowed_articles, slug) {
-                Ok(article) -> PageArticle(article, session)
-                Error(_) ->
-                  PageError(ArticleNotFound(
-                    slug,
-                    get_available_slugs(allowed_articles),
-                  ))
-              }
-            }
-          }
-        }
-        routes.ArticleEdit(id) -> {
-          case articles {
-            rd.Pending(_, _) -> PageArticleListLoading
-            rd.NotInitialized -> PageError(Other("articles not initialized"))
-            rd.Errored(error, _) ->
-              PageError(HttpError(error, "Failed to load articles for editing"))
-            rd.Loaded(articles_list, _, _) -> {
-              let allowed_articles =
-                articles_list
-                |> list.filter(article.can_view(_, session))
-              case find_article_by_id(allowed_articles, id) {
-                Ok(article) -> {
-                  case article.can_edit(article, session), article.draft {
-                    True, Some(_) -> {
-                      case session {
-                        session.Authenticated(session_auth) ->
-                          PageArticleEdit(article, session_auth)
-                        session.Unauthenticated ->
-                          PageError(AuthenticationRequired("edit article"))
-                        session.Pending ->
-                          PageError(AuthenticationRequired("edit article"))
-                      }
-                    }
-                    True, None -> {
-                      case session {
-                        session.Authenticated(session_auth) ->
-                          PageArticleEdit(
-                            article.ArticleV1(
-                              ..article,
-                              draft: article.to_draft(article),
-                            ),
-                            session_auth,
-                          )
-                        session.Unauthenticated ->
-                          PageError(AuthenticationRequired("edit article"))
-                        session.Pending ->
-                          PageError(AuthenticationRequired("edit article"))
-                      }
-                    }
-                    False, _ ->
-                      PageError(AuthenticationRequired("edit article"))
-                  }
-                }
-                Error(_) -> PageError(ArticleEditNotFound(id))
-              }
-            }
-          }
-        }
-        routes.About -> PageAbout
-        routes.DjotDemo ->
-          case session {
-            session.Authenticated(session_auth) ->
-              PageDjotDemo(session_auth, "")
-            session.Unauthenticated ->
-              PageError(AuthenticationRequired("access DJOT demo"))
-            session.Pending ->
-              PageError(AuthenticationRequired("access DJOT demo"))
-          }
-        routes.UrlShortIndex -> {
-          case session {
-            session.Authenticated(session_auth) ->
-              PageUrlShortIndex(session_auth)
-            session.Unauthenticated ->
-              PageError(AuthenticationRequired("access URL shortener"))
-            session.Pending ->
-              PageError(AuthenticationRequired("access URL shortener"))
-          }
-        }
-        routes.UrlShortInfo(short) -> {
-          case session {
-            session.Authenticated(session_auth) ->
-              PageUrlShortInfo(short, session_auth)
-            session.Unauthenticated ->
-              PageError(AuthenticationRequired("access URL shortener info"))
-            session.Pending ->
-              PageError(AuthenticationRequired("access URL shortener info"))
-          }
-        }
-        routes.UiComponents -> {
-          case session {
-            session.Authenticated(session_auth) ->
-              PageUiComponents(session_auth)
-            session.Unauthenticated ->
-              PageError(AuthenticationRequired("access UI components"))
-            session.Pending ->
-              PageError(AuthenticationRequired("access UI components"))
-          }
-        }
-        routes.Notifications -> {
-          case session {
-            session.Authenticated(session_auth) ->
-              PageNotifications(session_auth)
-            session.Unauthenticated ->
-              PageError(AuthenticationRequired("access notifications"))
-            session.Pending ->
-              PageError(AuthenticationRequired("access notifications"))
-          }
-        }
-        routes.Profile -> {
-          case session {
-            session.Authenticated(session_auth) -> PageProfile(session_auth)
-            session.Unauthenticated ->
-              PageError(AuthenticationRequired("access profile"))
-            session.Pending ->
-              PageError(AuthenticationRequired("access profile"))
-          }
-        }
-        routes.Debug -> PageDebug
-        routes.NotFound(uri) -> PageNotFound(uri)
+        sync.KVError(error) -> PageError(Other(error))
       }
     }
+    routes.Article(slug) -> {
+      // Search through all articles to find the one with matching slug
+      let articles_list = articles.data |> dict.values()
+      case find_article_by_slug(articles_list, slug) {
+        Ok(article) -> PageArticle(article, session)
+        Error(_) ->
+          PageError(ArticleNotFound(slug, articles.data |> dict.keys()))
+      }
+    }
+    routes.ArticleEdit(id) -> {
+      case articles.data |> dict.get(id) {
+        Ok(article) -> {
+          case session {
+            session.Authenticated(session_auth) ->
+              PageArticleEdit(article, session_auth)
+            session.Unauthenticated ->
+              PageError(AuthenticationRequired("edit article"))
+            session.Pending -> PageError(AuthenticationRequired("edit article"))
+          }
+        }
+        Error(_) -> PageError(ArticleEditNotFound(id))
+      }
+    }
+    routes.About -> PageAbout
+    routes.DjotDemo ->
+      case session {
+        session.Authenticated(session_auth) -> PageDjotDemo(session_auth, "")
+        session.Unauthenticated ->
+          PageError(AuthenticationRequired("access DJOT demo"))
+        session.Pending -> PageError(AuthenticationRequired("access DJOT demo"))
+      }
+    routes.UrlShortIndex -> PageUrlShortIndex
+
+    routes.UrlShortInfo(short) -> {
+      case session {
+        session.Authenticated(session_auth) ->
+          PageUrlShortInfo(short, session_auth)
+        session.Unauthenticated ->
+          PageError(AuthenticationRequired("access URL shortener info"))
+        session.Pending ->
+          PageError(AuthenticationRequired("access URL shortener info"))
+      }
+    }
+    routes.UiComponents -> PageUiComponents
+    routes.Notifications -> PageNotifications
+    routes.Profile -> {
+      case session {
+        session.Authenticated(session_auth) -> PageProfile(session_auth)
+        session.Unauthenticated ->
+          PageError(AuthenticationRequired("access profile"))
+        session.Pending -> PageError(AuthenticationRequired("access profile"))
+      }
+    }
+    routes.Debug -> PageDebug
+    routes.NotFound(uri) -> PageNotFound(uri)
   }
 }
 
