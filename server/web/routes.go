@@ -535,6 +535,13 @@ func handleSeed(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger.Debug("seed handler called")
 
+		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		if !ok || user.ID == "" {
+			logger.Warn("user not found in context")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
 		art := articles.TestArticle()
 		_, err := repo.Create(art)
 		if err != nil {
@@ -561,6 +568,13 @@ func handlePurge(l *jst_log.Logger, repo articles.ArticleRepo) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger.Debug("called")
+
+		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		if !ok || user.ID == "" {
+			logger.Warn("user not found in context")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 		err := repo.Purge()
 		if err != nil {
 			logger.Error("failed to purge repo: %s", err.Error())
@@ -1168,12 +1182,12 @@ func handleShortUrlUpdate(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		logger.Debug("called")
 
 		// Get user from context
-		// _, ok := r.Context().Value(who.UserKey).(whoApi.User)
-		// if !ok {
-		// 	logger.Warn("user not found in context")
-		// 	http.Error(w, "unauthorized", http.StatusUnauthorized)
-		// 	return
-		// }
+		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		if !ok || user.ID == "" {
+			logger.Warn("user not found in context")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 
 		id := r.PathValue("id")
 		if id == "" {
@@ -1251,12 +1265,12 @@ func handleShortUrlDelete(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		logger.Debug("called")
 
 		// Get user from context
-		// _, ok := r.Context().Value(who.UserKey).(whoApi.User)
-		// if !ok {
-		// 	logger.Warn("user not found in context")
-		// 	http.Error(w, "unauthorized", http.StatusUnauthorized)
-		// 	return
-		// }
+		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		if !ok || user.ID == "" {
+			logger.Warn("user not found in context")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 
 		id := r.PathValue("id")
 		if id == "" {
