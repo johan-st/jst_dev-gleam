@@ -4123,6 +4123,9 @@ fn view_notifications(model: Model) -> List(Element(Msg)) {
         ui.simple_paragraph(
           "You can send push notifications to my phone. I trust you, whoever you are to be respectfull. I am looking forward to hearing from you all!",
         ),
+        ui.simple_paragraph(
+          "(please note that I have no way of knowing who you are so if you want me to get back to you, please include a way to contact you)",
+        ),
         html.div([attr.class("h-16")], []),
         view_notification_form(model),
       ],
@@ -4132,28 +4135,30 @@ fn view_notifications(model: Model) -> List(Element(Msg)) {
 
 fn view_notification_form(model: Model) -> Element(Msg) {
   html.div([attr.class("space-y-4")], [
-    ui.form_input(
-      "Message",
-      model.notification_form_message,
-      "Enter notification message",
-      "text",
-      True,
-      None,
-      NotificationFormMessageUpdated,
+    ui.form_textarea(
+      label: "Message",
+      value: model.notification_form_message,
+      placeholder: "Enter notification message",
+      height_class: "h-32",
+      required: True,
+      error: None,
+      oninput: NotificationFormMessageUpdated,
     ),
-    ui.button(
-      case model.notification_sending {
-        True -> "Sending..."
-        False -> "Send Notification"
-      },
-      ui.ColorTeal,
-      case model.notification_sending, model.notification_form_message == "" {
-        True, _ -> ui.ButtonStatePending
-        False, True -> ui.ButtonStateDisabled
-        _, _ -> ui.ButtonStateNormal
-      },
-      NotificationSendClicked,
-    ),
+    html.div([attr.class("ml-auto w-max")], [
+      ui.button(
+        case model.notification_sending {
+          True -> "Sending..."
+          False -> "Send Notification"
+        },
+        ui.ColorTeal,
+        case model.notification_sending, model.notification_form_message == "" {
+          True, _ -> ui.ButtonStatePending
+          False, True -> ui.ButtonStateDisabled
+          _, _ -> ui.ButtonStateNormal
+        },
+        NotificationSendClicked,
+      ),
+    ]),
   ])
 }
 

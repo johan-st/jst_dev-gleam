@@ -371,13 +371,13 @@ pub fn button(
 // FORMS ----------------------------------------------------------------------
 
 pub fn form_input(
-  label: String,
-  value: String,
-  placeholder: String,
-  input_type: String,
-  required: Bool,
-  error: Option(String),
-  oninput: fn(String) -> msg,
+  label label: String,
+  value value: String,
+  placeholder placeholder: String,
+  input_type input_type: String,
+  required required: Bool,
+  error error: Option(String),
+  oninput oninput: fn(String) -> msg,
 ) -> Element(msg) {
   form_input_with_focus(
     label,
@@ -392,14 +392,14 @@ pub fn form_input(
 }
 
 pub fn form_input_with_focus(
-  label: String,
-  value: String,
-  placeholder: String,
-  input_type: String,
-  required: Bool,
-  error: Option(String),
-  oninput: fn(String) -> msg,
-  focus_id: Option(String),
+  label label: String,
+  value value: String,
+  placeholder placeholder: String,
+  input_type input_type: String,
+  required required: Bool,
+  error error: Option(String),
+  oninput oninput: fn(String) -> msg,
+  focus_id focus_id: Option(String),
 ) -> Element(msg) {
   html.div([attr.class("mb-6")], [
     html.label([attr.class("block text-sm font-semibold text-zinc-300 mb-3")], [
@@ -446,13 +446,13 @@ pub fn form_input_with_focus(
 
 /// Form textarea component with consistent styling
 pub fn form_textarea(
-  label: String,
-  value: String,
-  placeholder: String,
-  height_class: String,
-  required: Bool,
-  error: Option(String),
-  oninput: fn(String) -> msg,
+  label label: String,
+  value value: String,
+  placeholder placeholder: String,
+  height_class height_class: String,
+  required required: Bool,
+  error error: Option(String),
+  oninput oninput: fn(String) -> msg,
 ) -> Element(msg) {
   html.div([attr.class("mb-6")], [
     html.label([attr.class("block text-sm font-semibold text-zinc-300 mb-3")], [
