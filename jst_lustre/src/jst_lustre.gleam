@@ -2099,7 +2099,7 @@ fn view_header(model: Model) -> Element(Msg) {
                   view_header_link(
                     target: routes.Notifications,
                     current: model.route,
-                    label: "ntfy",
+                    label: "Push",
                     attributes: [],
                   ),
                 ],
@@ -2178,7 +2178,7 @@ fn view_header(model: Model) -> Element(Msg) {
                               view_header_link(
                                 target: routes.Notifications,
                                 current: model.route,
-                                label: "ntfy",
+                                label: "Push",
                                 attributes: top_nav_attributes_small,
                               ),
                             ],

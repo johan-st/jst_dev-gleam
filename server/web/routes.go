@@ -1426,56 +1426,64 @@ func handleShortUrlRedirect(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 // --- NOTIFICATION HANDLERS ---
 
 func handleNotificationSend(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+	type Req struct {
+		Message string `json:"message"`
+	}
+	type Resp struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+		ID      string `json:"id"`
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var (
-			user     whoApi.User
-			category string
+			user whoApi.User
+			req  Req
 		)
 		logger := l.WithBreadcrumb("handleNotificationSend")
 
 		// Get user from context
 		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
 		if !ok {
-			category = "public"
 			user = whoApi.User{
 				ID:       "-",
 				Username: "guest",
 			}
-			// http.Error(w, "unauthorized", http.StatusUnauthorized)
-			// return
 		} else {
-			category = "private"
+			whoReq := whoApi.UserGetRequest{
+				ID: user.ID,
+			}
+			whoReqBytes, err := json.Marshal(whoReq)
+			if err != nil {
+				logger.Error("failed to marshal who request: %v", err)
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+				return
+			}
+
+			msg, err := nc.Request(whoApi.Subj.UserGroup+"."+whoApi.Subj.UserGet, whoReqBytes, 2*time.Second)
+			if err != nil {
+				logger.Error("failed to get user: %v", err)
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+				return
+			}
+			if err := json.Unmarshal(msg.Data, &user); err != nil {
+				logger.Error("failed to unmarshal user: %v", err)
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+				return
+			}
 		}
 
 		// Parse request body
-		var req struct {
-			// Title     string                 `json:"title"`
-			Message string `json:"message"`
-			// Category  string                 `json:"category"`
-			// Priority  ntfy.Priority          `json:"priority"`
-			// NtfyTopic string                 `json:"ntfy_topic"`
-			// Data      map[string]interface{} `json:"data,omitempty"`
-		}
-
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			logger.Error("failed to decode request: %v", err)
 			http.Error(w, "invalid request body", http.StatusBadRequest)
 			return
 		}
 
-		// Validate required fields
-		// if req.Title == "" {
-		// 	http.Error(w, "title is required", http.StatusBadRequest)
-		// 	return
-		// }
 		if req.Message == "" {
 			http.Error(w, "message is required", http.StatusBadRequest)
 			return
 		}
-		// if req.Category == "" {
-		// 	http.Error(w, "category is required", http.StatusBadRequest)
-		// 	return
-		// }
 
 		// Create notification
 		notification := ntfy.Notification{
@@ -1483,7 +1491,7 @@ func handleNotificationSend(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 			UserID:    user.ID,
 			Title:     user.Username + "@jst.dev",
 			Message:   req.Message,
-			Category:  category,
+			Category:  "jst.dev",
 			Priority:  ntfy.PriorityNormal,
 			NtfyTopic: "jst",
 			Data:      map[string]interface{}{},
@@ -1523,10 +1531,10 @@ func handleNotificationSend(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		}
 
 		// Return success response
-		respJson(w, map[string]string{
-			"status":  "success",
-			"message": "Notification sent successfully",
-			"id":      notification.ID,
+		respJson(w, Resp{
+			Status:  "success",
+			Message: "Notification sent successfully",
+			ID:      notification.ID,
 		}, http.StatusOK)
 	})
 }
