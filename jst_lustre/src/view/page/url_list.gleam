@@ -28,22 +28,22 @@ pub type Callbacks(msg) {
 }
 
 pub fn list(
-  urls: RemoteData(List(ShortUrl), HttpError),
-  expanded_ids: Set(String),
-  delete_confirmation: Option(#(String, msg)),
-  copy_feedback: Option(String),
-  cbs: Callbacks(msg),
+  short_urls urls: List(ShortUrl),
+  expanded_ids expanded_ids: Set(String),
+  delete_confirmation delete_confirmation: Option(#(String, msg)),
+  copy_feedback copy_feedback: Option(String),
+  cbs cbs: Callbacks(msg),
 ) -> Element(msg) {
   case urls {
-    NotInitialized | Pending(_, _) ->
+    [] ->
       ui.card("urls", [
         html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
           html.text("URLs"),
         ]),
         ui.loading("Loading URLs...", ui.ColorNeutral),
       ])
-    Loaded(short_urls, _, _) -> {
-      case short_urls {
+    _ -> {
+      case urls {
         [] ->
           ui.card("urls", [
             html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
@@ -57,7 +57,7 @@ pub fn list(
           ])
         _ -> {
           let url_elements =
-            list.map(short_urls, fn(url) {
+            list.map(urls, fn(url) {
               let is_expanded = set.contains(expanded_ids, url.id)
               case is_expanded {
                 True -> expanded_url_card(copy_feedback, cbs, url)
@@ -71,27 +71,13 @@ pub fn list(
             html.ul([attr.class("space-y-2"), attr.role("list")], url_elements),
             case delete_confirmation {
               Some(#(delete_id, _)) ->
-                delete_confirmation_modal(delete_id, short_urls, cbs)
+                delete_confirmation_modal(delete_id, urls, cbs)
               None -> html.div([], [])
             },
           ])
         }
       }
     }
-    Errored(error, _) ->
-      ui.card("urls", [
-        html.h3([attr.class("text-lg text-pink-700 font-light mb-6")], [
-          html.text("URLs"),
-        ]),
-        html.div([attr.class("text-center py-12")], [
-          html.div([attr.class("text-red-400 text-lg mb-2")], [
-            html.text("Error loading short URLs"),
-          ]),
-          html.div([attr.class("text-zinc-500 text-sm")], [
-            html.text(http_error_to_string(error)),
-          ]),
-        ]),
-      ])
   }
 }
 

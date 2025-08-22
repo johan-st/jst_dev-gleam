@@ -1,13 +1,12 @@
 import article.{type Article}
 import gleam/dict
 import gleam/list
-import gleam/option.{None, Some}
 import gleam/uri.{type Uri}
 import routes.{type Route}
 import session.{type Session}
 import sync.{type KV, type KVState}
 import utils/http.{type HttpError}
-import utils/remote_data as rd
+import utils/short_url.{type ShortUrl}
 
 /// The `Page` ADT encapsulates all views/screens in the app.
 ///
@@ -30,9 +29,9 @@ pub type Page {
   PageArticleList(in_sync: Bool, articles: List(Article), session: Session)
 
   // Url Shortener page
-  PageUrlShortIndex
+  PageUrlShortIndex(kv_short_urls: sync.KV(String, ShortUrl))
   PageUrlShortInfo(
-    short: String,
+    short_url: ShortUrl,
     session_authenticated: session.SessionAuthenticated,
   )
 
@@ -90,12 +89,12 @@ pub fn to_uri(page: Page) -> Uri {
       let assert Ok(uri) = uri.parse("/article/" <> article.id <> "/edit")
       uri
     }
-    PageUrlShortIndex -> {
+    PageUrlShortIndex(_) -> {
       let assert Ok(uri) = uri.parse("/url/")
       uri
     }
-    PageUrlShortInfo(_short, _) -> {
-      let assert Ok(uri) = uri.parse("/url/")
+    PageUrlShortInfo(short, _) -> {
+      let assert Ok(uri) = uri.parse("/url/" <> short.id)
       uri
     }
     PageUiComponents -> {
@@ -160,6 +159,7 @@ pub fn from_route(
   route route: Route,
   session session: Session,
   articles articles: sync.KV(String, Article),
+  kv_url kv_url: sync.KV(String, ShortUrl),
 ) -> Page {
   case route {
     routes.Index -> PageIndex
@@ -206,16 +206,34 @@ pub fn from_route(
           PageError(AuthenticationRequired("access DJOT demo"))
         session.Pending -> PageError(AuthenticationRequired("access DJOT demo"))
       }
-    routes.UrlShortIndex -> PageUrlShortIndex
-
+    routes.UrlShortIndex -> PageUrlShortIndex(kv_url)
     routes.UrlShortInfo(short) -> {
-      case session {
-        session.Authenticated(session_auth) ->
-          PageUrlShortInfo(short, session_auth)
-        session.Unauthenticated ->
+      let res_url = dict.get(kv_url.data, short)
+      case res_url, kv_url.state, session {
+        Ok(short_url), _, session.Authenticated(session_auth) -> {
+          PageUrlShortInfo(short_url, session_auth)
+        }
+        Ok(_short_url), _, session.Unauthenticated -> {
           PageError(AuthenticationRequired("access URL shortener info"))
-        session.Pending ->
+        }
+        Ok(_short_url), _, session.Pending -> {
           PageError(AuthenticationRequired("access URL shortener info"))
+        }
+        Error(Nil), sync.NotInitialized, _ -> {
+          PageError(Other("URL not initialized"))
+        }
+        Error(Nil), sync.Connecting, _ -> {
+          PageError(Other("URL connecting"))
+        }
+        Error(Nil), sync.CatchingUp, _ -> {
+          PageError(Other("URL catching up"))
+        }
+        Error(Nil), sync.InSync, _ -> {
+          PageError(Other("URL in sync"))
+        }
+        Error(Nil), sync.KVError(error), _ -> {
+          PageError(Other(error))
+        }
       }
     }
     routes.UiComponents -> PageUiComponents

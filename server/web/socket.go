@@ -162,9 +162,9 @@ func userIDFromRequest(r *http.Request) string {
 // Authorization bootstrap TODO: implement proper
 func authorizeInitial(l *jst_log.Logger, s *server, userID string) capabilities {
 	caps := capabilities{
-		Subjects: []string{"time.>"},
-		Buckets:  map[string][]string{"article": {">"}},
-		Commands: []string{"article_list", "article_get", "article_create", "article_update", "article_delete", "article_history", "article_revision"},
+		Subjects: []string{"time.seconds"},
+		Buckets:  map[string][]string{"article": {">"}, "url_short": {">"}},
+		Commands: []string{},
 		Streams:  map[string][]string{},
 	}
 	if userID == "" {

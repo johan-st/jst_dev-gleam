@@ -42,7 +42,7 @@ pub type ShortUrlUpdateRequest {
 
 // DECODERS -------------------------------------------------------------------
 
-fn short_url_decoder() -> Decoder(ShortUrl) {
+pub fn decoder() -> Decoder(ShortUrl) {
   use id <- decode.field("id", decode.string)
   use short_code <- decode.field("shortCode", decode.string)
   use target_url <- decode.field("targetUrl", decode.string)
@@ -64,7 +64,7 @@ fn short_url_decoder() -> Decoder(ShortUrl) {
 }
 
 fn short_url_list_response_decoder() -> Decoder(ShortUrlListResponse) {
-  use short_urls <- decode.field("shortUrls", decode.list(short_url_decoder()))
+  use short_urls <- decode.field("shortUrls", decode.list(decoder()))
   use total <- decode.field("total", decode.int)
   use limit <- decode.field("limit", decode.int)
   use offset <- decode.field("offset", decode.int)
@@ -72,6 +72,14 @@ fn short_url_list_response_decoder() -> Decoder(ShortUrlListResponse) {
 }
 
 // ENCODERS -------------------------------------------------------------------
+
+pub fn encoder(short_url: ShortUrl) -> Json {
+  json.object([
+    #("id", json.string(short_url.id)),
+    #("shortCode", json.string(short_url.short_code)),
+    #("targetUrl", json.string(short_url.target_url)),
+  ])
+}
 
 pub fn encode_short_url_create_request(req: ShortUrlCreateRequest) -> Json {
   json.object([
@@ -107,7 +115,7 @@ pub fn create_short_url(
   |> request.set_path("/api/url")
   |> request.set_body(body)
   |> add_base_uri(base_uri)
-  |> http.send(http.expect_json(short_url_decoder(), msg))
+  |> http.send(http.expect_json(decoder(), msg))
 }
 
 pub fn list_short_urls(
@@ -151,7 +159,7 @@ pub fn update_short_url(
   |> request.set_path("/api/url/" <> req.id)
   |> request.set_body(body)
   |> add_base_uri(base_uri)
-  |> http.send(http.expect_json(short_url_decoder(), msg))
+  |> http.send(http.expect_json(decoder(), msg))
 }
 
 pub fn get_short_url(msg, base_uri: Uri, short_code: String) -> Effect(msg) {
@@ -159,7 +167,7 @@ pub fn get_short_url(msg, base_uri: Uri, short_code: String) -> Effect(msg) {
   |> request.set_method(gleam_http.Get)
   |> request.set_path("/api/url/" <> short_code)
   |> add_base_uri(base_uri)
-  |> http.send(http.expect_json(short_url_decoder(), msg))
+  |> http.send(http.expect_json(decoder(), msg))
 }
 
 // HELPERS ---------------------------------------------------------------------

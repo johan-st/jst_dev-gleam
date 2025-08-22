@@ -81,20 +81,30 @@ pub fn ws_text_message(
     )
   {
     Ok(Envelope(op:, target:, data:)) -> {
-      echo "ws_text_message: " <> op
       case target == kv.bucket {
         True -> {
-          echo "ws_text_message: target match: " <> target
           case op {
             "kv_msg" -> {
               case data {
                 KvPut(rev:, key:, value:) -> {
                   let data = dict.insert(kv.data, key, value)
-                  #(KV(..kv, data:, revision: rev), effect.none())
+                  #(
+                    KV(..kv, data:, revision: rev, state: case kv.state {
+                      InSync -> InSync
+                      _ -> CatchingUp
+                    }),
+                    effect.none(),
+                  )
                 }
                 KvDel(rev:, key:) -> {
                   let data = dict.delete(kv.data, key)
-                  #(KV(..kv, data:, revision: rev), effect.none())
+                  #(
+                    KV(..kv, data:, revision: rev, state: case kv.state {
+                      InSync -> InSync
+                      _ -> CatchingUp
+                    }),
+                    effect.none(),
+                  )
                 }
                 KvInSync(rev:) -> {
                   // currently revision is not set on in_sync messages. 
@@ -103,7 +113,7 @@ pub fn ws_text_message(
                 KvError(rev:, error:) -> {
                   echo "kv_msg: error"
                   echo "error: " <> error
-                  #(kv, effect.none())
+                  #(KV(..kv, state: KVError(error)), effect.none())
                 }
               }
             }
@@ -118,12 +128,13 @@ pub fn ws_text_message(
         }
         False -> {
           echo "ws_text_message: target mismatch"
+          echo "target: " <> target
+          echo "kv.bucket: " <> kv.bucket
           #(kv, effect.none())
         }
       }
     }
     Error(errors) -> {
-      echo "ws_text_message: decode error"
       echo errors
       #(kv, effect.none())
     }

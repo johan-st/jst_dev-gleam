@@ -66,10 +66,6 @@ type Model {
     base_uri: Uri,
     route: Route,
     session: Session,
-    // articles: RemoteData(List(Article), HttpError),
-    short_urls: RemoteData(List(ShortUrl), HttpError),
-    short_url_form_short_code: String,
-    short_url_form_target_url: String,
     djot_demo_content: String,
     edit_view_mode: EditViewMode,
     profile_menu_open: Bool,
@@ -106,6 +102,9 @@ type Model {
     // Sync
     ws: Option(ws.WebSocket),
     article_kv: sync.KV(String, article.Article),
+    short_url_kv: sync.KV(String, short_url.ShortUrl),
+    short_url_form_short_code: String,
+    short_url_form_target_url: String,
     // realtime_time: String,
   )
 }
@@ -160,7 +159,6 @@ pub type Msg {
   DjotDemoContentUpdated(content: String)
   ShortUrlCreateClicked(short_code: String, target_url: String)
   ShortUrlCreateResponse(result: Result(ShortUrl, HttpError))
-  ShortUrlListGot(result: Result(ShortUrlListResponse, HttpError))
   ShortUrlDeleteClicked(id: String)
   ShortUrlDeleteResponse(id: String, result: Result(String, HttpError))
   ShortUrlDeleteConfirmClicked(id: String)
@@ -264,7 +262,6 @@ fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 }
 
 fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
-  echo msg
   case msg {
     // LOCAL MODEL
     GotLocalModelResult(res) -> {
@@ -354,7 +351,6 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
 
     // Keyboard events
     KeyboardDown(ev) -> {
-      echo ev
       #(model, effect.none())
     }
 
@@ -362,7 +358,6 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       let code = p_event.code(key)
       let key = p_event.key(key)
       let key_parsed = key.parse_key(code, key)
-      echo key_parsed
       #(model, effect.none())
     }
 
@@ -894,37 +889,23 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ShortUrlCreateResponse(result) -> {
       case result {
         Ok(short_url) -> {
-          let updated_short_urls = case model.short_urls {
-            Pending(Some(urls), _) | Loaded(urls, _, _) ->
-              Loaded([short_url, ..urls], birl.now(), birl.now())
-            _ -> Loaded([short_url], birl.now(), birl.now())
-          }
-          #(Model(..model, short_urls: updated_short_urls), effect.none())
-        }
-        Error(err) -> {
-          #(
-            Model(..model, short_urls: rd.to_errored(model.short_urls, err)),
-            effect.none(),
-          )
-        }
-      }
-    }
-    ShortUrlListGot(result) -> {
-      case result {
-        Ok(response) -> {
           #(
             Model(
               ..model,
-              short_urls: model.short_urls |> rd.to_loaded(response.short_urls),
+              short_url_kv: model.short_url_kv
+                |> sync.set_data(dict.insert(
+                  model.short_url_kv.data,
+                  short_url.id,
+                  short_url,
+                )),
             ),
             effect.none(),
           )
         }
         Error(err) -> {
-          #(
-            Model(..model, short_urls: rd.to_errored(model.short_urls, err)),
-            effect.none(),
-          )
+          echo "short url create response error"
+          echo err
+          #(model, effect.none())
         }
       }
     }
@@ -953,17 +934,15 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ShortUrlDeleteResponse(id, result) -> {
       case result {
         Ok(_) -> {
-          let updated_short_urls = case model.short_urls {
-            Pending(Some(urls), _) | Loaded(urls, _, _) ->
-              Loaded(
-                list.filter(urls, fn(url) { url.id != id }),
-                birl.now(),
-                birl.now(),
-              )
-            _ -> Loaded([], birl.now(), birl.now())
-          }
+          let updated_short_urls =
+            model.short_url_kv.data
+            |> dict.delete(id)
           #(
-            Model(..model, short_urls: updated_short_urls),
+            Model(
+              ..model,
+              short_url_kv: model.short_url_kv
+                |> sync.set_data(updated_short_urls),
+            ),
             modem.push(
               uri.to_string(routes.to_uri(routes.UrlShortIndex)),
               None,
@@ -1011,27 +990,22 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ShortUrlToggleActiveResponse(id, result) -> {
       case result {
         Ok(updated_url) -> {
-          let updated_short_urls = case model.short_urls {
-            Pending(Some(urls), _) | Loaded(urls, _, _) ->
-              Loaded(
-                list.map(urls, fn(url) {
-                  case url.id == id {
-                    True -> updated_url
-                    False -> url
-                  }
-                }),
-                birl.now(),
-                birl.now(),
-              )
-            _ -> Loaded([], birl.now(), birl.now())
-          }
-          #(Model(..model, short_urls: updated_short_urls), effect.none())
-        }
-        Error(err) -> {
+          let updated_short_urls =
+            model.short_url_kv.data
+            |> dict.insert(id, updated_url)
           #(
-            Model(..model, short_urls: rd.to_errored(model.short_urls, err)),
+            Model(
+              ..model,
+              short_url_kv: model.short_url_kv
+                |> sync.set_data(updated_short_urls),
+            ),
             effect.none(),
           )
+        }
+        Error(err) -> {
+          echo "short url toggle active response error"
+          echo err
+          #(model, effect.none())
         }
       }
     }
@@ -1374,23 +1348,33 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     WebSocketMsg(msg) -> {
       case msg {
         ws.OnTextMessage(text) -> {
-          let #(kv_article, effect) =
+          let #(kv_article, effect_article) =
             sync.ws_text_message(model.article_kv, text)
-          let model = Model(..model, article_kv: kv_article)
+          let #(kv_short_url, effect_short_url) =
+            sync.ws_text_message(model.short_url_kv, text)
+          let model =
+            Model(..model, article_kv: kv_article, short_url_kv: kv_short_url)
+          let effect = effect.batch([effect_article, effect_short_url])
           #(model, effect)
         }
         ws.InvalidUrl -> todo as "ws.InvalidUrl"
         ws.OnBinaryMessage(_) -> todo as "ws.OnBinaryMessage"
         ws.OnClose(reason) -> {
           let #(kv_article, effect) = sync.ws_close(model.article_kv, reason)
-          let model = Model(..model, article_kv: kv_article)
+          let #(kv_short_url, effect_short_url) =
+            sync.ws_close(model.short_url_kv, reason)
+          let model =
+            Model(..model, article_kv: kv_article, short_url_kv: kv_short_url)
+          let effect = effect.batch([effect, effect_short_url])
           #(model, effect)
         }
         ws.OnOpen(w) -> {
           let #(kv_article, effect) = sync.ws_open(model.article_kv, w)
-          echo "ws_open"
-          echo effect
-          let model = Model(..model, article_kv: kv_article)
+          let #(kv_short_url, effect_short_url) =
+            sync.ws_open(model.short_url_kv, w)
+          let model =
+            Model(..model, article_kv: kv_article, short_url_kv: kv_short_url)
+          let effect = effect.batch([effect, effect_short_url])
           #(model, effect)
         }
       }
@@ -1437,21 +1421,6 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
           #(Model(..model, route:), effect.none())
         }
       }
-    routes.UrlShortIndex -> {
-      case model.short_urls {
-        NotInitialized -> #(
-          Model(
-            ..model,
-            route:,
-            short_urls: model.short_urls |> rd.to_pending(None),
-          ),
-          short_url.list_short_urls(ShortUrlListGot, model.base_uri, 10, 0),
-        )
-        _ -> {
-          #(Model(..model, route:), effect.none())
-        }
-      }
-    }
     routes.Profile -> {
       case session.subject(model.session) {
         Some(subject) -> #(
@@ -1480,6 +1449,7 @@ fn view(model: Model) -> Element(Msg) {
       route: model.route,
       session: model.session,
       articles: model.article_kv,
+      kv_url: model.short_url_kv,
     )
   let content: List(Element(Msg)) = case page {
     page.Loading(_) -> view_loading()
@@ -1513,13 +1483,10 @@ fn view(model: Model) -> Element(Msg) {
       }
     }
     page.PageAbout -> about.view()
-    page.PageUrlShortIndex ->
-      url_index.view(url_list.list(
-        model.short_urls,
-        model.expanded_urls,
-        model.delete_confirmation,
-        model.copy_feedback,
-        url_list.Callbacks(
+    page.PageUrlShortIndex(kv_url) ->
+      url_index.view(
+        kv_url:,
+        callbacks: url_list.Callbacks(
           ShortUrlCopyClicked,
           ShortUrlToggleActiveClicked,
           ShortUrlToggleExpanded,
@@ -1527,8 +1494,11 @@ fn view(model: Model) -> Element(Msg) {
           ShortUrlDeleteConfirmClicked,
           fn() { ShortUrlDeleteCancelClicked },
         ),
-      ))
-    page.PageUrlShortInfo(short, _) -> view_url_info_page(model, short)
+        expanded_urls: model.expanded_urls,
+        delete_confirmation: model.delete_confirmation,
+        copy_feedback: model.copy_feedback,
+      )
+    page.PageUrlShortInfo(short, _) -> view_url_info_page(model, short.id)
     page.PageDjotDemo(_, content) -> view_djot_demo(content)
     page.PageUiComponents -> view_ui_components()
     page.PageNotifications -> view_notifications(model)
@@ -2951,138 +2921,118 @@ fn view_expanded_url_card(model: Model, url: ShortUrl) -> Element(Msg) {
   )
 }
 
-// legacy URL list view helpers removed
-
 fn view_url_info_page(model: Model, short_code: String) -> List(Element(Msg)) {
-  case model.short_urls {
-    Loaded(urls, _, _) -> {
-      case list.find(urls, fn(url) { url.short_code == short_code }) {
-        Ok(url) -> [
-          view_title("URL Info", "url-info"),
-          html.div(
-            [
-              attr.class(
-                "mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700",
+  case model.short_url_kv.data |> dict.get(short_code) {
+    Ok(url) -> {
+      [
+        view_title("URL Info", "url-info"),
+        html.div(
+          [attr.class("mt-8 p-6 bg-zinc-800 rounded-lg border border-zinc-700")],
+          [
+            html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
+              html.text("URL Details"),
+            ]),
+            html.div([attr.class("space-y-4 text-zinc-300")], [
+              html.div([attr.class("flex justify-between items-center")], [
+                html.span([attr.class("text-zinc-500")], [
+                  html.text("Short Code:"),
+                ]),
+                html.span([attr.class("font-mono text-pink-700")], [
+                  html.text(url.short_code),
+                ]),
+              ]),
+              html.div([attr.class("flex justify-between items-center")], [
+                html.span([attr.class("text-zinc-500")], [
+                  html.text("Target URL:"),
+                ]),
+                html.span([attr.class("break-all")], [html.text(url.target_url)]),
+              ]),
+              html.div([attr.class("flex justify-between items-center")], [
+                html.span([attr.class("text-zinc-500")], [
+                  html.text("Created By:"),
+                ]),
+                html.span([], [html.text(url.created_by)]),
+              ]),
+              html.div([attr.class("flex justify-between items-center")], [
+                html.span([attr.class("text-zinc-500")], [html.text("Created:")]),
+                html.span([], [
+                  html.text(
+                    birl.from_unix(url.created_at)
+                    |> birl.to_naive_date_string,
+                  ),
+                ]),
+              ]),
+              html.div([attr.class("flex justify-between items-center")], [
+                html.span([attr.class("text-zinc-500")], [html.text("Updated:")]),
+                html.span([], [
+                  html.text(
+                    birl.from_unix(url.updated_at)
+                    |> birl.to_naive_date_string,
+                  ),
+                ]),
+              ]),
+              html.div([attr.class("flex justify-between items-center")], [
+                html.span([attr.class("text-zinc-500")], [
+                  html.text("Access Count:"),
+                ]),
+                html.span([], [html.text(int.to_string(url.access_count))]),
+              ]),
+              html.div([attr.class("flex justify-between items-center")], [
+                html.span([attr.class("text-zinc-500")], [html.text("Status:")]),
+                case url.is_active {
+                  True -> {
+                    html.span([attr.class("text-green-400")], [
+                      html.text("Active"),
+                    ])
+                  }
+                  False -> {
+                    html.span([attr.class("text-red-400")], [
+                      html.text("Inactive"),
+                    ])
+                  }
+                },
+              ]),
+            ]),
+            html.div([attr.class("mt-6 flex gap-4")], [
+              ui.button(
+                "Back to URLs",
+                ui.ColorTeal,
+                ui.ButtonStateNormal,
+                UserMouseDownNavigation(routes.to_uri(routes.UrlShortIndex)),
               ),
-            ],
-            [
-              html.h3([attr.class("text-lg text-pink-700 font-light mb-4")], [
-                html.text("URL Details"),
-              ]),
-              html.div([attr.class("space-y-4 text-zinc-300")], [
-                html.div([attr.class("flex justify-between items-center")], [
-                  html.span([attr.class("text-zinc-500")], [
-                    html.text("Short Code:"),
-                  ]),
-                  html.span([attr.class("font-mono text-pink-700")], [
-                    html.text(url.short_code),
-                  ]),
-                ]),
-                html.div([attr.class("flex justify-between items-center")], [
-                  html.span([attr.class("text-zinc-500")], [
-                    html.text("Target URL:"),
-                  ]),
-                  html.span([attr.class("break-all")], [
-                    html.text(url.target_url),
-                  ]),
-                ]),
-                html.div([attr.class("flex justify-between items-center")], [
-                  html.span([attr.class("text-zinc-500")], [
-                    html.text("Created By:"),
-                  ]),
-                  html.span([], [html.text(url.created_by)]),
-                ]),
-                html.div([attr.class("flex justify-between items-center")], [
-                  html.span([attr.class("text-zinc-500")], [
-                    html.text("Created:"),
-                  ]),
-                  html.span([], [
-                    html.text(
-                      birl.from_unix(url.created_at)
-                      |> birl.to_naive_date_string,
-                    ),
-                  ]),
-                ]),
-                html.div([attr.class("flex justify-between items-center")], [
-                  html.span([attr.class("text-zinc-500")], [
-                    html.text("Updated:"),
-                  ]),
-                  html.span([], [
-                    html.text(
-                      birl.from_unix(url.updated_at)
-                      |> birl.to_naive_date_string,
-                    ),
-                  ]),
-                ]),
-                html.div([attr.class("flex justify-between items-center")], [
-                  html.span([attr.class("text-zinc-500")], [
-                    html.text("Access Count:"),
-                  ]),
-                  html.span([], [html.text(int.to_string(url.access_count))]),
-                ]),
-                html.div([attr.class("flex justify-between items-center")], [
-                  html.span([attr.class("text-zinc-500")], [
-                    html.text("Status:"),
-                  ]),
-                  case url.is_active {
-                    True -> {
-                      html.span([attr.class("text-green-400")], [
-                        html.text("Active"),
-                      ])
-                    }
-                    False -> {
-                      html.span([attr.class("text-red-400")], [
-                        html.text("Inactive"),
-                      ])
-                    }
-                  },
-                ]),
-              ]),
-              html.div([attr.class("mt-6 flex gap-4")], [
-                ui.button(
-                  "Back to URLs",
-                  ui.ColorTeal,
-                  ui.ButtonStateNormal,
-                  UserMouseDownNavigation(routes.to_uri(routes.UrlShortIndex)),
-                ),
-                ui.button(
-                  case model.copy_feedback == Some(url.short_code) {
-                    True -> "Copied!"
-                    False -> "Copy URL"
-                  },
-                  ui.ColorTeal,
-                  ui.ButtonStateNormal,
-                  ShortUrlCopyClicked(url.short_code),
-                ),
-                ui.button(
-                  case url.is_active {
-                    True -> "Deactivate"
-                    False -> "Activate"
-                  },
-                  case url.is_active {
-                    True -> ui.ColorOrange
-                    False -> ui.ColorTeal
-                  },
-                  ui.ButtonStateNormal,
-                  ShortUrlToggleActiveClicked(url.id, url.is_active),
-                ),
-                ui.button(
-                  "Delete URL",
-                  ui.ColorRed,
-                  ui.ButtonStateNormal,
-                  ShortUrlDeleteClicked(url.id),
-                ),
-              ]),
-            ],
-          ),
-        ]
-        Error(_) -> [
-          view_title("URL Not Found", "url-not-found"),
-          ui.simple_paragraph("The requested URL was not found."),
-        ]
-      }
+              ui.button(
+                case model.copy_feedback == Some(url.short_code) {
+                  True -> "Copied!"
+                  False -> "Copy URL"
+                },
+                ui.ColorTeal,
+                ui.ButtonStateNormal,
+                ShortUrlCopyClicked(url.short_code),
+              ),
+              ui.button(
+                case url.is_active {
+                  True -> "Deactivate"
+                  False -> "Activate"
+                },
+                case url.is_active {
+                  True -> ui.ColorOrange
+                  False -> ui.ColorTeal
+                },
+                ui.ButtonStateNormal,
+                ShortUrlToggleActiveClicked(url.id, url.is_active),
+              ),
+              ui.button(
+                "Delete URL",
+                ui.ColorRed,
+                ui.ButtonStateNormal,
+                ShortUrlDeleteClicked(url.id),
+              ),
+            ]),
+          ],
+        ),
+      ]
     }
-    _ -> [
+    Error(Nil) -> [
       view_title("URL Info", "url-info"),
       ui.simple_paragraph("Loading URL information..."),
     ]
@@ -4191,7 +4141,6 @@ fn init(_) -> #(Model, Effect(Msg)) {
     Model(
       route: routes.from_uri(uri),
       session: session.Unauthenticated,
-      short_urls: NotInitialized,
       short_url_form_short_code: "",
       short_url_form_target_url: "",
       base_uri: uri,
@@ -4243,6 +4192,16 @@ fn init(_) -> #(Model, Effect(Msg)) {
         encoder_value: article.encoder,
         decoder_key: decode.string,
         decoder_value: article.decoder(),
+        start_revision: 0,
+      ),
+      short_url_kv: sync.new_kv(
+        id: "url_short_kv",
+        bucket: "url_short",
+        filter: None,
+        encoder_key: json.string,
+        encoder_value: short_url.encoder,
+        decoder_key: decode.string,
+        decoder_value: short_url.decoder(),
         start_revision: 0,
       ),
     )
