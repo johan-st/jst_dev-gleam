@@ -114,7 +114,7 @@ var upgrader = websocket.Upgrader{
 }
 
 // HandleRealtimeWebSocket upgrades the connection and serves the realtime bridge
-func HandleRealtimeWebSocket(l *jst_log.Logger, nc *nats.Conn, w http.ResponseWriter, r *http.Request) {
+func HandleRealtimeWebSocket(l *jst_log.Logger, nc *nats.Conn, slow time.Duration, w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		l.Error("ws upgrade: %v", err)
@@ -143,6 +143,7 @@ func HandleRealtimeWebSocket(l *jst_log.Logger, nc *nats.Conn, w http.ResponseWr
 		ctx:        ctx,
 		cancel:     cancel,
 		log:        l,
+		slow:       slow,
 	}
 
 	go c.watchAuthKV()
@@ -195,6 +196,7 @@ type rtClient struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	log        *jst_log.Logger
+	slow       time.Duration
 }
 
 func (c *rtClient) writeLoop() {
@@ -203,6 +205,9 @@ func (c *rtClient) writeLoop() {
 		case <-c.ctx.Done():
 			return
 		case msg := <-c.sendCh:
+			if c.slow > 0 {
+				time.Sleep(c.slow)
+			}
 			if err := c.conn.WriteJSON(msg); err != nil {
 				c.log.Error("ws write: %v", err)
 				c.closeWithError("write error")

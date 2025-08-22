@@ -23,6 +23,7 @@ type httpServer struct {
 	mux         *http.ServeMux // For defining routes
 	handler     http.Handler   // Final wrapped handler for serving requests
 	embedFs     fs.FS
+	slow        time.Duration
 }
 
 //go:embed static
@@ -30,7 +31,7 @@ var embedded embed.FS
 
 // New initializes and returns a new httpServer instance with embedded static files and an article repository.
 // Returns nil if the static files or article repository cannot be initialized.
-func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger, articleRepo articles.ArticleRepo, dev bool) *httpServer {
+func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger, articleRepo articles.ArticleRepo, dev bool, slow time.Duration) *httpServer {
 	fs, err := fs.Sub(embedded, "static")
 	if err != nil {
 		l.Error("Failed to load static folder")
@@ -44,10 +45,11 @@ func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger
 		embedFs:     fs,
 		articleRepo: articleRepo,
 		mux:         http.NewServeMux(),
+		slow:        slow,
 	}
 
 	// Set up routes on the mux
-	routes(s.mux, l.WithBreadcrumb("route"), s.articleRepo, nc, s.embedFs, jwtSecret, dev)
+	routes(s.mux, l.WithBreadcrumb("route"), s.articleRepo, nc, s.embedFs, jwtSecret, dev, s.slow)
 
 	// Apply global middleware to create the final handler
 	// note: last added is first called
