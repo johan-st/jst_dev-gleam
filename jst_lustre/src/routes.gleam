@@ -55,7 +55,7 @@ pub fn from_uri(uri: Uri) -> Route {
     ["url"] -> UrlShortIndex
     ["url", uid] -> UrlShortInfo(uid)
     ["ui-components"] -> UiComponents
-    ["notifications"] -> Notifications
+    ["push-me"] -> Notifications
     ["profile"] -> Profile
     ["debug"] -> Debug
     _ -> NotFound(uri)
@@ -73,7 +73,7 @@ pub fn to_string(route: Route) -> String {
     UrlShortIndex -> "/url"
     UrlShortInfo(short) -> "/url/" <> short
     UiComponents -> "/ui-components"
-    Notifications -> "/notifications"
+    Notifications -> "/push-me"
     Profile -> "/profile"
     Debug -> "/debug"
     NotFound(uri) -> "/404?uri=" <> uri.to_string(uri)
