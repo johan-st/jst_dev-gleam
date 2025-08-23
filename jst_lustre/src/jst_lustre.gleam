@@ -8,7 +8,6 @@ import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/result
 import sync
 import view/ui
 
@@ -29,7 +28,6 @@ import lustre/event
 import lustre_websocket as ws
 import modem
 import plinth/browser/event as p_event
-import realtime
 import routes.{type Route}
 import session.{type Session}
 import utils/dom_utils
@@ -42,15 +40,16 @@ import utils/persist.{type PersistentModel, PersistentModelV0, PersistentModelV1
 import utils/remote_data.{
   type RemoteData, Errored, Loaded, NotInitialized, Pending,
 } as rd
-import utils/short_url.{type ShortUrl, type ShortUrlListResponse}
+import utils/short_url.{type ShortUrl}
 import utils/url as url_utils
 import utils/user
 import utils/window_events
 import view/icon
-import view/page.{type Page}
+import view/page
 import view/page/about
 import view/page/article as view_article
 import view/page/article_list
+import view/page/debug as page_debug
 import view/page/index
 import view/page/url_index
 import view/page/url_list
@@ -1357,8 +1356,32 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           let effect = effect.batch([effect_article, effect_short_url])
           #(model, effect)
         }
-        ws.InvalidUrl -> todo as "ws.InvalidUrl"
-        ws.OnBinaryMessage(_) -> todo as "ws.OnBinaryMessage"
+        ws.InvalidUrl -> {
+          let kv_article =
+            sync.KV(..model.article_kv, state: sync.KVError("Invalid URL"))
+          let kv_short_url =
+            sync.KV(..model.short_url_kv, state: sync.KVError("Invalid URL"))
+          #(
+            Model(..model, article_kv: kv_article, short_url_kv: kv_short_url),
+            effect.none(),
+          )
+        }
+        ws.OnBinaryMessage(_) -> {
+          let kv_article =
+            sync.KV(
+              ..model.article_kv,
+              state: sync.KVError("Binary message not supported"),
+            )
+          let kv_short_url =
+            sync.KV(
+              ..model.short_url_kv,
+              state: sync.KVError("Binary message not supported"),
+            )
+          #(
+            Model(..model, article_kv: kv_article, short_url_kv: kv_short_url),
+            effect.none(),
+          )
+        }
         ws.OnClose(reason) -> {
           let #(kv_article, effect) = sync.ws_close(model.article_kv, reason)
           let #(kv_short_url, effect_short_url) =
@@ -1503,7 +1526,7 @@ fn view(model: Model) -> Element(Msg) {
     page.PageUiComponents -> view_ui_components()
     page.PageNotifications -> view_notifications(model)
     page.PageProfile(_) -> view_profile(model)
-    page.PageDebug -> todo as "view debug page"
+    page.PageDebug -> page_debug.view(model.article_kv, model.short_url_kv)
     page.PageNotFound(uri) -> view_not_found(uri)
   }
   let nav_hints_overlay = element.none()
@@ -1563,254 +1586,6 @@ fn view(model: Model) -> Element(Msg) {
     // view_status_bar_with_cmds(model),
   ])
 }
-
-fn format_unix_locale(raw_json: String) -> String {
-  // Parse { data: { unix: Int } } and format as YYYY-MM-DD HH:MM:SS
-  let decoder = {
-    use unix <- decode.subfield(["data", "unixMilli"], decode.int)
-    decode.success(unix)
-  }
-  case json.parse(from: raw_json, using: decoder) {
-    Ok(unix) -> {
-      let dt = birl.from_unix_milli(unix)
-      birl.to_naive_date_string(dt) <> " " <> birl.to_time_string(dt)
-    }
-    Error(_) -> raw_json
-  }
-}
-
-fn client_server_time_diff_ms(raw_json: String) -> String {
-  let decoder = {
-    use unix <- decode.subfield(["data", "unixMilli"], decode.int)
-    decode.success(unix)
-  }
-  case json.parse(from: raw_json, using: decoder) {
-    Ok(unix) -> {
-      let now_ms = birl.to_unix_milli(birl.now())
-      let server_ms = unix
-      let diff_ms = now_ms - server_ms
-      let magnitude = case diff_ms < 0 {
-        True -> -diff_ms
-        False -> diff_ms
-      }
-      let sign = case diff_ms < 0 {
-        True -> "-"
-        False -> "+"
-      }
-      sign <> int.to_string(magnitude) <> " ms"
-    }
-    Error(_) -> "n/a"
-  }
-}
-
-// Decoder for KV article updates
-fn article_kv_decoder() -> decode.Decoder(ArticleKvUpdate) {
-  use key <- decode.field("key", decode.string)
-  use revision <- decode.field("revision", decode.int)
-  use operation <- decode.field("op", decode.string)
-  use value <- decode.field("value", decode.string)
-
-  let article_value = case value {
-    "" -> None
-    _ -> None
-  }
-
-  decode.success(ArticleKvUpdate(
-    key:,
-    revision:,
-    operation:,
-    value: article_value,
-  ))
-}
-
-type ArticleKvUpdate {
-  ArticleKvUpdate(
-    key: String,
-    revision: Int,
-    operation: String,
-    value: Option(Article),
-  )
-}
-
-// // fn view_nav_hints_from_bindings(model: Model) -> Element(Msg) {
-// //   let shift = set.contains(model.keys_down, key.Captured(key.Shift))
-// //   let nav_items =
-// //     model.chord_bindings
-// //     |> list.filter(fn(b) { b.group == Nav && b.label != "" })
-// //     |> list.map(fn(b) {
-// //       let combo = case b.chord {
-// //         key.Chord(keys_set) ->
-// //           keys_set
-// //           |> set.to_list
-// //           |> list.map(fn(k) {
-// //             case k {
-// //               key.Captured(c) -> key.to_string(c, shift)
-// //               key.Unhandled(code) -> code
-// //             }
-// //           })
-// //           |> string.join("+")
-// //       }
-// //       #(b.label, combo)
-// //     })
-
-// //   html.div([attr.class("fixed inset-0 z-50 flex items-center justify-center")], [
-// //     // Dark overlay background
-// //     html.div(
-// //       [attr.class("absolute inset-0 bg-black bg-opacity-50 backdrop-blur-sm")],
-// //       [],
-// //     ),
-// //     // Quick nav content
-// //     html.div(
-// //       [
-// //         attr.class(
-// //           "relative bg-zinc-900 bg-opacity-95 text-white rounded-xl px-12 py-8 shadow-2xl border border-zinc-700 backdrop-blur-sm max-w-md",
-// //         ),
-// //       ],
-// //       [
-// //         html.div(
-// //           [
-// //             attr.class(
-// //               "text-2xl font-semibold text-pink-400 mb-6 text-center font-mono",
-// //             ),
-// //           ],
-// //           [html.text("Quick Navigation")],
-// //         ),
-// //         html.div([attr.class("text-base text-zinc-400 mb-6 text-center")], [
-// //           html.text("Hold Alt and press highlighted keys to navigate"),
-// //         ]),
-// //         html.ul(
-// //           [attr.class("space-y-4")],
-// //           list.map(nav_items, fn(item) {
-// //             case item {
-// //               #(name, shortcut) ->
-// //                 html.li(
-// //                   [
-// //                     attr.class(
-// //                       "flex items-center justify-between bg-zinc-800 rounded-lg px-6 py-4 border border-zinc-700 hover:border-pink-600 transition-colors",
-// //                     ),
-// //                   ],
-// //                   [
-// //                     html.span(
-// //                       [attr.class("text-zinc-300 font-medium text-lg")],
-// //                       [html.text(name)],
-// //                     ),
-// //                     html.span(
-// //                       [
-// //                         attr.class(
-// //                           "bg-zinc-700 text-zinc-200 px-3 py-2 rounded text-sm font-mono border border-zinc-600",
-// //                         ),
-// //                       ],
-// //                       [html.text(shortcut)],
-// //                     ),
-// //                   ],
-// //                 )
-// //             }
-// //           }),
-// //         ),
-// //       ],
-// //     ),
-// //   ])
-// // }
-
-// fn view_status_bar_with_cmds(model: Model) -> Element(Msg) {
-//   let keys = model.keys_down
-//   let session_ = model.session
-//   let shift = set.contains(keys, key.Captured(key.Shift))
-//   let ctrl = set.contains(keys, key.Captured(key.Ctrl))
-//   let alt = set.contains(keys, key.Captured(key.Alt))
-
-//   let cmd_hints = case ctrl {
-//     True -> {
-//       model.chord_bindings
-//       |> list.filter(fn(b) { b.group == Cmd && b.label != "" })
-//       |> list.map(fn(b) {
-//         let key_names = case b.chord {
-//           key.Chord(keys_set) ->
-//             keys_set
-//             |> set.to_list
-//             |> list.map(fn(k) {
-//               case k {
-//                 key.Captured(c) -> key.to_string(c, shift)
-//                 key.Unhandled(code) -> code
-//               }
-//             })
-//             |> string.join("+")
-//         }
-//         #(b.label, key_names)
-//       })
-//     }
-//     False -> []
-//   }
-
-//   case session_ {
-//     session.Authenticated(_) -> {
-//       let key_list = set.to_list(keys)
-//       html.div(
-//         [
-//           attr.class(
-//             "fixed bottom-0 left-0 right-0 bg-gray-800 text-white px-4 py-2 text-sm font-mono border-t border-gray-700",
-//           ),
-//         ],
-//         [
-//           html.div([attr.class("flex justify-between items-center")], [
-//             html.div([attr.class("flex items-center space-x-4")], [
-//               html.span([attr.class("flex items-center space-x-2")], [
-//                 html.span([], [html.text("Ctrl")]),
-//                 html.div(
-//                   [
-//                     attr.class(case ctrl {
-//                       True -> "w-3 h-3 bg-green-500 rounded-full"
-//                       False -> "w-3 h-3 bg-gray-500 rounded-full"
-//                     }),
-//                   ],
-//                   [],
-//                 ),
-//               ]),
-//               html.span([], [html.text("Alt")]),
-//               html.div(
-//                 [
-//                   attr.class(case alt {
-//                     True -> "w-3 h-3 bg-green-500 rounded-full"
-//                     False -> "w-3 h-3 bg-gray-500 rounded-full"
-//                   }),
-//                 ],
-//                 [],
-//               ),
-//               ..list.map(key_list, fn(key) {
-//                 let text = case key {
-//                   key.Captured(key) -> key.to_string(key, shift)
-//                   key.Unhandled(code) -> "(" <> code <> ")"
-//                 }
-//                 html.span([], [html.text(text)])
-//               })
-//             ]),
-//             html.div([attr.class("flex items-center space-x-6")], [
-//               html.div([attr.class("text-gray-400")], [html.text("JST Lustre")]),
-//               case cmd_hints {
-//                 [] -> element.none()
-//                 _ ->
-//                   html.div(
-//                     [
-//                       attr.class(
-//                         "flex items-center space-x-4 text-xs text-zinc-300",
-//                       ),
-//                     ],
-//                     list.map(cmd_hints, fn(tuple) {
-//                       case tuple {
-//                         #(label, combo) ->
-//                           html.span([], [html.text(label <> ": " <> combo)])
-//                       }
-//                     }),
-//                   )
-//               },
-//             ]),
-//           ]),
-//         ],
-//       )
-//     }
-//     session.Unauthenticated | session.Pending -> element.none()
-//   }
-// }
 
 // PROFILE VIEW -----------------------------------------------------------------
 fn view_profile(model: Model) -> List(Element(Msg)) {

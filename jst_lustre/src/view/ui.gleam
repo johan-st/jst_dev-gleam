@@ -114,7 +114,7 @@ pub fn page_title(title: String, id: String) -> Element(msg) {
     [
       attr.id(id),
       attr.class(
-        "bg-gradient-to-tr from-pink-800 via-pink-700 to-pink-500 bg-clip-text text-transparent text-3xl sm:text-4xl md:text-5xl font-light leading-tight mb-4",
+        "h-[1.25em] bg-gradient-to-tr from-pink-800 via-pink-700 to-pink-500 bg-clip-text text-transparent text-3xl sm:text-4xl md:text-5xl font-light leading-tight mb-4",
       ),
     ],
     [html.text(title)],

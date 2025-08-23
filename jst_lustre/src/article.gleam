@@ -9,7 +9,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/uri.{type Uri}
 import lustre/effect.{type Effect}
 import session.{type Session, Authenticated}
-import utils/http.{type HttpError}
+import utils/http
 
 pub type Article {
   ArticleV1(
