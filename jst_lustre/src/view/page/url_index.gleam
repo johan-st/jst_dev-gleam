@@ -55,5 +55,20 @@ pub fn view(
     )
   //TODO: add list of urls
   // todo as "url index list: add list of urls" 
-  [ui.page_header("URL Shortener", None), ui.content_container([intro])]
+  [
+    ui.flex_between(
+      ui.page_title("URL Shortener", "url-shortener-title"),
+      html.div([attr.class("flex items-center gap-3")], [
+        case kv.state {
+          sync.NotInitialized ->
+            ui.status_badge("Not initialized", ui.ColorNeutral)
+          sync.Connecting -> ui.status_badge("Connecting", ui.ColorTeal)
+          sync.CatchingUp -> ui.status_badge("Catching up", ui.ColorOrange)
+          sync.InSync -> ui.status_badge("In sync", ui.ColorGreen)
+          sync.KVError(_) -> ui.status_badge("Error", ui.ColorRed)
+        },
+      ]),
+    ),
+    ui.content_container([intro, list]),
+  ]
 }

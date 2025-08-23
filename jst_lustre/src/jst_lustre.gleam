@@ -1454,8 +1454,8 @@ fn view(model: Model) -> Element(Msg) {
   let content: List(Element(Msg)) = case page {
     page.Loading(_) -> view_loading()
     page.PageIndex -> index.view(UserMouseDownNavigation)
-    page.PageArticleList(in_sync, articles, session) ->
-      article_list.view(in_sync, articles, session, ArticleCreateClicked)
+    page.PageArticleList(_, _, session) ->
+      article_list.view(model.article_kv, session, ArticleCreateClicked)
     page.PageArticle(article, session) ->
       view_article.view_article_page(
         article,

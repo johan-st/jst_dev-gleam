@@ -1,5 +1,6 @@
 import article.{type Article}
 import birl
+import gleam/dict
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/order
@@ -8,28 +9,30 @@ import gleam/uri
 import lustre/attribute as attr
 import lustre/element.{type Element}
 import lustre/element/html
-
 import routes
 import session
+import sync
 import view/page/partials/article_partials as parts
 import view/ui
 
 pub fn view(
-  in_sync: Bool,
-  articles: List(Article),
-  sess: session.Session,
-  create_article_msg: msg,
+  articles kv: sync.KV(String, Article),
+  session sess: session.Session,
+  create_article_msg msg_create: msg,
 ) -> List(Element(msg)) {
   let filtered_articles = case sess {
     session.Unauthenticated ->
-      articles
+      kv.data
+      |> dict.values
       |> list.filter(fn(article) {
         case article.published_at {
           Some(_) -> True
           None -> False
         }
       })
-    _ -> articles
+    _ ->
+      kv.data
+      |> dict.values
   }
 
   let articles_elements =
@@ -44,18 +47,34 @@ pub fn view(
     })
     |> list.map(parts.view_article_card)
 
-  let header_section = [
-    ui.flex_between(ui.page_title("Articles", "article-list-title"), case sess {
-      session.Authenticated(_) ->
-        ui.button(
-          "Create Article",
-          ui.ColorPink,
-          ui.ButtonStateNormal,
-          create_article_msg,
-        )
-      _ -> element.none()
-    }),
-  ]
+  let header_section = case kv.state {
+    _ -> [
+      ui.flex_between(
+        ui.page_title("Articles", "article-list-title"),
+        html.div([attr.class("flex items-center gap-3")], [
+          // KV status indicator
+          case kv.state {
+            sync.NotInitialized -> ui.status_badge("Not initialized", ui.ColorNeutral)
+            sync.Connecting -> ui.status_badge("Connecting", ui.ColorTeal)
+            sync.CatchingUp -> ui.status_badge("Catching up", ui.ColorOrange)
+            sync.InSync -> ui.status_badge("In sync", ui.ColorGreen)
+            sync.KVError(_) -> ui.status_badge("Error", ui.ColorRed)
+          },
+          // Action (if permitted)
+          case sess {
+            session.Authenticated(_) ->
+              ui.button(
+                "Create Article",
+                ui.ColorPink,
+                ui.ButtonStateNormal,
+                msg_create,
+              )
+            _ -> html.div([], [])
+          },
+        ]),
+      ),
+    ]
+  }
 
   let content_section = case articles_elements {
     [] -> [
@@ -77,19 +96,22 @@ pub fn view(
 }
 
 pub fn view_article_listing(
-  articles: List(Article),
-  sess: session.Session,
+  articles kv: sync.KV(String, Article),
+  session sess: session.Session,
 ) -> List(Element(msg)) {
   let filtered_articles = case sess {
     session.Unauthenticated ->
-      articles
+      kv.data
+      |> dict.values
       |> list.filter(fn(article) {
         case article.published_at {
           Some(_) -> True
           None -> False
         }
       })
-    _ -> articles
+    _ ->
+      kv.data
+      |> dict.values
   }
 
   let articles_elements =
