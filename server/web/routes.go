@@ -60,6 +60,8 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 
 	// notifications
 	mux.Handle("POST /api/notifications", handleNotificationSend(l, nc))
+	mux.Handle("POST /api/ntfy/webhook", handleNtfyWebhook(l, nc))
+	mux.Handle("POST /api/ntfy/action", handleNtfyAction(l, nc))
 
 	// realtime websocket bridge
 	mux.Handle("GET /ws", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1427,7 +1429,9 @@ func handleShortUrlRedirect(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 
 func handleNotificationSend(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 	type Req struct {
-		Message string `json:"message"`
+		Message string           `json:"message"`
+		Title   string           `json:"title,omitempty"`
+		Actions []ntfy.Action    `json:"actions,omitempty"`
 	}
 	type Resp struct {
 		Status  string `json:"status"`
@@ -1486,16 +1490,22 @@ func handleNotificationSend(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		}
 
 		// Create notification
+		title := req.Title
+		if title == "" {
+			title = user.Username + "@jst.dev"
+		}
+
 		notification := ntfy.Notification{
 			ID:        uuid.New().String(),
 			UserID:    user.ID,
-			Title:     user.Username + "@jst.dev",
+			Title:     title,
 			Message:   req.Message,
 			Category:  "jst.dev",
 			Priority:  ntfy.PriorityNormal,
 			NtfyTopic: "jst",
 			Data:      map[string]interface{}{},
 			CreatedAt: time.Now(),
+			Actions:   req.Actions,
 		}
 
 		// Set default priority if not provided
@@ -1554,4 +1564,153 @@ func respJson(w http.ResponseWriter, content any, code int) {
 		http.Error(w, "failed to write response", http.StatusInternalServerError)
 		return
 	}
+}
+
+// Handle incoming webhooks from ntfy.sh
+func handleNtfyWebhook(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+	type Resp struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger := l.WithBreadcrumb("handleNtfyWebhook")
+
+		// Parse webhook data
+		var webhook ntfy.NtfyWebhook
+		if err := json.NewDecoder(r.Body).Decode(&webhook); err != nil {
+			logger.Error("failed to decode webhook: %v", err)
+			http.Error(w, "invalid webhook data", http.StatusBadRequest)
+			return
+		}
+
+		// Log webhook event
+		logger.Info("received ntfy webhook", 
+			"event", webhook.Event, 
+			"topic", webhook.Topic, 
+			"notification_id", webhook.ID)
+
+		// Handle different webhook events
+		switch webhook.Event {
+		case "open":
+			logger.Info("notification opened", "notification_id", webhook.ID)
+		case "click":
+			if webhook.Click != nil {
+				logger.Info("notification clicked", "notification_id", webhook.ID, "url", webhook.Click.URL)
+			}
+		case "action":
+			if len(webhook.Actions) > 0 {
+				for _, action := range webhook.Actions {
+					logger.Info("action triggered", 
+						"notification_id", webhook.ID, 
+						"action_id", action.ID, 
+						"action_type", action.Action)
+				}
+			}
+		case "delivery_failure":
+			logger.Error("notification delivery failed", "notification_id", webhook.ID)
+		default:
+			logger.Debug("unhandled webhook event", "event", webhook.Event, "notification_id", webhook.ID)
+		}
+
+		// Return success response
+		respJson(w, Resp{
+			Status:  "success",
+			Message: "Webhook processed successfully",
+		}, http.StatusOK)
+	})
+}
+
+// Handle action execution requests
+func handleNtfyAction(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+	type Req struct {
+		NotificationID string                 `json:"notification_id"`
+		ActionID       string                 `json:"action_id"`
+		UserID         string                 `json:"user_id"`
+		Token          string                 `json:"token"`
+		Data           map[string]interface{} `json:"data,omitempty"`
+	}
+
+	type Resp struct {
+		Status  string                 `json:"status"`
+		Message string                 `json:"message"`
+		Data    map[string]interface{} `json:"data,omitempty"`
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req Req
+		logger := l.WithBreadcrumb("handleNtfyAction")
+
+		// Parse request body
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			logger.Error("failed to decode request: %v", err)
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		// Validate required fields
+		if req.NotificationID == "" || req.ActionID == "" || req.UserID == "" || req.Token == "" {
+			http.Error(w, "missing required fields", http.StatusBadRequest)
+			return
+		}
+
+		// Create action request
+		actionReq := ntfy.ActionRequest{
+			NotificationID: req.NotificationID,
+			ActionID:       req.ActionID,
+			UserID:         req.UserID,
+			Token:          req.Token,
+			Data:           req.Data,
+		}
+
+		// Marshal action request
+		actionReqBytes, err := json.Marshal(actionReq)
+		if err != nil {
+			logger.Error("failed to marshal action request: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Send action request via NATS
+		msg, err := nc.Request(ntfy.SubjectAction, actionReqBytes, 10*time.Second)
+		if err != nil {
+			logger.Error("failed to send action request: %v", err)
+			http.Error(w, "failed to process action", http.StatusInternalServerError)
+			return
+		}
+
+		// Check for service errors
+		if msg.Header.Get("Nats-Service-Error") != "" {
+			errorCode := msg.Header.Get("Nats-Service-Error-Code")
+			if errorCode == "400" {
+				http.Error(w, string(msg.Data), http.StatusBadRequest)
+				return
+			}
+			http.Error(w, "action service error", http.StatusInternalServerError)
+			return
+		}
+
+		// Parse action response
+		var actionResp ntfy.ActionResponse
+		if err := json.Unmarshal(msg.Data, &actionResp); err != nil {
+			logger.Error("failed to unmarshal action response: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Return response
+		if actionResp.Success {
+			respJson(w, Resp{
+				Status:  "success",
+				Message: actionResp.Message,
+				Data:    actionResp.Data,
+			}, http.StatusOK)
+		} else {
+			respJson(w, Resp{
+				Status:  "error",
+				Message: actionResp.Message,
+				Data:    actionResp.Data,
+			}, http.StatusBadRequest)
+		}
+	})
 }

@@ -1,210 +1,302 @@
-# Notification Service (ntfy)
+# NTFY.SH Integration
 
-A flexible notification service built on NATS JetStream that supports multiple channels and user preferences, with full integration with ntfy.sh for push notifications.
+This package provides integration with [ntfy.sh](https://ntfy.sh) for sending push notifications with action support.
 
 ## Features
 
-- **ntfy.sh Integration**: Full integration with ntfy.sh for push notifications
-- **Multi-channel support**: Email, Push, SMS, Webhooks, Slack, Discord, etc.
-- **User preferences**: Per-user channel and category preferences
-- **Quiet hours**: Configurable do-not-disturb periods
-- **Priority levels**: Low, Normal, High, Urgent
-- **Category filtering**: Enable/disable notifications by category
-- **Acknowledgment tracking**: Track delivery status per channel
-- **Persistent storage**: JetStream KV for preferences and notifications
-
-## Architecture
-
-### NATS Subjects
-
-- `ntfy.user.preferences` - User preference updates
-- `ntfy.notification` - Incoming notifications
-- `ntfy.notification.ack` - Delivery acknowledgments
-
-### Queue Groups
-
-- `ntfy.workers` - Load-balanced notification processing
-
-### KV Storage
-
-- `KV_ntfy` bucket stores:
-  - User preferences: `prefs:{user_id}`
-  - Notifications: `notification:{notification_id}`
-  - Acknowledgments: `ack:{notification_id}:{channel}`
-
-## Usage
-
-### Initialize Service
-
-```go
-ntfy, err := NewNtfy(ctx, nc, logger)
-if err != nil {
-    log.Fatal(err)
-}
-
-err = ntfy.Start(ctx)
-if err != nil {
-    log.Fatal(err)
-}
-```
-
-### Update User Preferences
-
-```go
-prefs := UserPreferences{
-    UserID: "user123",
-    Email:  true,
-    Push:   true,
-    SMS:    false,
-    NtfyTopic: "my-app-notifications", // User's ntfy.sh topic
-    Channels: map[string]bool{
-        "slack": true,
-    },
-    Categories: map[string]bool{
-        "system":   true,
-        "alerts":   true,
-        "updates":  false,
-    },
-    QuietHours: &QuietHours{
-        Start:    "22:00",
-        End:      "08:00",
-        Timezone: "UTC",
-        Enabled:  true,
-    },
-}
-
-ntfy.UpdateUserPreferences(prefs)
-```
-
-### Send Notification
-
-```go
-notification := Notification{
-    ID:       uuid.New().String(),
-    UserID:   "user123",
-    Title:    "System Alert",
-    Message:  "Your account has been updated",
-    Category: "system",
-    Priority: PriorityNormal,
-    Data: map[string]interface{}{
-        "account_id": "acc456",
-    },
-}
-
-ntfy.SendNotification(notification)
-```
-
-## Notification Categories
-
-- `system` - System notifications
-- `security` - Security alerts
-- `alerts` - General alerts
-- `updates` - Update notifications
-- `onboarding` - Welcome/onboarding messages
-- `marketing` - Marketing messages
-
-## Priority Levels
-
-- `low` - Non-urgent notifications
-- `normal` - Standard notifications
-- `high` - Important notifications
-- `urgent` - Critical notifications (bypasses quiet hours)
-
-## ntfy.sh Integration
-
-The service includes full integration with ntfy.sh for push notifications:
-
-### Setup
-
-1. **User Configuration**: Users set their ntfy.sh topic in preferences
-2. **Automatic Sending**: Notifications are automatically sent to ntfy.sh
-3. **Priority Mapping**: Our priority levels are mapped to ntfy.sh priorities
-4. **Rich Notifications**: Support for titles, tags, and custom data
-
-### User Setup
-
-Users need to subscribe to their topic:
-
-```bash
-# Install ntfy client
-# macOS: brew install ntfy
-# Linux: See https://ntfy.sh/docs/install/
-
-# Subscribe to your topic
-ntfy subscribe my-app-notifications
-
-# Or use the web interface
-# https://ntfy.sh/my-app-notifications
-```
-
-### Mobile Apps
-
-- **iOS**: ntfy app from App Store
-- **Android**: ntfy app from Google Play
-- Subscribe to the same topic for notifications
-
-### Features
-
-- **Cross-platform**: Works on desktop, mobile, and web
-- **Real-time**: Instant push notifications
-- **Rich content**: Titles, messages, priorities, tags
-- **Custom data**: Additional JSON data in headers
-- **Privacy**: No account required, topic-based subscriptions
-
-## Channel Integration
-
-The service is designed to be extended with actual channel implementations:
-
-- **ntfy.sh**: ✅ Fully implemented
-- **Email**: Integrate with SendGrid, AWS SES, etc.
-- **Push**: Firebase Cloud Messaging, Apple Push Notifications
-- **SMS**: Twilio, AWS SNS
-- **Webhooks**: Custom HTTP endpoints
-- **Slack**: Slack Webhook API
-- **Discord**: Discord Webhook API
-
-## Scaling
-
-- **Horizontal**: Multiple service instances join the same queue group
-- **Vertical**: Increase worker goroutines per instance
-- **Channel-specific**: Scale different channels independently
-
-## Monitoring
-
-Track notification delivery through:
-- NATS acknowledgments
-- KV storage queries
-- Service logs
-- Custom metrics
+- Send notifications via ntfy.sh
+- Support for notification actions (buttons)
+- Webhook handling for action events
+- NATS-based service architecture
+- Configurable priority levels
+- Action execution with security tokens
 
 ## Configuration
 
 ### Environment Variables
 
 ```bash
-# ntfy.sh server (optional, defaults to https://ntfy.sh)
+# ntfy.sh server (defaults to https://ntfy.sh)
 NTFY_SERVER=https://ntfy.sh
 
-# Custom ntfy.sh instance (if self-hosted)
-NTFY_SERVER=https://ntfy.yourdomain.com
+# Optional authentication token
+NTFY_TOKEN=your_ntfy_token
 ```
 
-### Custom ntfy.sh Server
+### Server Configuration
 
-If you want to use your own ntfy.sh instance:
+The ntfy service is automatically started with the main server and provides:
 
+- NATS microservice endpoints
+- HTTP webhook handling
+- Action execution
+
+## API Endpoints
+
+### 1. Send Notification with Actions
+
+```http
+POST /api/notifications
+Content-Type: application/json
+
+{
+  "message": "New login attempt detected. Please approve or deny.",
+  "title": "MFA Request",
+  "actions": [
+    {
+      "id": "mfa_approve",
+      "action": "http",
+      "label": "✅ Approve",
+      "url": "https://your-domain.com/api/ntfy/action",
+      "method": "POST",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": "{\"notification_id\":\"{{id}}\",\"action_id\":\"mfa_approve\",\"user_id\":\"{{user_id}}\",\"token\":\"{{token}}\"}",
+      "clear": true
+    }
+  ]
+}
+```
+
+### 2. Webhook Endpoint
+
+```http
+POST /api/ntfy/webhook
+Content-Type: application/json
+
+{
+  "id": "notification-id",
+  "event": "action",
+  "topic": "your-topic",
+  "actions": [...]
+}
+```
+
+### 3. Action Execution
+
+```http
+POST /api/ntfy/action
+Content-Type: application/json
+
+{
+  "notification_id": "notification-id",
+  "action_id": "mfa_approve",
+  "user_id": "user-id",
+  "token": "security-token",
+  "data": {
+    "additional": "data"
+  }
+}
+```
+
+## Action Types
+
+### Built-in Actions
+
+- `mfa_approve` - Approve MFA request
+- `mfa_deny` - Deny MFA request
+- `registration_approve` - Approve user registration
+- `registration_deny` - Deny user registration
+
+### Action Properties
+
+- `id`: Unique action identifier
+- `action`: Action type (`view`, `http`, `broadcast`)
+- `label`: Button text
+- `url`: Action URL (for `view` and `http`)
+- `method`: HTTP method (for `http`)
+- `headers`: HTTP headers (for `http`)
+- `body`: Request body (for `http`)
+- `clear`: Clear notification after action
+
+## Usage Examples
+
+### MFA Approval Flow
+
+1. **Send notification with actions:**
 ```go
-// Use custom server
-ntfy, err := NewNtfyWithConfig(ctx, nc, logger, "https://ntfy.yourdomain.com")
-if err != nil {
-    log.Fatal(err)
+notification := ntfy.Notification{
+    ID:        "mfa-123",
+    UserID:    "user-456",
+    Title:     "MFA Request",
+    Message:   "New login attempt detected",
+    Actions: []ntfy.Action{
+        {
+            ID:      "mfa_approve",
+            Action:  "http",
+            Label:   "✅ Approve",
+            URL:     "https://your-domain.com/api/ntfy/action",
+            Method:  "POST",
+            Headers: map[string]string{"Content-Type": "application/json"},
+            Body:    `{"notification_id":"{{id}}","action_id":"mfa_approve","user_id":"{{user_id}}","token":"{{token}}"}`,
+            Clear:   true,
+        },
+        {
+            ID:      "mfa_deny",
+            Action:  "http",
+            Label:   "❌ Deny",
+            URL:     "https://your-domain.com/api/ntfy/action",
+            Method:  "POST",
+            Headers: map[string]string{"Content-Type": "application/json"},
+            Body:    `{"notification_id":"{{id}}","action_id":"mfa_deny","user_id":"{{user_id}}","token":"{{token}}"}`,
+            Clear:   true,
+        },
+    },
+}
+```
+
+2. **Handle action execution:**
+```go
+// The action will be automatically routed to handleMFAApprove or handleMFADeny
+// based on the action_id in the request
+```
+
+### Registration Approval Flow
+
+1. **Send notification:**
+```go
+notification := ntfy.Notification{
+    ID:        "reg-789",
+    UserID:    "admin-123",
+    Title:     "Registration Request",
+    Message:   "New user: john.doe@example.com",
+    Actions: []ntfy.Action{
+        {
+            ID:      "registration_approve",
+            Action:  "http",
+            Label:   "✅ Approve",
+            URL:     "https://your-domain.com/api/ntfy/action",
+            Method:  "POST",
+            Headers: map[string]string{"Content-Type": "application/json"},
+            Body:    `{"notification_id":"{{id}}","action_id":"registration_approve","user_id":"{{user_id}}","token":"{{token}}","data":{"email":"john.doe@example.com"}}`,
+            Clear:   true,
+        },
+        {
+            ID:      "registration_deny",
+            Action:  "http",
+            Label:   "❌ Deny",
+            URL:     "https://your-domain.com/api/ntfy/action",
+            Method:  "POST",
+            Headers: map[string]string{"Content-Type": "application/json"},
+            Body:    `{"notification_id":"{{id}}","action_id":"registration_deny","user_id":"{{user_id}}","token":"{{token}}","data":{"email":"john.doe@example.com"}}`,
+            Clear:   true,
+        },
+    },
 }
 ```
 
 ## Security
 
-- User isolation through user_id filtering
-- Channel-specific credentials
-- Rate limiting per user/channel
-- Audit trail via acknowledgments
-- ntfy.sh topics are user-specific and private 
+### Token Validation
+
+All action requests must include a valid token:
+
+```json
+{
+  "notification_id": "notification-id",
+  "action_id": "action-id",
+  "user_id": "user-id",
+  "token": "your-secure-token"
+}
+```
+
+### User Authorization
+
+The system validates that the user has permission to perform the requested action.
+
+## Testing
+
+Use the provided test script to verify functionality:
+
+```bash
+./test_actions.sh
+```
+
+Make sure to update the `BASE_URL` variable in the script to match your server.
+
+## Webhook Configuration
+
+To receive webhooks from ntfy.sh:
+
+1. **Enable webhooks in your ntfy.sh topic:**
+```bash
+# Subscribe to topic with webhooks enabled
+ntfy subscribe your-topic --webhook https://your-domain.com/api/ntfy/webhook
+```
+
+2. **Webhook events received:**
+- `open`: Notification opened
+- `click`: Notification clicked
+- `action`: Action button pressed
+- `delivery_failure`: Delivery failed
+
+## Extending Actions
+
+### Add New Action Types
+
+1. **Extend the action handler:**
+```go
+func (n *Ntfy) executeAction(req ActionRequest) (*ActionResponse, error) {
+    switch req.ActionID {
+    case "mfa_approve":
+        return n.handleMFAApprove(req)
+    case "your_new_action":
+        return n.handleYourNewAction(req)
+    default:
+        return &ActionResponse{
+            Success: false,
+            Message: fmt.Sprintf("unknown action: %s", req.ActionID),
+        }, nil
+    }
+}
+```
+
+2. **Implement the handler:**
+```go
+func (n *Ntfy) handleYourNewAction(req ActionRequest) (*ActionResponse, error) {
+    // Your custom logic here
+    return &ActionResponse{
+        Success: true,
+        Message: "Action completed successfully",
+        Data: map[string]interface{}{
+            "action": "your_new_action",
+            "user_id": req.UserID,
+            "timestamp": time.Now().Unix(),
+        },
+    }, nil
+}
+```
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Actions not appearing**: Check that the `Actions` header is properly formatted JSON
+2. **Webhooks not received**: Verify your ntfy.sh topic has webhooks enabled
+3. **Action execution fails**: Check the server logs for detailed error messages
+4. **Token validation fails**: Ensure the token in the action request matches your expected format
+
+### Debug Mode
+
+Enable debug logging to see detailed information about action processing:
+
+```go
+logger := l.WithBreadcrumb("handleNtfyAction")
+logger.Debug("processing action", "request", req)
+```
+
+## Best Practices
+
+1. **Use descriptive action IDs**: Make action IDs meaningful and consistent
+2. **Implement proper error handling**: Always handle errors gracefully
+3. **Log all actions**: Maintain audit trails for security and debugging
+4. **Use appropriate priorities**: Set notification priority based on urgency
+5. **Clear notifications appropriately**: Use the `clear` flag to manage notification lifecycle
+6. **Validate all inputs**: Never trust data from external sources
+7. **Implement rate limiting**: Prevent abuse of action endpoints
+8. **Use secure tokens**: Implement proper authentication for action execution
+
+## Examples
+
+See `ACTIONS_EXAMPLES.md` for comprehensive examples of different use cases and configurations. 
