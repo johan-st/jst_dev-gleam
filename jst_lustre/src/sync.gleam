@@ -20,6 +20,7 @@ pub type KV(key, value) {
     filter: Option(String),
     revision: Int,
     data: Dict(key, value),
+    message_count: Int,
     // Encoders
     encoder_key: fn(key) -> Json,
     encoder_value: fn(value) -> Json,
@@ -57,6 +58,7 @@ pub fn new_kv(
       filter:,
       revision: start_revision,
       data: dict.new(),
+      message_count: 0,
       encoder_key:,
       encoder_value:,
       decoder_key:,
@@ -92,7 +94,7 @@ pub fn ws_text_message(
                     KV(..kv, data:, revision: rev, state: case kv.state {
                       InSync -> InSync
                       _ -> CatchingUp
-                    }),
+                    }, message_count: kv.message_count + 1),
                     effect.none(),
                   )
                 }
@@ -102,18 +104,18 @@ pub fn ws_text_message(
                     KV(..kv, data:, revision: rev, state: case kv.state {
                       InSync -> InSync
                       _ -> CatchingUp
-                    }),
+                    }, message_count: kv.message_count + 1),
                     effect.none(),
                   )
                 }
                 KvInSync(rev:) -> {
                   // currently revision is not set on in_sync messages. 
-                  #(KV(..kv, state: InSync), effect.none())
+                  #(KV(..kv, state: InSync, message_count: kv.message_count + 1), effect.none())
                 }
                 KvError(rev:, error:) -> {
                   echo "kv_msg: error"
                   echo "error: " <> error
-                  #(KV(..kv, state: KVError(error)), effect.none())
+                  #(KV(..kv, state: KVError(error), message_count: kv.message_count + 1), effect.none())
                 }
               }
             }
@@ -167,7 +169,7 @@ pub fn ws_open(
   kv: KV(key, value),
   soc: WebSocket,
 ) -> #(KV(key, value), Effect(msg)) {
-  #(KV(..kv, state: Connecting), ws.send(soc, sub_envelope(kv)))
+  #(KV(..kv, state: Connecting, message_count: kv.message_count + 1), ws.send(soc, sub_envelope(kv)))
 }
 
 // PUBLIC HELPERS

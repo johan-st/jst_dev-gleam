@@ -40,6 +40,21 @@ pub fn view(
       ]),
     )
 
+  let total_messages = kv_article.message_count + kv_short_url.message_count
+  let total_stats = ui.card_with_title("total-stats", "Total Messages", [
+    html.div([], [
+      html.p([], [
+        html.text("Total Messages: " <> { total_messages |> int.to_string }),
+      ]),
+      html.p([], [
+        html.text("Articles Messages: " <> { kv_article.message_count |> int.to_string }),
+      ]),
+      html.p([], [
+        html.text("URL Messages: " <> { kv_short_url.message_count |> int.to_string }),
+      ]),
+    ]),
+  ])
+
   let article_stats =
     ui.card_with_title("kv-articles", "Articles KV", [
       html.div([], [
@@ -51,6 +66,9 @@ pub fn view(
         ]),
         html.p([], [
           html.text("Revision: " <> { kv_article.revision |> int.to_string }),
+        ]),
+        html.p([], [
+          html.text("Messages: " <> { kv_article.message_count |> int.to_string }),
         ]),
       ]),
     ])
@@ -67,8 +85,11 @@ pub fn view(
         html.p([], [
           html.text("Revision: " <> { kv_short_url.revision |> int.to_string }),
         ]),
+        html.p([], [
+          html.text("Messages: " <> { kv_short_url.message_count |> int.to_string }),
+        ]),
       ]),
     ])
 
-  [header, ui.content_container([article_stats, url_stats])]
+  [header, ui.content_container([total_stats, article_stats, url_stats])]
 }
