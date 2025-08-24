@@ -124,7 +124,7 @@ pub fn ws_text_message(
               echo "kv.id: " <> kv.id
               echo "kv.bucket: " <> kv.bucket
               echo "kv.filter: " <> kv.filter |> option.unwrap("")
-              #(kv, effect.none())
+              #(KV(..kv, message_count: kv.message_count + 1), effect.none())
             }
           }
         }
@@ -155,8 +155,8 @@ pub fn ws_close(
   reason: ws.WebSocketCloseReason,
 ) -> #(KV(key, value), Effect(msg)) {
   case reason {
-    ws.Normal -> #(KV(..kv, state: KVError("Socket closed")), effect.none())
-    ws.GoingAway -> #(KV(..kv, state: KVError("Socket closed")), effect.none())
+    ws.Normal -> #(KV(..kv, state: KVError("Socket closed"), message_count: kv.message_count + 1), effect.none())
+    ws.GoingAway -> #(KV(..kv, state: KVError("Socket closed"), message_count: kv.message_count + 1), effect.none())
     _ -> {
       echo "ws_close reason"
       echo reason

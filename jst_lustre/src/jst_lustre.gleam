@@ -1358,9 +1358,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         }
         ws.InvalidUrl -> {
           let kv_article =
-            sync.KV(..model.article_kv, state: sync.KVError("Invalid URL"))
+            sync.KV(..model.article_kv, state: sync.KVError("Invalid URL"), message_count: model.article_kv.message_count + 1)
           let kv_short_url =
-            sync.KV(..model.short_url_kv, state: sync.KVError("Invalid URL"))
+            sync.KV(..model.short_url_kv, state: sync.KVError("Invalid URL"), message_count: model.short_url_kv.message_count + 1)
           #(
             Model(..model, article_kv: kv_article, short_url_kv: kv_short_url),
             effect.none(),
@@ -1371,11 +1371,13 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             sync.KV(
               ..model.article_kv,
               state: sync.KVError("Binary message not supported"),
+              message_count: model.article_kv.message_count + 1,
             )
           let kv_short_url =
             sync.KV(
               ..model.short_url_kv,
               state: sync.KVError("Binary message not supported"),
+              message_count: model.short_url_kv.message_count + 1,
             )
           #(
             Model(..model, article_kv: kv_article, short_url_kv: kv_short_url),
