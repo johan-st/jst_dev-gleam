@@ -60,6 +60,7 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 
 	// notifications
 	mux.Handle("POST /api/notifications", handleNotificationSend(l, nc))
+	mux.Handle("GET /api/act/{action_id}", handleAction(l, nc))
 
 	// realtime websocket bridge
 	mux.Handle("GET /ws", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1427,7 +1428,9 @@ func handleShortUrlRedirect(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 
 func handleNotificationSend(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 	type Req struct {
-		Message string `json:"message"`
+		Message string           `json:"message"`
+		Title   string           `json:"title,omitempty"`
+		Actions []ntfy.Action    `json:"actions,omitempty"`
 	}
 	type Resp struct {
 		Status  string `json:"status"`
@@ -1486,16 +1489,22 @@ func handleNotificationSend(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		}
 
 		// Create notification
+		title := req.Title
+		if title == "" {
+			title = user.Username + "@jst.dev"
+		}
+
 		notification := ntfy.Notification{
 			ID:        uuid.New().String(),
 			UserID:    user.ID,
-			Title:     user.Username + "@jst.dev",
+			Title:     title,
 			Message:   req.Message,
 			Category:  "jst.dev",
 			Priority:  ntfy.PriorityNormal,
 			NtfyTopic: "jst",
 			Data:      map[string]interface{}{},
 			CreatedAt: time.Now(),
+			Actions:   req.Actions,
 		}
 
 		// Set default priority if not provided
@@ -1555,3 +1564,8 @@ func respJson(w http.ResponseWriter, content any, code int) {
 		return
 	}
 }
+
+
+
+
+
