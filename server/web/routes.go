@@ -60,8 +60,7 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 
 	// notifications
 	mux.Handle("POST /api/notifications", handleNotificationSend(l, nc))
-	mux.Handle("POST /api/ntfy/webhook", handleNtfyWebhook(l, nc))
-	mux.Handle("POST /api/ntfy/action", handleNtfyAction(l, nc))
+	mux.Handle("GET /api/act/{action_id}", handleAction(l, nc))
 
 	// realtime websocket bridge
 	mux.Handle("GET /ws", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1566,101 +1565,47 @@ func respJson(w http.ResponseWriter, content any, code int) {
 	}
 }
 
-// Handle incoming webhooks from ntfy.sh
-func handleNtfyWebhook(l *jst_log.Logger, nc *nats.Conn) http.Handler {
-	type Resp struct {
-		Status  string `json:"status"`
-		Message string `json:"message"`
-	}
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger := l.WithBreadcrumb("handleNtfyWebhook")
-
-		// Parse webhook data
-		var webhook ntfy.NtfyWebhook
-		if err := json.NewDecoder(r.Body).Decode(&webhook); err != nil {
-			logger.Error("failed to decode webhook: %v", err)
-			http.Error(w, "invalid webhook data", http.StatusBadRequest)
-			return
-		}
-
-		// Log webhook event
-		logger.Info("received ntfy webhook", 
-			"event", webhook.Event, 
-			"topic", webhook.Topic, 
-			"notification_id", webhook.ID)
-
-		// Handle different webhook events
-		switch webhook.Event {
-		case "open":
-			logger.Info("notification opened", "notification_id", webhook.ID)
-		case "click":
-			if webhook.Click != nil {
-				logger.Info("notification clicked", "notification_id", webhook.ID, "url", webhook.Click.URL)
-			}
-		case "action":
-			if len(webhook.Actions) > 0 {
-				for _, action := range webhook.Actions {
-					logger.Info("action triggered", 
-						"notification_id", webhook.ID, 
-						"action_id", action.ID, 
-						"action_type", action.Action)
-				}
-			}
-		case "delivery_failure":
-			logger.Error("notification delivery failed", "notification_id", webhook.ID)
-		default:
-			logger.Debug("unhandled webhook event", "event", webhook.Event, "notification_id", webhook.ID)
-		}
-
-		// Return success response
-		respJson(w, Resp{
-			Status:  "success",
-			Message: "Webhook processed successfully",
-		}, http.StatusOK)
-	})
-}
 
 // Handle action execution requests
-func handleNtfyAction(l *jst_log.Logger, nc *nats.Conn) http.Handler {
-	type Req struct {
-		NotificationID string                 `json:"notification_id"`
-		ActionID       string                 `json:"action_id"`
-		UserID         string                 `json:"user_id"`
-		Token          string                 `json:"token"`
-		Data           map[string]interface{} `json:"data,omitempty"`
-	}
-
-	type Resp struct {
-		Status  string                 `json:"status"`
-		Message string                 `json:"message"`
-		Data    map[string]interface{} `json:"data,omitempty"`
-	}
-
+func handleAction(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req Req
-		logger := l.WithBreadcrumb("handleNtfyAction")
+		logger := l.WithBreadcrumb("handleAction")
 
-		// Parse request body
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			logger.Error("failed to decode request: %v", err)
-			http.Error(w, "invalid request body", http.StatusBadRequest)
+		// Extract action ID from URL path
+		actionID := r.PathValue("action_id")
+		if actionID == "" {
+			http.Error(w, "action ID is required", http.StatusBadRequest)
 			return
 		}
 
-		// Validate required fields
-		if req.NotificationID == "" || req.ActionID == "" || req.UserID == "" || req.Token == "" {
-			http.Error(w, "missing required fields", http.StatusBadRequest)
+		// Get query parameters
+		notificationID := r.URL.Query().Get("nid")
+		userID := r.URL.Query().Get("uid")
+		token := r.URL.Query().Get("token")
+
+		// Validate required parameters
+		if notificationID == "" || userID == "" || token == "" {
+			http.Error(w, "missing required parameters: nid, uid, token", http.StatusBadRequest)
 			return
 		}
 
 		// Create action request
 		actionReq := ntfy.ActionRequest{
-			NotificationID: req.NotificationID,
-			ActionID:       req.ActionID,
-			UserID:         req.UserID,
-			Token:          req.Token,
-			Data:           req.Data,
+			NotificationID: notificationID,
+			ActionID:       actionID,
+			UserID:         userID,
+			Token:          token,
+			Data:           make(map[string]interface{}),
+		}
+
+		// Add any additional query parameters as data
+		for key, values := range r.URL.Query() {
+			if key != "nid" && key != "uid" && key != "token" {
+				if len(values) > 0 {
+					actionReq.Data[key] = values[0]
+				}
+			}
 		}
 
 		// Marshal action request
@@ -1698,19 +1643,49 @@ func handleNtfyAction(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 			return
 		}
 
-		// Return response
+		// Return simple response
 		if actionResp.Success {
-			respJson(w, Resp{
-				Status:  "success",
-				Message: actionResp.Message,
-				Data:    actionResp.Data,
-			}, http.StatusOK)
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Action Completed</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+        .success { color: #28a745; }
+        .message { margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <div class="success">✅ %s</div>
+    <div class="message">%s</div>
+    <script>setTimeout(() => window.close(), 3000);</script>
+</body>
+</html>`, actionResp.Message, actionResp.Message)
 		} else {
-			respJson(w, Resp{
-				Status:  "error",
-				Message: actionResp.Message,
-				Data:    actionResp.Data,
-			}, http.StatusBadRequest)
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintf(w, `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Action Failed</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+        .error { color: #dc3545; }
+        .message { margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <div class="error">❌ %s</div>
+    <div class="message">%s</div>
+    <script>setTimeout(() => window.close(), 3000);</script>
+</body>
+</html>`, actionResp.Message, actionResp.Message)
 		}
 	})
 }

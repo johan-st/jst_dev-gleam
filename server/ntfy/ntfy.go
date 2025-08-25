@@ -60,47 +60,6 @@ type Action struct {
 	Clear   bool              `json:"clear,omitempty"`   // Whether to clear notification after action
 }
 
-// NtfyWebhook represents incoming webhook data from ntfy.sh
-type NtfyWebhook struct {
-	ID          string            `json:"id"`
-	Time        int64             `json:"time"`
-	Event       string            `json:"event"`
-	Topic       string            `json:"topic"`
-	Title       string            `json:"title"`
-	Message     string            `json:"message"`
-	Priority    int               `json:"priority"`
-	Tags        []string          `json:"tags"`
-	Click       *NtfyClick       `json:"click,omitempty"`
-	Actions     []NtfyAction     `json:"actions,omitempty"`
-	Attachment  *NtfyAttachment  `json:"attachment,omitempty"`
-	Headers     map[string]string `json:"headers,omitempty"`
-}
-
-// NtfyClick represents click event data
-type NtfyClick struct {
-	URL string `json:"url"`
-}
-
-// NtfyAction represents action event data
-type NtfyAction struct {
-	ID     string            `json:"id"`
-	Action string            `json:"action"`
-	Label  string            `json:"label"`
-	URL    string            `json:"url,omitempty"`
-	Method string            `json:"method,omitempty"`
-	Headers map[string]string `json:"headers,omitempty"`
-	Body   string            `json:"body,omitempty"`
-}
-
-// NtfyAttachment represents attachment data
-type NtfyAttachment struct {
-	Name    string `json:"name"`
-	Type    string `json:"type"`
-	Size    int64  `json:"size"`
-	Expires int64  `json:"expires"`
-	URL     string `json:"url"`
-}
-
 // ActionRequest represents a request to execute an action
 type ActionRequest struct {
 	NotificationID string            `json:"notification_id"`
