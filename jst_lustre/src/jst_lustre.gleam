@@ -1790,6 +1790,11 @@ fn view_login_modal(model: Model) -> Element(Msg) {
 }
 
 // VIEW HEADER ----------------------------------------------------------------
+
+fn view_logo() -> Element(Msg) {
+  icon.view([attr.class("h-8 w-auto text-pink-700")], icon.Logo)
+}
+
 fn view_header(model: Model) -> Element(Msg) {
   let top_nav_attributes_small = [
     attr.class(
@@ -1808,7 +1813,7 @@ fn view_header(model: Model) -> Element(Msg) {
         [
           html.div([], [
             view_internal_link(page.to_uri(page.PageIndex), [
-              html.text("jst.dev"),
+              view_logo(),
             ]),
           ]),
           html.div([attr.class("flex items-center space-x-8")], [
@@ -3322,6 +3327,47 @@ fn view_ui_components() -> List(Element(Msg)) {
       "UI Components",
       Some("Showcase of all available UI components"),
     ),
+    // Logotype
+    html.section([attr.class("space-y-6")], [
+      ui.card_with_title("brand-icons", "Logotype", [
+        html.div(
+          [
+            attr.class(
+              "grid grid-cols-1 sm:grid-cols-2 gap-10 justify-items-center",
+            ),
+          ],
+          [
+            html.div([attr.class("flex flex-col items-center gap-4 p-4")], [
+              icon.view(
+                [attr.class("h-24 w-full text-zinc-100 mx-auto")],
+                icon.Logo,
+              ),
+              html.p([attr.class("text-sm text-zinc-400 text-center")], [
+                html.text("Standard"),
+              ]),
+            ]),
+            html.div([attr.class("flex flex-col items-center gap-4 p-4")], [
+              icon.view(
+                [attr.class("h-24 w-full text-pink-600 mx-auto")],
+                icon.LogoCustom("#2dd4bf88", "#a1a1aa88"),
+              ),
+              html.p([attr.class("text-sm text-zinc-400 text-center")], [
+                html.text("Custom Colors"),
+              ]),
+            ]),
+            html.div([attr.class("flex flex-col items-center gap-4 p-4")], [
+              icon.view(
+                [attr.class("h-24 w-full text-pink-600 mx-auto")],
+                icon.LogoCustomWithBackground("#ccc", "#f80", "#333"),
+              ),
+              html.p([attr.class("text-sm text-zinc-400 text-center")], [
+                html.text("Custom Colors With Background"),
+              ]),
+            ]),
+          ],
+        ),
+      ]),
+    ]),
     // Loading States Section
     html.section([attr.class("space-y-6")], [
       ui.card_with_title("loading-states", "Loading States", [
