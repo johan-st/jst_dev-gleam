@@ -1418,6 +1418,7 @@ fn fetch_articles_model(model_effect_touple) -> #(Model, Effect(Msg)) {
 
 fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
   let route = routes.from_uri(uri)
+  let model = Model(..model, profile_menu_open: False)
   case route {
     routes.ArticleEdit(id) ->
       case model.article_kv.data |> dict.get(id) {
@@ -1812,9 +1813,7 @@ fn view_header(model: Model) -> Element(Msg) {
         ],
         [
           html.div([], [
-            view_internal_link(page.to_uri(page.PageIndex), [
-              view_logo(),
-            ]),
+            view_internal_link(page.to_uri(page.PageIndex), [view_logo()]),
           ]),
           html.div([attr.class("flex items-center space-x-8")], [
             // Desktop navigation
@@ -1887,8 +1886,8 @@ fn view_header(model: Model) -> Element(Msg) {
                               "flex md:hidden flex-col border-b border-zinc-400",
                             ),
                           ],
-                          list.flatten([
-                            [
+                          case model.session {
+                            session.Authenticated(_) -> [
                               view_header_link(
                                 target: routes.Articles,
                                 current: model.route,
@@ -1917,13 +1916,45 @@ fn view_header(model: Model) -> Element(Msg) {
                                 target: routes.Debug,
                                 current: model.route,
                                 label: "Debug",
-                                attributes: [],
+                                attributes: top_nav_attributes_small,
                               ),
                               view_header_link(
                                 target: routes.UiComponents,
                                 current: model.route,
                                 label: "UI",
-                                attributes: [],
+                                attributes: top_nav_attributes_small,
+                              ),
+                            ]
+                            _ -> [
+                              view_header_link(
+                                target: routes.Articles,
+                                current: model.route,
+                                label: "Articles",
+                                attributes: top_nav_attributes_small,
+                              ),
+                              view_header_link(
+                                target: routes.About,
+                                current: model.route,
+                                label: "About",
+                                attributes: top_nav_attributes_small,
+                              ),
+                              view_header_link(
+                                target: routes.UrlShortIndex,
+                                current: model.route,
+                                label: "URLs",
+                                attributes: top_nav_attributes_small,
+                              ),
+                              view_header_link(
+                                target: routes.Notifications,
+                                current: model.route,
+                                label: "Push",
+                                attributes: top_nav_attributes_small,
+                              ),
+                              view_header_link(
+                                target: routes.UiComponents,
+                                current: model.route,
+                                label: "UI",
+                                attributes: top_nav_attributes_small,
                               ),
                               view_header_link(
                                 target: routes.Debug,
@@ -1931,17 +1962,11 @@ fn view_header(model: Model) -> Element(Msg) {
                                 label: "Debug",
                                 attributes: top_nav_attributes_small,
                               ),
-                              view_header_link(
-                                target: routes.DjotDemo,
-                                current: model.route,
-                                label: "Djot",
-                                attributes: top_nav_attributes_small,
-                              ),
-                            ],
-                          ]),
+                            ]
+                          },
                         ),
-                        case model.session {
-                          session.Unauthenticated ->
+                        html.ul([], case model.session {
+                          session.Unauthenticated -> [
                             html.li([], [
                               ui.button_menu(
                                 "Login",
@@ -1949,8 +1974,9 @@ fn view_header(model: Model) -> Element(Msg) {
                                 ui.ButtonStateNormal,
                                 ProfileMenuAction(LoginFormToggled),
                               ),
-                            ])
-                          session.Pending ->
+                            ]),
+                          ]
+                          session.Pending -> [
                             html.li([], [
                               ui.button_menu(
                                 "Login",
@@ -1958,31 +1984,31 @@ fn view_header(model: Model) -> Element(Msg) {
                                 ui.ButtonStatePending,
                                 ProfileMenuAction(AuthLogoutClicked),
                               ),
-                            ])
-                          session.Authenticated(_auth_sess) ->
+                            ]),
+                          ]
+                          session.Authenticated(_auth_sess) -> [
                             html.li([], [
+                              html.li([], [
+                                ui.button_menu(
+                                  "Profile",
+                                  ui.ColorTeal,
+                                  ui.ButtonStateNormal,
+                                  ProfileMenuAction(
+                                    UserNavigatedTo(routes.to_uri(
+                                      routes.Profile,
+                                    )),
+                                  ),
+                                ),
+                              ]),
                               ui.button_menu(
                                 "Logout",
                                 ui.ColorOrange,
                                 ui.ButtonStateNormal,
                                 ProfileMenuAction(AuthLogoutClicked),
                               ),
-                            ])
-                        },
-                        case model.session {
-                          session.Authenticated(_) ->
-                            html.li([], [
-                              ui.button_menu(
-                                "Profile",
-                                ui.ColorTeal,
-                                ui.ButtonStateNormal,
-                                ProfileMenuAction(
-                                  UserNavigatedTo(routes.to_uri(routes.Profile)),
-                                ),
-                              ),
-                            ])
-                          _ -> html.text("")
-                        },
+                            ]),
+                          ]
+                        }),
                         // case model.debug_use_local_storage {
                       //   True ->
                       //     ui.button_menu_custom(
