@@ -155,15 +155,39 @@ func run(
 	// 	return fmt.Errorf("start blog: %w", err)
 	// }
 
-	// - ntfy
-	l.Debug("starting ntfy")
-	ntfySvc, err := ntfy.NewWithConfig(ctx, nc, lRoot.WithBreadcrumb("ntfy"), ntfy.DefaultNtfyServer, conf.NtfyToken)
+	// - ntfy service
+	l.Debug("starting ntfy service")
+	ntfyService, err := ntfy.New(ctx, nc, lRoot.WithBreadcrumb("ntfy"))
 	if err != nil {
 		return fmt.Errorf("new ntfy: %w", err)
 	}
-	err = ntfySvc.Start(ctx)
+	err = ntfyService.Start(ctx)
 	if err != nil {
 		return fmt.Errorf("start ntfy: %w", err)
+	}
+
+	// - machine event notifier
+	l.Debug("starting machine event notifier")
+	machineEventNotifier := ntfy.NewMachineEventNotifier(&ntfyService, nc, lRoot.WithBreadcrumb("machine-events"))
+	err = machineEventNotifier.Start(ctx)
+	if err != nil {
+		return fmt.Errorf("start machine event notifier: %w", err)
+	}
+
+	// - NATS event notifier
+	l.Debug("starting NATS event notifier")
+	natsEventNotifier := ntfy.NewNATSEventNotifier(&ntfyService, nc, lRoot.WithBreadcrumb("nats-events"), conf.AppName, conf.Region)
+	err = natsEventNotifier.Start(ctx)
+	if err != nil {
+		return fmt.Errorf("start NATS event notifier: %w", err)
+	}
+
+	// - error logger
+	l.Debug("starting error logger")
+	errorLogger := ntfy.NewErrorLogger(&ntfyService, nc, lRoot.WithBreadcrumb("error-logger"), conf.AppName, conf.Region)
+	err = errorLogger.Start(ctx)
+	if err != nil {
+		return fmt.Errorf("start error logger: %w", err)
 	}
 
 	// - who
@@ -250,6 +274,12 @@ func run(
 	cancel()
 
 	l.Info("Received interrupt signal, starting graceful shutdown...")
+
+	// Shutdown ntfy services
+	l.Debug("shutting down ntfy services")
+	machineEventNotifier.Shutdown()
+	natsEventNotifier.Shutdown()
+	errorLogger.Shutdown()
 
 	// Drain connections
 	l.Debug("draining connections")
