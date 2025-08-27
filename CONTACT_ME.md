@@ -120,8 +120,7 @@ Contact Request → NATS → ntfy → User Action (HTTP) → NATS → Chat Sessi
 - `contact.request.create` - Create new contact request
 - `contact.request.respond` - Handle Accept/Busy response
 - `chat.<session_id>` - Chat room for specific session
-- `session.<session_id>` - Session status and metadata
-- `session.<session_id>.status` - Session status updates
+- `session.<session_id>` - Session status, metadata, and updates
 
 **Integration**:
 - Extends existing WebSocket infrastructure
