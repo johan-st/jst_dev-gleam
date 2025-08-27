@@ -123,10 +123,11 @@ Contact Request → NATS → ntfy → User Action (HTTP) → NATS → Chat Sessi
 - `session.<session_id>` - Session status, metadata, and updates
 
 **Integration**:
-- Extends existing WebSocket infrastructure
-- Uses NATS subjects for chat room messaging
-- Integrates with existing user authentication
-- Leverages existing WebSocket connection management
+- **Extends existing WebSocket infrastructure** - no new session service needed
+- **Uses existing subscription system** - clients subscribe to `chat.<session_id>` via existing `sub` operation
+- **Leverages existing authorization** - extend `capabilities.Subjects` to include chat patterns
+- **NATS KV for session state** - store session metadata in `session.<session_id>` bucket
+- **Existing WebSocket connection management** - no changes to connection lifecycle
 
 #### 1.2 Enhanced ntfy Service
 **Modifications to existing service**:
@@ -247,16 +248,23 @@ type ChatMessage struct {
 }
 ```
 
-### WebSocket Session
-```go
-type WebSocketSession struct {
-    ID        string    `json:"id"`
-    UserID    string    `json:"user_id"`
-    ChatRooms []string  `json:"chat_rooms"` // NATS subjects being listened to
-    CreatedAt time.Time `json:"created_at"`
-    LastSeen  time.Time `json:"last_seen"`
-}
-```
+### WebSocket Session Management
+**Current Implementation**: The existing WebSocket system already handles subscriptions through the `rtClient` struct with:
+- `subs map[string]*nats.Subscription` - tracks NATS subscriptions
+- `caps capabilities` - authorization and allowed subjects
+- `id string` - client identification
+
+**Enhanced Approach**: Extend the existing system rather than create a separate session service:
+- **No new WebSocketSession struct needed** - leverage existing `rtClient`
+- **Chat rooms flow through existing subscription system** - clients subscribe to `chat.<session_id>`
+- **Session metadata stored in NATS KV** - `session.<session_id>` for status and metadata
+- **Existing authorization system** - extend `capabilities.Subjects` to include chat patterns
+
+**Benefits**:
+- Reuses proven WebSocket infrastructure
+- No duplicate session management
+- Leverages existing authorization and subscription patterns
+- Simpler implementation with fewer moving parts
 
 ## API Endpoints
 
@@ -326,8 +334,9 @@ type WebSocketSession struct {
 ### Week 2: Chat Infrastructure
 - Implement chat session management
 - NATS subject-based chat rooms
-- WebSocket integration with existing infrastructure
+- Extend existing WebSocket authorization for chat subjects
 - Basic message handling
+- NATS KV integration for session state
 
 ### Week 3: Frontend Development
 - Enhance notification page with chat request functionality
