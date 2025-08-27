@@ -92,7 +92,7 @@ Contact Request → HTTP → ntfy → User Action → HTTP → SSE Chat Stream
 
 **Implementation**:
 ```
-Contact Request → NATS → ntfy → User Action (HTTP) → NATS → Chat Session Creation → WebSocket (chat.<session>)
+Contact Request → NATS → ntfy → User Action (HTTP) → NATS → Chat Session Creation → WebSocket (chat.room.<session>)
 ```
 
 ## Detailed Implementation Plan
@@ -117,16 +117,16 @@ Contact Request → NATS → ntfy → User Action (HTTP) → NATS → Chat Sessi
 - `GetSessionStatus()`: Retrieve session status
 
 **NATS Subjects**:
-- `contact.request.create` - Create new contact request
-- `contact.request.respond` - Handle Accept/Busy response
-- `chat.<session_id>` - Chat room for specific session
-- `session.<session_id>` - Session status, metadata, and updates
+- `chat.request.create` - Create new contact request
+- `chat.request.respond` - Handle Accept/Busy response
+- `chat.room.<session_id>` - Chat room for specific session
+- `chat.request.<request_id>` - Request status, metadata, and updates
 
 **Integration**:
 - **Extends existing WebSocket infrastructure** - no new session service needed
-- **Uses existing subscription system** - clients subscribe to `chat.<session_id>` via existing `sub` operation
-- **Leverages existing authorization** - extend `capabilities.Subjects` to include chat patterns
-- **NATS KV for session state** - store session metadata in `session.<session_id>` bucket
+- **Uses existing subscription system** - clients subscribe to `chat.room.<session_id>` via existing `sub` operation
+- **Leverages existing authorization** - extend `capabilities.Subjects` with pattern matching for chat subjects
+- **NATS KV for session state** - store session metadata in `chat.request.<request_id>` bucket
 - **Existing WebSocket connection management** - no changes to connection lifecycle
 
 #### 1.2 Enhanced ntfy Service
@@ -182,7 +182,7 @@ Contact Request → NATS → ntfy → User Action (HTTP) → NATS → Chat Sessi
 - Message history
 - Session management
 - Integration with existing WebSocket infrastructure
-- NATS subject-based chat rooms (`chat.<session_id>`)
+- NATS subject-based chat rooms (`chat.room.<session_id>`)
 
 #### 2.3 Route Updates
 **Modifications to `jst_lustre/src/routes.gleam`**:
@@ -256,15 +256,30 @@ type ChatMessage struct {
 
 **Enhanced Approach**: Extend the existing system rather than create a separate session service:
 - **No new WebSocketSession struct needed** - leverage existing `rtClient`
-- **Chat rooms flow through existing subscription system** - clients subscribe to `chat.<session_id>`
-- **Session metadata stored in NATS KV** - `session.<session_id>` for status and metadata
-- **Existing authorization system** - extend `capabilities.Subjects` to include chat patterns
+- **Chat rooms flow through existing subscription system** - clients subscribe to `chat.room.<session_id>`
+- **Request metadata stored in NATS KV** - `chat.request.<request_id>` for status and metadata
+- **Existing authorization system** - extend `capabilities.Subjects` with pattern matching for chat subjects
+
+**Pattern Matching Strategy**:
+- **Status Updates**: Post to subject, listen for changes on same subject
+- **Authorization Patterns**: Use `<session>` and `<user>` placeholders for dynamic access
+- **Example Patterns**: `chat.room.<session>`, `chat.request.<user>`, `chat.room.*`
+
+**Status Update Strategy**:
+- **Single Subject Approach**: Post status changes to the same subject that clients listen to
+- **Real-time Updates**: Clients receive immediate updates when status changes
+- **Simplified Architecture**: No need for separate "status" subjects
+- **Example Flow**: 
+  - Status change → `chat.request.<request_id>` → All listeners get update
+  - Chat message → `chat.room.<session_id>` → All room participants get message
 
 **Benefits**:
 - Reuses proven WebSocket infrastructure
 - No duplicate session management
 - Leverages existing authorization and subscription patterns
 - Simpler implementation with fewer moving parts
+- Consistent subject naming convention
+- Unified status and message handling
 
 ## API Endpoints
 
@@ -333,10 +348,10 @@ type ChatMessage struct {
 
 ### Week 2: Chat Infrastructure
 - Implement chat session management
-- NATS subject-based chat rooms
-- Extend existing WebSocket authorization for chat subjects
+- NATS subject-based chat rooms (`chat.room.<session_id>`)
+- Extend existing WebSocket authorization with pattern matching (`<session>`, `<user>`)
 - Basic message handling
-- NATS KV integration for session state
+- NATS KV integration for request state (`chat.request.<request_id>`)
 
 ### Week 3: Frontend Development
 - Enhance notification page with chat request functionality
