@@ -146,19 +146,22 @@ Contact Request → NATS → ntfy → User Action (HTTP) → NATS → Chat Sessi
 
 #### 2.1 Contact Page
 **Location**: `jst_lustre/src/view/contact.gleam`
-**Purpose**: Contact request interface (adapted from existing notification page)
+**Purpose**: Enhanced contact interface (adapted from existing notification page)
 
 **Components**:
-- Contact form with "See if I am available" button
+- Existing notification form (preserved)
+- New "See if I am available" button
 - Request status display
 - Loading states and error handling
 - Chat interface integration
 
 **Features**:
-- "See if I am available" button (replaces notification form)
-- Request ID display
+- **Preserved**: Existing notification functionality unchanged
+- **New**: "See if I am available" button for chat requests
+- Request ID display for chat requests
 - Status updates via WebSocket
 - Seamless transition to chat interface
+- Updated page description to explain both features
 - Reuses existing notification page structure and styling
 
 #### 2.2 Chat Interface
@@ -182,7 +185,7 @@ Contact Request → NATS → ntfy → User Action (HTTP) → NATS → Chat Sessi
 
 #### 2.3 Route Updates
 **Modifications to `jst_lustre/src/routes.gleam`**:
-- Replace `Notifications` route with `Contact` route
+- Rename `Notifications` route to `Contact` route (keeping same URL)
 - Add `ChatSession(id: String)` route
 - Update navigation and routing logic
 - Maintain existing URL structure where possible
@@ -327,7 +330,7 @@ type WebSocketSession struct {
 - Basic message handling
 
 ### Week 3: Frontend Development
-- Adapt notification page to contact page
+- Enhance notification page with chat request functionality
 - Chat interface implementation
 - Route integration and updates
 
