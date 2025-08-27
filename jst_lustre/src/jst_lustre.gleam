@@ -1965,82 +1965,69 @@ fn view_header(model: Model) -> Element(Msg) {
                             ]
                           },
                         ),
-                        html.ul([], case model.session {
-                          session.Unauthenticated -> [
-                            html.li([], [
-                              ui.button_menu(
-                                "Login",
-                                ui.ColorTeal,
-                                ui.ButtonStateNormal,
-                                ProfileMenuAction(LoginFormToggled),
+                        html.ul(
+                          [],
+                          list.flatten([
+                            [
+                              view_header_link(
+                                target: routes.Debug,
+                                current: model.route,
+                                label: "Debug",
+                                attributes: top_nav_attributes_small,
                               ),
-                            ]),
-                          ]
-                          session.Pending -> [
-                            html.li([], [
-                              ui.button_menu(
-                                "Login",
-                                ui.ColorTeal,
-                                ui.ButtonStatePending,
-                                ProfileMenuAction(AuthLogoutClicked),
+                              view_header_link(
+                                target: routes.UiComponents,
+                                current: model.route,
+                                label: "UI",
+                                attributes: top_nav_attributes_small,
                               ),
-                            ]),
-                          ]
-                          session.Authenticated(_auth_sess) -> [
-                            html.li([], [
-                              html.li([], [
-                                ui.button_menu(
-                                  "Profile",
-                                  ui.ColorTeal,
-                                  ui.ButtonStateNormal,
-                                  ProfileMenuAction(
-                                    UserNavigatedTo(routes.to_uri(
-                                      routes.Profile,
-                                    )),
+                            ],
+                            case model.session {
+                              session.Unauthenticated -> [
+                                html.li([], [
+                                  ui.button_menu(
+                                    "Login",
+                                    ui.ColorTeal,
+                                    ui.ButtonStateNormal,
+                                    ProfileMenuAction(LoginFormToggled),
                                   ),
-                                ),
-                              ]),
-                              ui.button_menu(
-                                "Logout",
-                                ui.ColorOrange,
-                                ui.ButtonStateNormal,
-                                ProfileMenuAction(AuthLogoutClicked),
-                              ),
-                            ]),
-                          ]
-                        }),
-                        // case model.debug_use_local_storage {
-                      //   True ->
-                      //     ui.button_menu_custom(
-                      //       [
-                      //         html.div([attr.class("flex justify-between")], [
-                      //           html.text("LocalStorage"),
-                      //           icon.view(
-                      //             [attr.class("w-6 text-green-400")],
-                      //             icon.Checkmark,
-                      //           ),
-                      //         ]),
-                      //       ],
-                      //       ui.ColorNeutral,
-                      //       ui.ButtonStateNormal,
-                      //       DebugToggleLocalStorage,
-                      //     )
-                      //   False ->
-                      //     ui.button_menu_custom(
-                      //       [
-                      //         html.div([attr.class("flex justify-between ")], [
-                      //           html.text("LocalStorage"),
-                      //           icon.view(
-                      //             [attr.class("w-6 text-orange-400")],
-                      //             icon.Close,
-                      //           ),
-                      //         ]),
-                      //       ],
-                      //       ui.ColorNeutral,
-                      //       ui.ButtonStateNormal,
-                      //       DebugToggleLocalStorage,
-                      //     )
-                      // },
+                                ]),
+                              ]
+                              session.Pending -> [
+                                html.li([], [
+                                  ui.button_menu(
+                                    "Login",
+                                    ui.ColorTeal,
+                                    ui.ButtonStatePending,
+                                    ProfileMenuAction(AuthLogoutClicked),
+                                  ),
+                                ]),
+                              ]
+                              session.Authenticated(_auth_sess) -> [
+                                html.li([], [
+                                  html.li([], [
+                                    ui.button_menu(
+                                      "Profile",
+                                      ui.ColorTeal,
+                                      ui.ButtonStateNormal,
+                                      ProfileMenuAction(
+                                        UserNavigatedTo(routes.to_uri(
+                                          routes.Profile,
+                                        )),
+                                      ),
+                                    ),
+                                  ]),
+                                  ui.button_menu(
+                                    "Logout",
+                                    ui.ColorOrange,
+                                    ui.ButtonStateNormal,
+                                    ProfileMenuAction(AuthLogoutClicked),
+                                  ),
+                                ]),
+                              ]
+                            },
+                          ]),
+                        ),
                       ]),
                     ],
                   )

@@ -20,13 +20,6 @@ pub fn view(msg_nav_to: fn(uri.Uri) -> msg) -> List(Element(msg)) {
           html.text(
             "This site and its underlying IT infrastructure is the primary 
             place for me to experiment with technologies and topologies. I 
-            also share some of my thoughts and learnings here.",
-          ),
-        ]),
-        html.p([attr.class("mb-6")], [
-          html.text(
-            "This site and its underlying IT infrastructure is the primary 
-            place for me to experiment with technologies and topologies. I 
             also share some of my thoughts and learnings here. Feel free to 
             check out my overview: ",
           ),
@@ -37,13 +30,7 @@ pub fn view(msg_nav_to: fn(uri.Uri) -> msg) -> List(Element(msg)) {
             "It too is a work in progress and I mostly keep it here for my own reference.",
           ),
         ]),
-        html.p([attr.class("mb-6")], [
-          html.text(
-            "I'm a software developer and writer, exploring modern technologies 
-            and sharing insights from my experiments. This space serves as both 
-            a playground for new ideas and a platform for documenting the journey.",
-          ),
-        ]),
+
       ]),
     ]),
   ]
