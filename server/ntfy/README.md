@@ -1,210 +1,139 @@
-# Notification Service (ntfy)
+# NTFY.SH Actions - Simplified
 
-A flexible notification service built on NATS JetStream that supports multiple channels and user preferences, with full integration with ntfy.sh for push notifications.
+A simple action system for ntfy.sh notifications that uses a single endpoint for all actions.
 
-## Features
+## How It Works
 
-- **ntfy.sh Integration**: Full integration with ntfy.sh for push notifications
-- **Multi-channel support**: Email, Push, SMS, Webhooks, Slack, Discord, etc.
-- **User preferences**: Per-user channel and category preferences
-- **Quiet hours**: Configurable do-not-disturb periods
-- **Priority levels**: Low, Normal, High, Urgent
-- **Category filtering**: Enable/disable notifications by category
-- **Acknowledgment tracking**: Track delivery status per channel
-- **Persistent storage**: JetStream KV for preferences and notifications
+1. **Send notification with actions** - Include action buttons in your ntfy.sh notifications
+2. **User taps action** - ntfy.sh makes an HTTP request to your server
+3. **Server processes action** - Your server handles the action and returns a response
+4. **User sees result** - Simple HTML page shows success/failure
 
-## Architecture
+## Single Endpoint
 
-### NATS Subjects
+```
+GET /api/act/{action_id}?nid={notification_id}&uid={user_id}&token={token}&{additional_data}
+```
 
-- `ntfy.user.preferences` - User preference updates
-- `ntfy.notification` - Incoming notifications
-- `ntfy.notification.ack` - Delivery acknowledgments
+### Parameters
 
-### Queue Groups
+- `{action_id}` - The action to execute (e.g., `mfa_approve`, `registration_deny`)
+- `nid` - Notification ID (required)
+- `uid` - User ID (required) 
+- `token` - Security token (required)
+- Additional parameters are passed as data to the action
 
-- `ntfy.workers` - Load-balanced notification processing
+## Quick Start
 
-### KV Storage
+### 1. Send a notification with actions
 
-- `KV_ntfy` bucket stores:
-  - User preferences: `prefs:{user_id}`
-  - Notifications: `notification:{notification_id}`
-  - Acknowledgments: `ack:{notification_id}:{channel}`
-
-## Usage
-
-### Initialize Service
-
-```go
-ntfy, err := NewNtfy(ctx, nc, logger)
-if err != nil {
-    log.Fatal(err)
-}
-
-err = ntfy.Start(ctx)
-if err != nil {
-    log.Fatal(err)
+```json
+POST /api/notifications
+{
+  "message": "New login attempt detected. Please approve or deny.",
+  "title": "MFA Request",
+  "actions": [
+    {
+      "id": "mfa_approve",
+      "action": "http",
+      "label": "✅ Approve",
+      "url": "https://your-domain.com/api/act/mfa_approve?nid={{id}}&uid={{user_id}}&token={{token}}",
+      "method": "GET",
+      "clear": true
+    }
+  ]
 }
 ```
 
-### Update User Preferences
+### 2. When user taps the action button
+
+ntfy.sh will make a GET request to your server, and the action will be processed automatically.
+
+## Available Actions
+
+The system comes with these built-in actions:
+
+- `mfa_approve` - Approve MFA request
+- `mfa_deny` - Deny MFA request  
+- `registration_approve` - Approve user registration
+- `registration_deny` - Deny user registration
+
+## Adding New Actions
+
+### 1. Extend the action handler
 
 ```go
-prefs := UserPreferences{
-    UserID: "user123",
-    Email:  true,
-    Push:   true,
-    SMS:    false,
-    NtfyTopic: "my-app-notifications", // User's ntfy.sh topic
-    Channels: map[string]bool{
-        "slack": true,
-    },
-    Categories: map[string]bool{
-        "system":   true,
-        "alerts":   true,
-        "updates":  false,
-    },
-    QuietHours: &QuietHours{
-        Start:    "22:00",
-        End:      "08:00",
-        Timezone: "UTC",
-        Enabled:  true,
-    },
+func (n *Ntfy) executeAction(req ActionRequest) (*ActionResponse, error) {
+    switch req.ActionID {
+    case "mfa_approve":
+        return n.handleMFAApprove(req)
+    case "your_new_action":
+        return n.handleYourNewAction(req)
+    default:
+        return &ActionResponse{
+            Success: false,
+            Message: fmt.Sprintf("unknown action: %s", req.ActionID),
+        }, nil
+    }
 }
-
-ntfy.UpdateUserPreferences(prefs)
 ```
 
-### Send Notification
+### 2. Implement the handler
 
 ```go
-notification := Notification{
-    ID:       uuid.New().String(),
-    UserID:   "user123",
-    Title:    "System Alert",
-    Message:  "Your account has been updated",
-    Category: "system",
-    Priority: PriorityNormal,
-    Data: map[string]interface{}{
-        "account_id": "acc456",
-    },
+func (n *Ntfy) handleYourNewAction(req ActionRequest) (*ActionResponse, error) {
+    // Your custom logic here
+    return &ActionResponse{
+        Success: true,
+        Message: "Action completed successfully",
+        Data: map[string]interface{}{
+            "action": "your_new_action",
+            "user_id": req.UserID,
+            "timestamp": time.Now().Unix(),
+        },
+    }, nil
 }
-
-ntfy.SendNotification(notification)
 ```
 
-## Notification Categories
+## Testing
 
-- `system` - System notifications
-- `security` - Security alerts
-- `alerts` - General alerts
-- `updates` - Update notifications
-- `onboarding` - Welcome/onboarding messages
-- `marketing` - Marketing messages
-
-## Priority Levels
-
-- `low` - Non-urgent notifications
-- `normal` - Standard notifications
-- `high` - Important notifications
-- `urgent` - Critical notifications (bypasses quiet hours)
-
-## ntfy.sh Integration
-
-The service includes full integration with ntfy.sh for push notifications:
-
-### Setup
-
-1. **User Configuration**: Users set their ntfy.sh topic in preferences
-2. **Automatic Sending**: Notifications are automatically sent to ntfy.sh
-3. **Priority Mapping**: Our priority levels are mapped to ntfy.sh priorities
-4. **Rich Notifications**: Support for titles, tags, and custom data
-
-### User Setup
-
-Users need to subscribe to their topic:
+Use the provided test script:
 
 ```bash
-# Install ntfy client
-# macOS: brew install ntfy
-# Linux: See https://ntfy.sh/docs/install/
-
-# Subscribe to your topic
-ntfy subscribe my-app-notifications
-
-# Or use the web interface
-# https://ntfy.sh/my-app-notifications
+./test_simple_actions.sh
 ```
 
-### Mobile Apps
-
-- **iOS**: ntfy app from App Store
-- **Android**: ntfy app from Google Play
-- Subscribe to the same topic for notifications
-
-### Features
-
-- **Cross-platform**: Works on desktop, mobile, and web
-- **Real-time**: Instant push notifications
-- **Rich content**: Titles, messages, priorities, tags
-- **Custom data**: Additional JSON data in headers
-- **Privacy**: No account required, topic-based subscriptions
-
-## Channel Integration
-
-The service is designed to be extended with actual channel implementations:
-
-- **ntfy.sh**: ✅ Fully implemented
-- **Email**: Integrate with SendGrid, AWS SES, etc.
-- **Push**: Firebase Cloud Messaging, Apple Push Notifications
-- **SMS**: Twilio, AWS SNS
-- **Webhooks**: Custom HTTP endpoints
-- **Slack**: Slack Webhook API
-- **Discord**: Discord Webhook API
-
-## Scaling
-
-- **Horizontal**: Multiple service instances join the same queue group
-- **Vertical**: Increase worker goroutines per instance
-- **Channel-specific**: Scale different channels independently
-
-## Monitoring
-
-Track notification delivery through:
-- NATS acknowledgments
-- KV storage queries
-- Service logs
-- Custom metrics
-
-## Configuration
-
-### Environment Variables
+Or test actions directly:
 
 ```bash
-# ntfy.sh server (optional, defaults to https://ntfy.sh)
-NTFY_SERVER=https://ntfy.sh
-
-# Custom ntfy.sh instance (if self-hosted)
-NTFY_SERVER=https://ntfy.yourdomain.com
+curl "https://your-domain.com/api/act/mfa_approve?nid=test-123&uid=user-456&token=test-token"
 ```
 
-### Custom ntfy.sh Server
+## ntfy.sh Action Types
 
-If you want to use your own ntfy.sh instance:
+ntfy.sh supports these action types:
 
-```go
-// Use custom server
-ntfy, err := NewNtfyWithConfig(ctx, nc, logger, "https://ntfy.yourdomain.com")
-if err != nil {
-    log.Fatal(err)
-}
-```
+- **`view`** - Opens a URL in browser/app
+- **`http`** - Makes an HTTP request to your server (defaults to POST, but we use GET)
+- **`broadcast`** - Sends Android broadcast (Android only)
+
+We use the **`http`** action type with GET method for simplicity.
+
+## Benefits
+
+1. **Simple**: Single endpoint for all actions
+2. **GET requests**: Easy to use with ntfy.sh http actions
+3. **No webhooks**: Direct HTTP calls from ntfy.sh
+4. **Clean URLs**: Easy to understand and debug
+5. **Extensible**: Easy to add new action types
+6. **User-friendly**: Simple HTML responses
 
 ## Security
 
-- User isolation through user_id filtering
-- Channel-specific credentials
-- Rate limiting per user/channel
-- Audit trail via acknowledgments
-- ntfy.sh topics are user-specific and private 
+- **Token validation**: All actions require a valid security token
+- **User authorization**: Actions are validated against user permissions
+- **Input validation**: All parameters are validated
+
+## Examples
+
+See `SIMPLE_ACTIONS.md` for comprehensive examples and use cases. 

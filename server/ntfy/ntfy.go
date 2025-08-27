@@ -28,12 +28,13 @@ type Ntfy struct {
 const (
 	// NATS Subjects
 	SubjectNotification = "ntfy.notification"
+	SubjectAction      = "ntfy.action"
 
 	// ntfy.sh defaults
 	DefaultNtfyServer = "https://ntfy.sh"
 )
 
-// Notification message
+// Notification message with action support
 type Notification struct {
 	ID        string                 `json:"id"`
 	UserID    string                 `json:"user_id"`
@@ -44,6 +45,35 @@ type Notification struct {
 	NtfyTopic string                 `json:"ntfy_topic"` // User's ntfy topic
 	Data      map[string]interface{} `json:"data,omitempty"`
 	CreatedAt time.Time              `json:"created_at"`
+	Actions   []Action               `json:"actions,omitempty"` // ntfy.sh actions
+}
+
+// Action represents an ntfy.sh action button
+type Action struct {
+	ID      string            `json:"id"`      // Unique action identifier
+	Action  string            `json:"action"`  // Action type: "view", "http", "broadcast"
+	Label   string            `json:"label"`   // Button label
+	URL     string            `json:"url,omitempty"`     // URL for view/http actions
+	Method  string            `json:"method,omitempty"`  // HTTP method for http actions
+	Headers map[string]string `json:"headers,omitempty"` // Headers for http actions
+	Body    string            `json:"body,omitempty"`    // Body for http actions
+	Clear   bool              `json:"clear,omitempty"`   // Whether to clear notification after action
+}
+
+// ActionRequest represents a request to execute an action
+type ActionRequest struct {
+	NotificationID string            `json:"notification_id"`
+	ActionID       string            `json:"action_id"`
+	UserID         string            `json:"user_id"`
+	Token          string            `json:"token"`
+	Data           map[string]interface{} `json:"data,omitempty"`
+}
+
+// ActionResponse represents the result of an action execution
+type ActionResponse struct {
+	Success bool                   `json:"success"`
+	Message string                 `json:"message"`
+	Data    map[string]interface{} `json:"data,omitempty"`
 }
 
 type Priority string
@@ -97,6 +127,11 @@ func (n *Ntfy) Start(ctx context.Context) error {
 	// Add notification endpoint
 	if err = ntfySvc.AddEndpoint("send_notification", n.handleNotification(), micro.WithEndpointSubject(SubjectNotification)); err != nil {
 		return fmt.Errorf("add notification endpoint: %w", err)
+	}
+
+	// Add action endpoint
+	if err = ntfySvc.AddEndpoint("handle_action", n.handleAction(), micro.WithEndpointSubject(SubjectAction)); err != nil {
+		return fmt.Errorf("add action endpoint: %w", err)
 	}
 
 	n.l.Info("ntfy service started")
@@ -175,6 +210,14 @@ func (n *Ntfy) sendNtfyNotification(notification Notification) error {
 	req.Header.Set("Priority", n.mapPriorityToNtfy(notification.Priority))
 	req.Header.Set("Tags", notification.Category)
 
+	// Add actions if present
+	if len(notification.Actions) > 0 {
+		actionsJSON, err := json.Marshal(notification.Actions)
+		if err == nil {
+			req.Header.Set("Actions", string(actionsJSON))
+		}
+	}
+
 	// Add authorization header if token is configured
 	if n.ntfyToken != "" {
 		req.Header.Set("Authorization", "Bearer "+n.ntfyToken)
@@ -242,4 +285,160 @@ func (n *Ntfy) validateNotification(notification *Notification) error {
 		return fmt.Errorf("category is required")
 	}
 	return nil
+}
+
+// Handle incoming action requests
+func (n *Ntfy) handleAction() micro.HandlerFunc {
+	return func(req micro.Request) {
+		var actionReq ActionRequest
+		if err := json.Unmarshal(req.Data(), &actionReq); err != nil {
+			n.l.Error("failed to unmarshal action request", "error", err)
+			if err := req.Error("400", fmt.Sprintf("failed to unmarshal action request: %v", err), nil); err != nil {
+				n.l.Error("failed to send error response", "error", err)
+			}
+			return
+		}
+
+		// Validate action request
+		if err := n.validateActionRequest(&actionReq); err != nil {
+			n.l.Error("invalid action request", "error", err, "notification_id", actionReq.NotificationID)
+			if err := req.Error("400", fmt.Sprintf("invalid action request: %v", err), nil); err != nil {
+				n.l.Error("failed to send error response", "error", err)
+			}
+			return
+		}
+
+		// Execute the action
+		response, err := n.executeAction(actionReq)
+		if err != nil {
+			n.l.Error("failed to execute action", "error", err, "notification_id", actionReq.NotificationID, "action_id", actionReq.ActionID)
+			if err := req.Error("500", fmt.Sprintf("failed to execute action: %v", err), nil); err != nil {
+				n.l.Error("failed to send error response", "error", err)
+			}
+			return
+		}
+
+		// Return success response
+		responseBytes, err := json.Marshal(response)
+		if err != nil {
+			n.l.Error("failed to marshal action response", "error", err)
+			if err := req.Error("500", "failed to marshal response", nil); err != nil {
+				n.l.Error("failed to send error response", "error", err)
+			}
+			return
+		}
+
+		if err := req.Respond(responseBytes); err != nil {
+			n.l.Error("failed to send action response", "error", err)
+		}
+	}
+}
+
+// Validate action request fields
+func (n *Ntfy) validateActionRequest(req *ActionRequest) error {
+	if req.NotificationID == "" {
+		return fmt.Errorf("notification ID is required")
+	}
+	if req.ActionID == "" {
+		return fmt.Errorf("action ID is required")
+	}
+	if req.UserID == "" {
+		return fmt.Errorf("user ID is required")
+	}
+	if req.Token == "" {
+		return fmt.Errorf("token is required")
+	}
+	return nil
+}
+
+// Execute an action based on the request
+func (n *Ntfy) executeAction(req ActionRequest) (*ActionResponse, error) {
+	n.l.Info("executing action", "notification_id", req.NotificationID, "action_id", req.ActionID, "user_id", req.UserID)
+
+	// Here you would implement the actual action logic
+	// This is a placeholder implementation - you can extend this based on your needs
+	switch req.ActionID {
+	case "mfa_approve":
+		return n.handleMFAApprove(req)
+	case "mfa_deny":
+		return n.handleMFADeny(req)
+	case "registration_approve":
+		return n.handleRegistrationApprove(req)
+	case "registration_deny":
+		return n.handleRegistrationDeny(req)
+	default:
+		return &ActionResponse{
+			Success: false,
+			Message: fmt.Sprintf("unknown action: %s", req.ActionID),
+		}, nil
+	}
+}
+
+// Handle MFA approval action
+func (n *Ntfy) handleMFAApprove(req ActionRequest) (*ActionResponse, error) {
+	n.l.Info("MFA approved", "user_id", req.UserID, "notification_id", req.NotificationID)
+	
+	// Here you would implement the actual MFA approval logic
+	// For example, mark the MFA request as approved in your database
+	
+	return &ActionResponse{
+		Success: true,
+		Message: "MFA request approved successfully",
+		Data: map[string]interface{}{
+			"action": "mfa_approve",
+			"user_id": req.UserID,
+			"timestamp": time.Now().Unix(),
+		},
+	}, nil
+}
+
+// Handle MFA denial action
+func (n *Ntfy) handleMFADeny(req ActionRequest) (*ActionResponse, error) {
+	n.l.Info("MFA denied", "user_id", req.UserID, "notification_id", req.NotificationID)
+	
+	// Here you would implement the actual MFA denial logic
+	
+	return &ActionResponse{
+		Success: true,
+		Message: "MFA request denied",
+		Data: map[string]interface{}{
+			"action": "mfa_deny",
+			"user_id": req.UserID,
+			"timestamp": time.Now().Unix(),
+		},
+	}, nil
+}
+
+// Handle registration approval action
+func (n *Ntfy) handleRegistrationApprove(req ActionRequest) (*ActionResponse, error) {
+	n.l.Info("Registration approved", "user_id", req.UserID, "notification_id", req.NotificationID)
+	
+	// Here you would implement the actual registration approval logic
+	
+	return &ActionResponse{
+		Success: true,
+		Message: "Registration request approved successfully",
+		Data: map[string]interface{}{
+			"action": "registration_approve",
+			"user_id": req.UserID,
+			"timestamp": time.Now().Unix(),
+		},
+	}, nil
+}
+
+// Handle registration denial action
+func (n *Ntfy) handleRegistrationDeny(req ActionRequest) (*ActionResponse, error) {
+	n.l.Info("Registration denied", "user_id", req.UserID, "notification_id", req.NotificationID)
+	
+	// Here you would implement the actual registration denial logic
+	
+	return &ActionResponse{
+		Success: true,
+		Message: "Registration request denied",
+		Data: map[string]interface{}{
+			"action": "registration_deny",
+			"user_id": req.UserID,
+			"timestamp": time.Now().Unix(),
+		},
+	}, nil
 }
