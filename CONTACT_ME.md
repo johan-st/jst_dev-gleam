@@ -191,6 +191,30 @@ Contact Request → NATS → ntfy → User Action (HTTP) → NATS → Chat Sessi
 - Update navigation and routing logic
 - Maintain existing URL structure where possible
 
+#### 2.4 Frontend Feedback & Optimistic Updates
+Implement responsive user feedback by listening on the same subjects we publish to and correlating events via unique IDs in headers or payloads.
+
+- **Correlation ID**: Include a unique `client_msg_id` (UUID) in each published message; echo it back in server-originated events so the client can reconcile.
+- **Subject Echo**: The client subscribes to the same subject it publishes to. When it sees its own event (matching `client_msg_id`), it progresses the local UI state.
+
+Frontend request lifecycle (contact request):
+1. Button pressed → set state to "sending"; start short timeout for network errors.
+2. When the published event is observed locally on the subject (by `client_msg_id`) → set state to "waiting"; start a longer timeout that warns: "this is taking longer than usual".
+3. When a response/update arrives (accept/busy) on the same request subject → clear pending state, handle the response (navigate to chat on accept; show busy message on decline).
+
+Chat optimistic messaging:
+- On send, immediately render the message as "pending" (greyed out, pinned to bottom) with `client_msg_id`.
+- If the message is seen on the room subject with matching `client_msg_id`, convert pending → confirmed (assign server timestamp/id).
+- If timeout elapses without confirmation, keep it pending with a retry affordance.
+
+Timeout guidance:
+- Network error/retry: ~2–5s for initial send failure.
+- Long-running warning: ~10–20s before showing "taking longer than usual".
+
+Error feedback:
+- Revert to normal state on hard failure and display a concise error toast.
+- For chat, keep failed messages pending with a retry button rather than removing them.
+
 ### Phase 3: Integration and Testing
 
 #### 3.1 Service Integration
