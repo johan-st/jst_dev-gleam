@@ -74,15 +74,17 @@ Contact Request → HTTP → ntfy → User Action → HTTP → SSE Chat Stream
 ```
 
 ### Option 3: Hybrid Approach (Recommended)
-**Architecture**: NATS for request handling and chat rooms, WebSocket for real-time communication
+**Architecture**: NATS for request handling and chat rooms, HTTP for responses, WebSocket for real-time communication
 
 **Pros**:
 - Best of both worlds
 - Reuses existing WebSocket infrastructure with NATS subjects
 - NATS handles both request orchestration and chat room messaging
+- HTTP provides simple, stateless response handling
 - Chat flows through established WebSocket connections
 - Most aligned with existing architecture
 - Simplified service structure by combining contact and chat
+- No need to track inboxes or maintain complex state
 
 **Cons**:
 - Requires careful session management
@@ -90,7 +92,7 @@ Contact Request → HTTP → ntfy → User Action → HTTP → SSE Chat Stream
 
 **Implementation**:
 ```
-Contact Request → NATS → ntfy → User Action → NATS → Chat Session Creation → WebSocket (chat.<session>)
+Contact Request → NATS → ntfy → User Action (HTTP) → NATS → Chat Session Creation → WebSocket (chat.<session>)
 ```
 
 ## Detailed Implementation Plan
@@ -130,14 +132,16 @@ Contact Request → NATS → ntfy → User Action → NATS → Chat Session Crea
 #### 1.2 Enhanced ntfy Service
 **Modifications to existing service**:
 - Add support for action buttons in notifications
-- Implement action callback handling for Accept/Busy responses
+- Implement HTTP callback URLs for Accept/Busy responses
 - Support for custom notification data including session IDs
+- Generate unique callback URLs for each notification
 
 **New Features**:
 - Action button support (Accept/Busy)
-- Callback URL handling for actions
+- HTTP callback URL handling for actions
 - Enhanced notification data structure
 - Integration with chat session creation
+- Stateless response handling via HTTP endpoints
 
 ### Phase 2: Frontend Implementation
 
@@ -257,7 +261,11 @@ type WebSocketSession struct {
 ### Contact Requests
 - `POST /api/contact/request` - Create new contact request
 - `GET /api/contact/request/{id}` - Get request status
-- `POST /api/contact/request/{id}/respond` - Respond to request (Accept/Busy)
+
+### Contact Responses (HTTP Callbacks)
+- `POST /api/contact/respond/{requestId}/accept` - Accept contact request
+- `POST /api/contact/respond/{requestId}/busy` - Decline contact request
+- `GET /api/contact/status/{requestId}` - Get current request status
 
 ### Chat Sessions
 - `GET /api/chat/session/{id}` - Get chat session details
@@ -266,14 +274,15 @@ type WebSocketSession struct {
 - `DELETE /api/chat/session/{id}` - Close chat session
 
 ### WebSocket Endpoints
-- `/ws/chat/{sessionId}` - Chat session WebSocket connection
+- `/ws` - Existing WebSocket endpoint (chat flows through NATS subjects)
 
 ## Security Considerations
 
 ### Authentication & Authorization
 - Contact requests: No authentication required (public endpoint)
+- Contact responses: No authentication required (public callback endpoints)
 - Chat sessions: Require valid session ID and participant verification
-- Admin actions: Require JST authentication for Accept/Busy responses
+- Admin actions: No authentication required for Accept/Busy responses (simplified for development)
 
 ### Rate Limiting
 - Limit contact requests per IP address
@@ -307,19 +316,21 @@ type WebSocketSession struct {
 ## Implementation Timeline
 
 ### Week 1: Backend Foundation
-- Implement Contact Request Service
-- Enhance ntfy Service for actions
+- Implement Combined Chat & Contact Service
+- Enhance ntfy Service for HTTP callbacks
 - Basic data models and storage
+- HTTP callback endpoints for Accept/Busy
 
 ### Week 2: Chat Infrastructure
-- Implement Chat Session Service
-- WebSocket integration
+- Implement chat session management
+- NATS subject-based chat rooms
+- WebSocket integration with existing infrastructure
 - Basic message handling
 
 ### Week 3: Frontend Development
-- Contact page implementation
-- Chat interface
-- Route integration
+- Adapt notification page to contact page
+- Chat interface implementation
+- Route integration and updates
 
 ### Week 4: Integration & Testing
 - Service integration
@@ -368,4 +379,6 @@ type WebSocketSession struct {
 
 The recommended implementation approach (Option 3: Hybrid) provides the best balance of leveraging existing infrastructure while maintaining simplicity and scalability. The NATS-based architecture ensures reliable message delivery, while the WebSocket integration provides real-time chat capabilities that align with the existing system design.
 
-This implementation will create a seamless contact experience that integrates naturally with the current ntfy notification system and provides a foundation for future real-time communication features.
+By using HTTP for responses instead of tracking inboxes, we simplify the architecture and eliminate the need for complex state management. The existing WebSocket infrastructure handles real-time communication through NATS subjects, creating a clean separation of concerns.
+
+This implementation will create a seamless contact experience that integrates naturally with the current ntfy notification system and provides a foundation for future real-time communication features. The combination of NATS for orchestration, HTTP for responses, and WebSocket for chat creates a robust and maintainable system.
