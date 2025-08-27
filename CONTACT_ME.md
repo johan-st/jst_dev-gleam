@@ -24,14 +24,14 @@ This document outlines the implementation plan for a new contact availability fe
 
 ### Existing Services to Reuse
 - **ntfy Service**: Already handles notifications with NATS integration
-- **WebSocket Infrastructure**: Existing real-time communication system
-- **NATS**: Message bus for service communication
+- **WebSocket Infrastructure**: Existing real-time communication system with NATS subjects
+- **NATS**: Message bus for service communication and chat room subjects
 - **User Management**: Existing who service for user identification
+- **Notification Page**: Existing UI that can be adapted for contact requests
 
 ### New Services Required
-- **Contact Request Service**: Manages contact requests and responses
-- **Chat Session Service**: Handles real-time chat between parties
-- **Contact Page Frontend**: UI for contact requests
+- **Combined Chat & Contact Service**: Manages contact requests and chat sessions
+- **Contact Page Frontend**: Adapted from existing notification page
 
 ## Implementation Options
 
@@ -74,93 +74,89 @@ Contact Request → HTTP → ntfy → User Action → HTTP → SSE Chat Stream
 ```
 
 ### Option 3: Hybrid Approach (Recommended)
-**Architecture**: NATS for request handling, WebSocket for chat, HTTP for status updates
+**Architecture**: NATS for request handling and chat rooms, WebSocket for real-time communication
 
 **Pros**:
 - Best of both worlds
-- Reuses existing WebSocket infrastructure
-- NATS handles request orchestration
-- HTTP provides simple status endpoints
+- Reuses existing WebSocket infrastructure with NATS subjects
+- NATS handles both request orchestration and chat room messaging
+- Chat flows through established WebSocket connections
 - Most aligned with existing architecture
+- Simplified service structure by combining contact and chat
 
 **Cons**:
-- Slightly more complex than pure HTTP
-- Requires careful state synchronization
+- Requires careful session management
+- Need to handle WebSocket connection lifecycle
 
 **Implementation**:
 ```
-Contact Request → NATS → ntfy → User Action → NATS → WebSocket Chat + HTTP Status
+Contact Request → NATS → ntfy → User Action → NATS → Chat Session Creation → WebSocket (chat.<session>)
 ```
 
 ## Detailed Implementation Plan
 
 ### Phase 1: Backend Services
 
-#### 1.1 Contact Request Service
-**Location**: `server/contact/`
-**Purpose**: Manages contact request lifecycle
+#### 1.1 Combined Chat & Contact Service
+**Location**: `server/chat/`
+**Purpose**: Manages both contact requests and chat sessions
 
 **Components**:
-- `contact.go`: Main service with NATS microservice
-- `models.go`: Request/response data structures
-- `handlers.go`: Request processing logic
+- `chat.go`: Main service with NATS microservice
+- `contact.go`: Contact request handling
+- `session.go`: Chat session management
+- `models.go`: Combined data structures
 
 **Key Functions**:
-- `CreateRequest()`: Generate new contact request
-- `HandleResponse()`: Process Accept/Busy responses
-- `GetRequestStatus()`: Retrieve request status
+- `CreateContactRequest()`: Generate new contact request
+- `HandleContactResponse()`: Process Accept/Busy responses
+- `CreateChatSession()`: Initialize chat session after acceptance
+- `SendChatMessage()`: Broadcast message to chat room
+- `GetSessionStatus()`: Retrieve session status
 
 **NATS Subjects**:
-- `contact.request.create` - Create new request
+- `contact.request.create` - Create new contact request
 - `contact.request.respond` - Handle Accept/Busy response
-- `contact.request.status` - Get request status
-
-#### 1.2 Chat Session Service
-**Location**: `server/chat/`
-**Purpose**: Manages real-time chat sessions
-
-**Components**:
-- `chat.go`: Chat session management
-- `session.go`: Individual chat session logic
-- `websocket.go`: WebSocket upgrade and handling
-
-**Key Functions**:
-- `CreateSession()`: Initialize chat session
-- `JoinSession()`: Add participant to session
-- `SendMessage()`: Broadcast message to session
-- `CloseSession()`: Clean up session resources
+- `chat.<session_id>` - Chat room for specific session
+- `session.<session_id>` - Session status and metadata
+- `session.<session_id>.status` - Session status updates
 
 **Integration**:
 - Extends existing WebSocket infrastructure
-- Uses NATS for session coordination
+- Uses NATS subjects for chat room messaging
 - Integrates with existing user authentication
+- Leverages existing WebSocket connection management
 
-#### 1.3 Enhanced ntfy Service
+#### 1.2 Enhanced ntfy Service
 **Modifications to existing service**:
 - Add support for action buttons in notifications
-- Implement action callback handling
-- Support for custom notification data
+- Implement action callback handling for Accept/Busy responses
+- Support for custom notification data including session IDs
 
 **New Features**:
 - Action button support (Accept/Busy)
 - Callback URL handling for actions
 - Enhanced notification data structure
+- Integration with chat session creation
 
 ### Phase 2: Frontend Implementation
 
 #### 2.1 Contact Page
 **Location**: `jst_lustre/src/view/contact.gleam`
-**Purpose**: Contact request interface
+**Purpose**: Contact request interface (adapted from existing notification page)
 
 **Components**:
-- Contact form with availability button
+- Contact form with "See if I am available" button
 - Request status display
 - Loading states and error handling
+- Chat interface integration
 
 **Features**:
-- "See if I am available" button
+- "See if I am available" button (replaces notification form)
 - Request ID display
 - Status updates via WebSocket
+- Seamless transition to chat interface
+- Reuses existing notification page structure and styling
 
 #### 2.2 Chat Interface
 **Location**: `jst_lustre/src/view/chat_session.gleam`
@@ -171,18 +167,22 @@ Contact Request → NATS → ntfy → User Action → NATS → WebSocket Chat + 
 - Input field for new messages
 - Participant information
 - Connection status
+- Session management
 
 **Features**:
-- Real-time message updates
+- Real-time message updates via WebSocket
 - Typing indicators
 - Message history
 - Session management
+- Integration with existing WebSocket infrastructure
+- NATS subject-based chat rooms (`chat.<session_id>`)
 
 #### 2.3 Route Updates
 **Modifications to `jst_lustre/src/routes.gleam`**:
-- Add `Contact` route
+- Replace `Notifications` route with `Contact` route
 - Add `ChatSession(id: String)` route
 - Update navigation and routing logic
+- Maintain existing URL structure where possible
 
 ### Phase 3: Integration and Testing
 
@@ -238,6 +238,17 @@ type ChatMessage struct {
     SenderID  string    `json:"sender_id"`
     Content   string    `json:"content"`
     Timestamp time.Time `json:"timestamp"`
+}
+```
+
+### WebSocket Session
+```go
+type WebSocketSession struct {
+    ID        string    `json:"id"`
+    UserID    string    `json:"user_id"`
+    ChatRooms []string  `json:"chat_rooms"` // NATS subjects being listened to
+    CreatedAt time.Time `json:"created_at"`
+    LastSeen  time.Time `json:"last_seen"`
 }
 ```
 
