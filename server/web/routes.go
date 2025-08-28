@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"time"
 
 	"slices"
@@ -60,6 +61,12 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 
 	// notifications
 	mux.Handle("POST /api/notifications", handleNotificationSend(l, nc))
+
+	// contact requests
+	mux.Handle("POST /api/contact/request", handleContactRequestCreate(l, nc))
+	mux.Handle("GET /api/contact/request/{id}", handleContactRequestGet(l, nc))
+	mux.Handle("POST /api/contact/respond/{requestId}/accept", handleContactRequestAccept(l, nc))
+	mux.Handle("POST /api/contact/respond/{requestId}/busy", handleContactRequestBusy(l, nc))
 
 	// realtime websocket bridge
 	mux.Handle("GET /ws", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1536,6 +1543,230 @@ func handleNotificationSend(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 			Message: "Notification sent successfully",
 			ID:      notification.ID,
 		}, http.StatusOK)
+	})
+}
+
+// --- CONTACT REQUEST HANDLERS ---
+
+func handleContactRequestCreate(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+	type Req struct {
+		ClientMsgID string `json:"client_msg_id"`
+	}
+	type Resp struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+		ID      string `json:"id"`
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var (
+			user whoApi.User
+			req  Req
+		)
+		logger := l.WithBreadcrumb("handleContactRequestCreate")
+
+		// Get user from context (or create guest user)
+		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		if !ok {
+			user = whoApi.User{
+				ID:       "guest-" + uuid.New().String(),
+				Username: "guest",
+			}
+		}
+
+		// Parse request body
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			logger.Error("failed to decode request: %v", err)
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		if req.ClientMsgID == "" {
+			http.Error(w, "client_msg_id is required", http.StatusBadRequest)
+			return
+		}
+
+		// Create contact request via NATS
+		contactReq := map[string]interface{}{
+			"requester_id":  user.ID,
+			"requester_ip":  r.RemoteAddr,
+			"client_msg_id": req.ClientMsgID,
+		}
+
+		contactReqBytes, err := json.Marshal(contactReq)
+		if err != nil {
+			logger.Error("failed to marshal contact request: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Send to chat service
+		msg, err := nc.Request("chat.request.create", contactReqBytes, 10*time.Second)
+		if err != nil {
+			logger.Error("failed to create contact request: %v", err)
+			http.Error(w, "failed to create contact request", http.StatusInternalServerError)
+			return
+		}
+
+		// Parse response
+		var contactRequest map[string]interface{}
+		if err := json.Unmarshal(msg.Data, &contactRequest); err != nil {
+			logger.Error("failed to unmarshal contact request response: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Send ntfy notification with action buttons
+		notification := ntfy.Notification{
+			ID:        uuid.New().String(),
+			UserID:    "jst",
+			Title:     "New Contact Request",
+			Message:   fmt.Sprintf("Someone wants to chat with you! (Request ID: %s)", contactRequest["id"]),
+			Category:  "contact",
+			Priority:  ntfy.PriorityHigh,
+			NtfyTopic: "jst",
+			Data: map[string]interface{}{
+				"request_id": contactRequest["id"],
+				"actions":    fmt.Sprintf("view, Accept, %s/accept; view, Busy, %s/busy",
+					strings.TrimSuffix(r.URL.String(), "/request"),
+					strings.TrimSuffix(r.URL.String(), "/request")),
+			},
+			CreatedAt: time.Now(),
+		}
+
+		notificationBytes, err := json.Marshal(notification)
+		if err != nil {
+			logger.Error("failed to marshal notification: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Send notification
+		ntfyMsg, err := nc.Request(ntfy.SubjectNotification, notificationBytes, 10*time.Second)
+		if err != nil {
+			logger.Error("failed to send notification: %v", err)
+			http.Error(w, "failed to send notification", http.StatusInternalServerError)
+			return
+		}
+
+		// Check for service errors
+		if ntfyMsg.Header.Get("Nats-Service-Error") != "" {
+			logger.Error("notification service error: %s", string(ntfyMsg.Data))
+			http.Error(w, "notification service error", http.StatusInternalServerError)
+			return
+		}
+
+		// Return success response
+		respJson(w, Resp{
+			Status:  "success",
+			Message: "Contact request created successfully",
+			ID:      contactRequest["id"].(string),
+		}, http.StatusOK)
+	})
+}
+
+func handleContactRequestGet(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := r.PathValue("id")
+		if requestID == "" {
+			http.Error(w, "request ID is required", http.StatusBadRequest)
+			return
+		}
+
+		// Get contact request from chat service
+		getReq := map[string]string{"id": requestID}
+		getReqBytes, err := json.Marshal(getReq)
+		if err != nil {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		msg, err := nc.Request("chat.request.get", getReqBytes, 5*time.Second)
+		if err != nil {
+			http.Error(w, "contact request not found", http.StatusNotFound)
+			return
+		}
+
+		// Return the contact request
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(msg.Data)
+	})
+}
+
+func handleContactRequestAccept(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := r.PathValue("requestId")
+		if requestID == "" {
+			http.Error(w, "request ID is required", http.StatusBadRequest)
+			return
+		}
+
+		// Respond to contact request via NATS
+		response := map[string]string{
+			"request_id": requestID,
+			"response":   "accept",
+		}
+
+		responseBytes, err := json.Marshal(response)
+		if err != nil {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		msg, err := nc.Request("chat.request.respond", responseBytes, 10*time.Second)
+		if err != nil {
+			http.Error(w, "failed to accept contact request", http.StatusInternalServerError)
+			return
+		}
+
+		// Check for service errors
+		if msg.Header.Get("Nats-Service-Error") != "" {
+			http.Error(w, "failed to accept contact request", http.StatusInternalServerError)
+			return
+		}
+
+		// Return success
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Contact request accepted"))
+	})
+}
+
+func handleContactRequestBusy(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := r.PathValue("requestId")
+		if requestID == "" {
+			http.Error(w, "request ID is required", http.StatusBadRequest)
+			return
+		}
+
+		// Respond to contact request via NATS
+		response := map[string]string{
+			"request_id": requestID,
+			"response":   "busy",
+		}
+
+		responseBytes, err := json.Marshal(response)
+		if err != nil {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		msg, err := nc.Request("chat.request.respond", responseBytes, 10*time.Second)
+		if err != nil {
+			http.Error(w, "failed to decline contact request", http.StatusInternalServerError)
+			return
+		}
+
+		// Check for service errors
+		if msg.Header.Get("Nats-Service-Error") != "" {
+			http.Error(w, "failed to decline contact request", http.StatusInternalServerError)
+			return
+		}
+
+		// Return success
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Contact request declined"))
 	})
 }
 

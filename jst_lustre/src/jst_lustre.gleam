@@ -17,6 +17,7 @@ import view/ui
 import gleam/set.{type Set}
 import gleam/string
 import gleam/uri.{type Uri}
+import gleam/uuid
 
 import keyboard as key
 import lustre
@@ -36,6 +37,7 @@ import utils/http.{type HttpError}
 import utils/jot_to_lustre
 import utils/mouse
 import utils/notification.{type NotificationResponse}
+import utils/chat.{type ChatRequestResponse, create_chat_request, send_chat_request}
 import utils/persist.{type PersistentModel, PersistentModelV0, PersistentModelV1}
 import utils/remote_data.{
   type RemoteData, Errored, Loaded, NotInitialized, Pending,
@@ -80,6 +82,8 @@ type Model {
     // Notification form fields
     notification_form_message: String,
     notification_sending: Bool,
+    // Chat request fields
+    chat_request_sending: Bool,
     // Profile page state
     profile_user: RemoteData(user.UserFull, HttpError),
     profile_form_username: String,
@@ -188,6 +192,10 @@ pub type Msg {
   NotificationFormMessageUpdated(String)
   NotificationSendClicked
   NotificationSendResponse(Result(NotificationResponse, HttpError))
+
+  // Chat Requests
+  ChatRequestClicked
+  ChatRequestResponse(Result(ChatRequestResponse, HttpError))
 
   // UI Components
   NoOp
@@ -1054,6 +1062,44 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               ..model,
               notification_sending: False,
               notice: "Failed to send notification: "
+                <> error_string.http_error(err),
+            ),
+            effect.none(),
+          )
+        }
+      }
+    }
+    // CHAT REQUEST HANDLERS
+    ChatRequestClicked -> {
+      let client_msg_id = uuid.generate()
+      let request = chat.create_chat_request(client_msg_id)
+      #(
+        Model(..model, chat_request_sending: True),
+        chat.send_chat_request(
+          ChatRequestResponse,
+          model.base_uri,
+          request,
+        ),
+      )
+    }
+    ChatRequestResponse(result) -> {
+      case result {
+        Ok(response) -> {
+          #(
+            Model(
+              ..model,
+              chat_request_sending: False,
+              notice: "Chat request sent! I'll get back to you soon.",
+            ),
+            effect.none(),
+          )
+        }
+        Error(err) -> {
+          #(
+            Model(
+              ..model,
+              chat_request_sending: False,
+              notice: "Failed to send chat request: "
                 <> error_string.http_error(err),
             ),
             effect.none(),
@@ -3908,10 +3954,21 @@ fn view_ui_components() -> List(Element(Msg)) {
 
 fn view_notifications(model: Model) -> List(Element(Msg)) {
   [
-    ui.page_title("Push notifications", "title-notifications"),
+    ui.page_title("Contact & Notifications", "title-notifications"),
+    ui.card_with_title(
+      key: "chat-request",
+      title: "Want to chat?",
+      content: [
+        ui.simple_paragraph(
+          "Click the button below to see if I'm available for a real-time chat. I'll get a notification and can accept or decline your request.",
+        ),
+        html.div([attr.class("h-16")], []),
+        view_chat_request_button(model),
+      ],
+    ),
     ui.card_with_title(
       key: "want-to-get-in-touch",
-      title: "Want to get in touch?",
+      title: "Want to send a notification?",
       content: [
         ui.simple_paragraph(
           "You can send push notifications to my phone. I trust you, whoever you are to be respectfull. I am looking forward to hearing from you all!",
@@ -3950,6 +4007,25 @@ fn view_notification_form(model: Model) -> Element(Msg) {
           _, _ -> ui.ButtonStateNormal
         },
         NotificationSendClicked,
+      ),
+    ]),
+  ])
+}
+
+fn view_chat_request_button(model: Model) -> Element(Msg) {
+  html.div([attr.class("space-y-4")], [
+    html.div([attr.class("ml-auto w-max")], [
+      ui.button(
+        case model.chat_request_sending {
+          True -> "Checking availability..."
+          False -> "See if I am available"
+        },
+        ui.ColorBlue,
+        case model.chat_request_sending {
+          True -> ui.ButtonStatePending
+          False -> ui.ButtonStateNormal
+        },
+        ChatRequestClicked,
       ),
     ]),
   ])
@@ -4002,6 +4078,8 @@ fn init(_) -> #(Model, Effect(Msg)) {
       // Notification form fields
       notification_form_message: "",
       notification_sending: False,
+      // Chat request fields
+      chat_request_sending: False,
       // profile state
       profile_user: NotInitialized,
       profile_form_username: "",

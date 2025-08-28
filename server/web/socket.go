@@ -163,7 +163,7 @@ func userIDFromRequest(r *http.Request) string {
 // Authorization bootstrap TODO: implement proper
 func authorizeInitial(l *jst_log.Logger, s *server, userID string) capabilities {
 	caps := capabilities{
-		Subjects: []string{"time.seconds"},
+		Subjects: []string{"time.seconds", "chat.room.*", "chat.request.*"},
 		Buckets:  map[string][]string{"article": {">"}, "url_short": {">"}},
 		Commands: []string{},
 		Streams:  map[string][]string{},

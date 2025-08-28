@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"jst_dev/server/articles"
+	"jst_dev/server/chat"
 	"jst_dev/server/jst_log"
 	"jst_dev/server/ntfy"
 	"jst_dev/server/talk"
@@ -164,6 +165,17 @@ func run(
 	err = ntfySvc.Start(ctx)
 	if err != nil {
 		return fmt.Errorf("start ntfy: %w", err)
+	}
+
+	// - chat
+	l.Debug("starting chat")
+	chatSvc, err := chat.New(ctx, nc, lRoot.WithBreadcrumb("chat"))
+	if err != nil {
+		return fmt.Errorf("new chat: %w", err)
+	}
+	err = chatSvc.Start(ctx)
+	if err != nil {
+		return fmt.Errorf("start chat: %w", err)
 	}
 
 	// - who
