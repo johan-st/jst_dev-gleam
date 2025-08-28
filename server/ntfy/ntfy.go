@@ -185,6 +185,28 @@ func (n *Ntfy) sendNtfyNotification(notification Notification) error {
 		if dataJSON, err := json.Marshal(notification.Data); err == nil {
 			req.Header.Set("X-Data", string(dataJSON))
 		}
+		// Optional: additional ntfy headers via Data["headers"] map[string]string
+		if rawHeaders, ok := notification.Data["headers"]; ok {
+			if hdrs, ok := rawHeaders.(map[string]interface{}); ok {
+				for k, v := range hdrs {
+					if vs, ok := v.(string); ok {
+						switch k {
+						case "Content-Type", "Title", "Priority", "Tags", "Authorization", "X-Data":
+							// skip protected headers
+							continue
+						default:
+							req.Header.Set(k, vs)
+						}
+					}
+				}
+			}
+		}
+		// Convenience: allow Data["actions"] to set ntfy Actions header directly
+		if rawActions, ok := notification.Data["actions"]; ok {
+			if actions, ok := rawActions.(string); ok && actions != "" {
+				req.Header.Set("Actions", actions)
+			}
+		}
 	}
 
 	// Send request

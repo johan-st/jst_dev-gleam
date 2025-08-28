@@ -17,6 +17,7 @@ import view/ui
 import gleam/set.{type Set}
 import gleam/string
 import gleam/uri.{type Uri}
+import gleam/uuid
 
 import keyboard as key
 import lustre
@@ -36,6 +37,7 @@ import utils/http.{type HttpError}
 import utils/jot_to_lustre
 import utils/mouse
 import utils/notification.{type NotificationResponse}
+import utils/chat.{create_chat_request, send_chat_request}
 import utils/persist.{type PersistentModel, PersistentModelV0, PersistentModelV1}
 import utils/remote_data.{
   type RemoteData, Errored, Loaded, NotInitialized, Pending,
@@ -80,6 +82,8 @@ type Model {
     // Notification form fields
     notification_form_message: String,
     notification_sending: Bool,
+    // Chat request fields
+    chat_request_sending: Bool,
     // Profile page state
     profile_user: RemoteData(user.UserFull, HttpError),
     profile_form_username: String,
@@ -188,6 +192,13 @@ pub type Msg {
   NotificationFormMessageUpdated(String)
   NotificationSendClicked
   NotificationSendResponse(Result(NotificationResponse, HttpError))
+
+  // Chat Requests
+  ChatRequestClicked
+  ChatRequestResponseReceived(String) // request_id
+  ChatRequestResponse {
+    ChatRequestResponse(request_id: String)
+  }
 
   // UI Components
   NoOp
@@ -1061,6 +1072,29 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         }
       }
     }
+    // CHAT REQUEST HANDLERS
+    ChatRequestClicked -> {
+      let client_msg_id = uuid.generate()
+      let request = chat.create_chat_request(client_msg_id)
+      case model.ws {
+        Some(websocket) -> {
+          #(
+            Model(..model, chat_request_sending: True),
+            chat.send_chat_request(
+              NoOp,
+              websocket,
+              request,
+            ),
+          )
+        }
+        None -> {
+          #(
+            Model(..model, notice: "WebSocket not connected. Please refresh the page."),
+            effect.none(),
+          )
+        }
+      }
+    }
     // PROFILE
     ProfileMeGot(result) -> {
       case result {
@@ -1347,14 +1381,26 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     WebSocketMsg(msg) -> {
       case msg {
         ws.OnTextMessage(text) -> {
-          let #(kv_article, effect_article) =
-            sync.ws_text_message(model.article_kv, text)
-          let #(kv_short_url, effect_short_url) =
-            sync.ws_text_message(model.short_url_kv, text)
-          let model =
-            Model(..model, article_kv: kv_article, short_url_kv: kv_short_url)
-          let effect = effect.batch([effect_article, effect_short_url])
-          #(model, effect)
+          // Check if this is a chat request response
+          case json.decode(text, chat_response_decoder()) {
+            Ok(response) -> {
+              #(
+                Model(..model),
+                effect.send(ChatRequestResponseReceived(response.request_id)),
+              )
+            }
+            Error(_) -> {
+              // Handle regular sync messages
+              let #(kv_article, effect_article) =
+                sync.ws_text_message(model.article_kv, text)
+              let #(kv_short_url, effect_short_url) =
+                sync.ws_text_message(model.short_url_kv, text)
+              let model =
+                Model(..model, article_kv: kv_article, short_url_kv: kv_short_url)
+              let effect = effect.batch([effect_article, effect_short_url])
+              #(model, effect)
+            }
+          }
         }
         ws.InvalidUrl -> {
           let kv_article =
@@ -1402,6 +1448,17 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         }
       }
     }
+    // Chat request response received
+    ChatRequestResponseReceived(request_id) -> {
+      #(
+        Model(
+          ..model,
+          chat_request_sending: False,
+          notice: "Chat request sent! I'll get back to you soon.",
+        ),
+        effect.none(),
+      )
+    }
   }
 }
 
@@ -1414,6 +1471,11 @@ fn fetch_articles_model(model_effect_touple) -> #(Model, Effect(Msg)) {
   let effect = effect.batch([effect])
 
   #(model, effect)
+}
+
+fn chat_response_decoder() -> decode.Decoder(ChatRequestResponse) {
+  use request_id <- decode.field("id", decode.string)
+  decode.success(ChatRequestResponse(request_id))
 }
 
 fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
@@ -3895,10 +3957,21 @@ fn view_ui_components() -> List(Element(Msg)) {
 
 fn view_notifications(model: Model) -> List(Element(Msg)) {
   [
-    ui.page_title("Push notifications", "title-notifications"),
+    ui.page_title("Contact & Notifications", "title-notifications"),
+    ui.card_with_title(
+      key: "chat-request",
+      title: "Want to chat?",
+      content: [
+        ui.simple_paragraph(
+          "Click the button below to see if I'm available for a real-time chat. I'll get a notification and can accept or decline your request.",
+        ),
+        html.div([attr.class("h-16")], []),
+        view_chat_request_button(model),
+      ],
+    ),
     ui.card_with_title(
       key: "want-to-get-in-touch",
-      title: "Want to get in touch?",
+      title: "Want to send a notification?",
       content: [
         ui.simple_paragraph(
           "You can send push notifications to my phone. I trust you, whoever you are to be respectfull. I am looking forward to hearing from you all!",
@@ -3937,6 +4010,25 @@ fn view_notification_form(model: Model) -> Element(Msg) {
           _, _ -> ui.ButtonStateNormal
         },
         NotificationSendClicked,
+      ),
+    ]),
+  ])
+}
+
+fn view_chat_request_button(model: Model) -> Element(Msg) {
+  html.div([attr.class("space-y-4")], [
+    html.div([attr.class("ml-auto w-max")], [
+      ui.button(
+        case model.chat_request_sending {
+          True -> "Checking availability..."
+          False -> "See if I am available"
+        },
+        ui.ColorBlue,
+        case model.chat_request_sending {
+          True -> ui.ButtonStatePending
+          False -> ui.ButtonStateNormal
+        },
+        ChatRequestClicked,
       ),
     ]),
   ])
@@ -3989,6 +4081,8 @@ fn init(_) -> #(Model, Effect(Msg)) {
       // Notification form fields
       notification_form_message: "",
       notification_sending: False,
+      // Chat request fields
+      chat_request_sending: False,
       // profile state
       profile_user: NotInitialized,
       profile_form_username: "",
