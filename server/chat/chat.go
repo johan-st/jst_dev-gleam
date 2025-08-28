@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,11 +26,7 @@ const (
 type Chat struct {
 	nc *nats.Conn
 	l  *jst_log.Logger
-	
-	// In-memory storage for MVP (can be replaced with NATS KV later)
-	requests   map[string]*ContactRequest
-	sessions   map[string]*ChatSession
-	mu         sync.RWMutex
+	js nats.JetStreamContext
 }
 
 func New(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (Chat, error) {
@@ -39,11 +34,15 @@ func New(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (Chat, error) {
 		return Chat{}, fmt.Errorf("logger is required")
 	}
 
+	js, err := nc.JetStream()
+	if err != nil {
+		return Chat{}, fmt.Errorf("failed to get jetstream: %w", err)
+	}
+
 	return Chat{
-		nc:        nc,
-		l:         l,
-		requests:  make(map[string]*ContactRequest),
-		sessions:  make(map[string]*ChatSession),
+		nc: nc,
+		l:  l,
+		js: js,
 	}, nil
 }
 
@@ -112,14 +111,27 @@ func (c *Chat) handleContactRequestCreate() micro.HandlerFunc {
 			ClientMsgID: createReq.ClientMsgID,
 		}
 
-		// Store in memory
-		c.mu.Lock()
-		c.requests[contactReq.ID] = contactReq
-		c.mu.Unlock()
+		// Store in NATS KV
+		kv, err := c.js.KeyValue("chat")
+		if err != nil {
+			c.l.Error("failed to get chat KV bucket", "error", err)
+			if err := req.Error("500", "failed to store contact request", nil); err != nil {
+				c.l.Error("failed to send error response", "error", err)
+			}
+			return
+		}
+
+		requestData, _ := json.Marshal(contactReq)
+		if _, err := kv.Put(fmt.Sprintf("request.%s", contactReq.ID), requestData); err != nil {
+			c.l.Error("failed to store contact request in KV", "error", err)
+			if err := req.Error("500", "failed to store contact request", nil); err != nil {
+				c.l.Error("failed to send error response", "error", err)
+			}
+			return
+		}
 
 		// Publish to chat.request.<request_id> for real-time updates
 		subject := fmt.Sprintf("chat.request.%s", contactReq.ID)
-		requestData, _ := json.Marshal(contactReq)
 		if err := c.nc.Publish(subject, requestData); err != nil {
 			c.l.Error("failed to publish contact request", "error", err, "request_id", contactReq.ID)
 		}
@@ -146,13 +158,28 @@ func (c *Chat) handleContactRequestRespond() micro.HandlerFunc {
 			return
 		}
 
-		// Get the contact request
-		c.mu.RLock()
-		contactReq, exists := c.requests[responseReq.RequestID]
-		c.mu.RUnlock()
+		// Get the contact request from NATS KV
+		kv, err := c.js.KeyValue("chat")
+		if err != nil {
+			c.l.Error("failed to get chat KV bucket", "error", err)
+			if err := req.Error("500", "failed to get contact request", nil); err != nil {
+				c.l.Error("failed to send error response", "error", err)
+			}
+			return
+		}
 
-		if !exists {
+		entry, err := kv.Get(fmt.Sprintf("request.%s", responseReq.RequestID))
+		if err != nil || entry == nil {
 			if err := req.Error("404", "contact request not found", nil); err != nil {
+				c.l.Error("failed to send error response", "error", err)
+			}
+			return
+		}
+
+		var contactReq ContactRequest
+		if err := json.Unmarshal(entry.Value(), &contactReq); err != nil {
+			c.l.Error("failed to unmarshal contact request", "error", err)
+			if err := req.Error("500", "failed to parse contact request", nil); err != nil {
 				c.l.Error("failed to send error response", "error", err)
 			}
 			return
@@ -173,14 +200,20 @@ func (c *Chat) handleContactRequestRespond() micro.HandlerFunc {
 				CreatedAt:    now,
 			}
 
-			c.mu.Lock()
-			c.sessions[chatSession.ID] = chatSession
+			// Store session in NATS KV
+			sessionData, _ := json.Marshal(chatSession)
+			if _, err := kv.Put(fmt.Sprintf("session.%s", chatSession.ID), sessionData); err != nil {
+				c.l.Error("failed to store chat session in KV", "error", err)
+			}
+
+			// Update contact request with session ID
 			contactReq.ChatSessionID = &chatSession.ID
-			c.mu.Unlock()
+			if _, err := kv.Put(fmt.Sprintf("request.%s", contactReq.ID), sessionData); err != nil {
+				c.l.Error("failed to update contact request in KV", "error", err)
+			}
 
 			// Publish session creation
 			sessionSubject := fmt.Sprintf("chat.room.%s", chatSession.ID)
-			sessionData, _ := json.Marshal(chatSession)
 			if err := c.nc.Publish(sessionSubject, sessionData); err != nil {
 				c.l.Error("failed to publish session creation", "error", err, "session_id", chatSession.ID)
 			}
@@ -188,8 +221,8 @@ func (c *Chat) handleContactRequestRespond() micro.HandlerFunc {
 
 		// Publish updated request status
 		subject := fmt.Sprintf("chat.request.%s", contactReq.ID)
-		requestData, _ := json.Marshal(contactReq)
-		if err := c.nc.Publish(subject, requestData); err != nil {
+		updatedRequestData, _ := json.Marshal(contactReq)
+		if err := c.nc.Publish(subject, updatedRequestData); err != nil {
 			c.l.Error("failed to publish updated request", "error", err, "request_id", contactReq.ID)
 		}
 
@@ -249,16 +282,44 @@ func (c *Chat) handleChatMessageSend() micro.HandlerFunc {
 
 // Get contact request by ID
 func (c *Chat) GetContactRequest(id string) (*ContactRequest, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	req, exists := c.requests[id]
-	return req, exists
+	kv, err := c.js.KeyValue("chat")
+	if err != nil {
+		c.l.Error("failed to get chat KV bucket", "error", err)
+		return nil, false
+	}
+
+	entry, err := kv.Get(fmt.Sprintf("request.%s", id))
+	if err != nil || entry == nil {
+		return nil, false
+	}
+
+	var req ContactRequest
+	if err := json.Unmarshal(entry.Value(), &req); err != nil {
+		c.l.Error("failed to unmarshal contact request", "error", err)
+		return nil, false
+	}
+
+	return &req, true
 }
 
 // Get chat session by ID
 func (c *Chat) GetChatSession(id string) (*ChatSession, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	chatSession, exists := c.sessions[id]
-	return chatSession, exists
+	kv, err := c.js.KeyValue("chat")
+	if err != nil {
+		c.l.Error("failed to get chat KV bucket", "error", err)
+		return nil, false
+	}
+
+	entry, err := kv.Get(fmt.Sprintf("session.%s", id))
+	if err != nil || entry == nil {
+		return nil, false
+	}
+
+	var session ChatSession
+	if err := json.Unmarshal(entry.Value(), &session); err != nil {
+		c.l.Error("failed to unmarshal chat session", "error", err)
+		return nil, false
+	}
+
+	return &session, true
 }
