@@ -6,20 +6,24 @@ import (
 	"sync"
 )
 
-// A new Service struct should be created with `name.New(..deps) (*Service, error)`.
+// A new Service implementation should be created with `name.New(..deps) (*Service, error)`.
 //
-// The Service is stopped when the context is cancelled.
-// It returns an error if the service fails to start, stop or operate.
+// Lifecycle contract:
+// - Start any required resources (HTTP server, message endpoints, schedulers, etc.)
+// - Log a concise "started" message
+// - Block until the provided context is cancelled
+// - Perform cleanup (stop servers, unregister/endpoints, close connections)
+// - Log "stopping..." and "stopped" around cleanup
+// - Return nil on normal cancellation, or a wrapped error on failure
 //
 //	func (s *MyService) Run(ctx context.Context) error {
-//	    // Connect to NATS
-//	    // Register Service with internal name
-//	    // Run until context cancelled
+//	    // Initialize service (set up routes, endpoints, connections, etc.)
+//	    // s.l.Info("service started")
 //	    <-ctx.Done()
-//	    // Cleanup NATS connection
-//	    // Cleanup other resources
-//	    // Return error if cleanup fails
-//	    return ctx.Err()
+//	    // s.l.Info("service stopping...")
+//	    // Cleanup resources
+//	    // s.l.Info("service stopped")
+//	    return nil
 //	}
 type Service interface {
 	Run(ctx context.Context) error
