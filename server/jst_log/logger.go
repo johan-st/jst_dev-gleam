@@ -131,15 +131,17 @@ func (l *Logger) Fatal(msg string, args ...any) {
 func (l *Logger) log(level Level, msg string, args ...any) {
 	msg = strings.TrimSuffix(msg, "\n")
 
+	// Always format first so local logs include args too
+	if len(args) > 0 {
+		msg = fmt.Sprintf(msg, args...)
+	}
+
 	if l.nc == nil {
 		fmt.Printf("[local] %s\n", msg)
 		l.queue = append(l.queue, LogMessage{level, msg, args})
 		return
 	}
 	unixMicro := strconv.FormatInt(time.Now().UnixMicro(), 10)
-	if len(args) > 0 {
-		msg = fmt.Sprintf(msg, args...)
-	}
 
 	levelStr := []string{l.conf.debug, l.conf.info, l.conf.warn, l.conf.err, l.conf.fatal}[level+1]
 
