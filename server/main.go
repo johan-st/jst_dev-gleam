@@ -13,32 +13,60 @@ import (
 	"jst_dev/server/articles"
 	"jst_dev/server/jst_log"
 	"jst_dev/server/ntfy"
+	"jst_dev/server/service"
 	"jst_dev/server/talk"
 	"jst_dev/server/urlShort"
 	web "jst_dev/server/web"
 	"jst_dev/server/who"
 
-	"github.com/joho/godotenv"
 	"github.com/nats-io/nats.go"
 )
 
 // main is the entry point of the server application, initializing the context and running the server.
 // If an error occurs during startup or execution, it prints the error to standard error and exits with status code 1.
 func main() {
-	ctx := context.Background()
-	_ = godotenv.Load()
-	if err := run(
-		ctx,
-		// os.Args,
-		// os.Stdin,
-		// os.Stdout,
-		// os.Stderr,
-		os.Getenv,
-		// os.Getwd,
-	); err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
-		os.Exit(1)
-	}
+	// ctx := context.Background()
+	// _ = godotenv.Load()
+	// if err := run(
+	// 	ctx,
+	// 	// os.Args,
+	// 	// os.Stdin,
+	// 	// os.Stdout,
+	// 	// os.Stderr,
+	// 	os.Getenv,
+	// 	// os.Getwd,
+	// ); err != nil {
+	// 	fmt.Fprintf(os.Stderr, "%s\n", err)
+	// 	os.Exit(1)
+	// }
+
+	// - example service
+	waitGroup := &sync.WaitGroup{}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+	svcExample1, _ := service.New(1)
+	serviceRunner(ctx, waitGroup, svcExample1)
+	svcExample2, _ := service.New(2)
+	serviceRunner(ctx, waitGroup, svcExample2)
+	svcExample3, _ := service.New(3)
+	serviceRunner(ctx, waitGroup, svcExample3)
+	svcExample4, _ := service.New(4)
+	serviceRunner(ctx, waitGroup, svcExample4)
+	svcExample5, _ := service.New(5)
+	serviceRunner(ctx, waitGroup, svcExample5)
+	fmt.Println("Example service started")
+	waitGroup.Wait()
+	fmt.Println("Example service stopped")
+}
+
+func serviceRunner(ctx context.Context, waitGroup *sync.WaitGroup, svc service.Service) {
+	waitGroup.Add(1)
+	go func() {
+		defer waitGroup.Done()
+		if err := svc.Run(ctx); err != nil {
+			fmt.Printf("- Service error %d: %v\n", svc.Name(), err)
+		}
+	}()
 }
 
 // run initializes and starts all core services, manages their lifecycle, and handles graceful shutdown on interrupt signals.
