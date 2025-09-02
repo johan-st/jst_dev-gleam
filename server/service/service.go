@@ -1,6 +1,10 @@
 package service
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"sync"
+)
 
 // A new Service struct should be created with `name.New(..deps) (*Service, error)`.
 //
@@ -20,4 +24,17 @@ import "context"
 type Service interface {
 	Run(ctx context.Context) error
 	Name() string
+}
+
+// Run starts a service in a goroutine and manages its lifecycle.
+// It adds the service to the wait group, runs it in the background,
+// and handles cleanup when the context is cancelled.
+func Run(ctx context.Context, waitGroup *sync.WaitGroup, svc Service) {
+	waitGroup.Add(1)
+	go func() {
+		defer waitGroup.Done()
+		if err := svc.Run(ctx); err != nil {
+			fmt.Printf("- Service error %s: %v\n", svc.Name(), err)
+		}
+	}()
 }

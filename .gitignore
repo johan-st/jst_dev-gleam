@@ -6,3 +6,4 @@ node_modules
 *.exe
 build
 !build/index.html
+server/server

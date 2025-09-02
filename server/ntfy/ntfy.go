@@ -78,8 +78,9 @@ func NewWithConfig(ctx context.Context, nc *nats.Conn, l *jst_log.Logger, ntfySe
 	}, nil
 }
 
-// Start the notification service
-func (n *Ntfy) Start(ctx context.Context) error {
+// Run implements the service.Service interface
+// The service runs until the context is cancelled, then performs cleanup
+func (n *Ntfy) Run(ctx context.Context) error {
 	svcMetadata := map[string]string{}
 	svcMetadata["location"] = "unknown"
 	svcMetadata["environment"] = "development"
@@ -100,7 +101,23 @@ func (n *Ntfy) Start(ctx context.Context) error {
 	}
 
 	n.l.Info("ntfy service started")
-	return nil
+	
+	// Wait for context cancellation
+	<-ctx.Done()
+	
+	// Cleanup
+	n.l.Info("ntfy service stopping...")
+	if err := ntfySvc.Stop(); err != nil {
+		n.l.Error("failed to stop ntfy service: %v", err)
+	}
+	
+	n.l.Info("ntfy service stopped")
+	return ctx.Err()
+}
+
+// Name returns the service name for identification
+func (n *Ntfy) Name() string {
+	return "ntfy"
 }
 
 // Handle incoming notifications

@@ -68,7 +68,47 @@ func (s *httpServer) GetMux() *http.ServeMux {
 	return s.mux
 }
 
-func (s *httpServer) Run(cleanShutdown *sync.WaitGroup, port string) {
+// Run implements the service.Service interface
+// The service runs until the context is cancelled, then performs cleanup
+func (s *httpServer) Run(ctx context.Context) error {
+	httpServer := &http.Server{
+		Addr:              net.JoinHostPort("0.0.0.0", "8080"),
+		Handler:           s.handler, // Use the wrapped handler instead of s.mux
+		ReadHeaderTimeout: 20 * time.Second,
+	}
+
+	// Start server in background
+	go func() {
+		s.l.Info("listening on %s", httpServer.Addr)
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			s.l.Error("error listening and serving: %s", err)
+		}
+	}()
+
+	// Wait for context cancellation
+	<-ctx.Done()
+
+	// Cleanup
+	s.l.Info("http server stopping...")
+	shutdownCtx := context.Background()
+	shutdownCtx, cancel := context.WithTimeout(shutdownCtx, 10*time.Second)
+	defer cancel()
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		s.l.Error("error shutting down http server: %s\n", err)
+	}
+
+	s.l.Info("http server stopped")
+	return ctx.Err()
+}
+
+// Name returns the service name for identification
+func (s *httpServer) Name() string {
+	return "web"
+}
+
+// RunWithWaitGroup is the legacy method for backward compatibility
+// Use Run(ctx) instead for the service interface
+func (s *httpServer) RunWithWaitGroup(cleanShutdown *sync.WaitGroup, port string) {
 	cleanShutdown.Add(1)
 
 	httpServer := &http.Server{

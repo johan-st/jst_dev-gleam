@@ -49,7 +49,9 @@ func New(ctx context.Context, c *Conf) (*ShortUrlService, error) {
 	return service, nil
 }
 
-func (s *ShortUrlService) Start(ctx context.Context) error {
+// Run implements the service.Service interface
+// The service runs until the context is cancelled, then performs cleanup
+func (s *ShortUrlService) Run(ctx context.Context) error {
 	if s.nc.Status() != nats.CONNECTED {
 		return fmt.Errorf("nats connection not connected: %s", s.nc.Status())
 	}
@@ -68,13 +70,13 @@ func (s *ShortUrlService) Start(ctx context.Context) error {
 		History:      1,
 		Compression:  false,
 	}
-	kv, err := js.CreateOrUpdateKeyValue(s.ctx, confKv)
+	kv, err := js.CreateOrUpdateKeyValue(ctx, confKv)
 	if err != nil {
 		s.l.Error(fmt.Sprintf("create short urls kv store %s:%s", confKv.Bucket, err.Error()))
 		return fmt.Errorf("create short urls kv store %s:%w", confKv.Bucket, err)
 	}
 	s.shortUrlsKv = kv
-	if err := s.shortUrlWatcher(); err != nil {
+	if err := s.shortUrlWatcher(ctx); err != nil {
 		return fmt.Errorf("failed to start short url watcher: %w", err)
 	}
 
@@ -112,12 +114,34 @@ func (s *ShortUrlService) Start(ctx context.Context) error {
 		return fmt.Errorf("add shorturl endpoint (shorturl_access): %w", err)
 	}
 
-	return nil
+	s.l.Info("short url service started")
+	
+	// Wait for context cancellation
+	<-ctx.Done()
+	
+	// Cleanup
+	s.l.Info("short url service stopping...")
+	if err := shortUrlSvc.Stop(); err != nil {
+		s.l.Error("failed to stop short url service: %v", err)
+	}
+	
+	s.l.Info("short url service stopped")
+	return ctx.Err()
+}
+
+// Name returns the service name for identification
+func (s *ShortUrlService) Name() string {
+	return "shorturl"
+}
+
+// Start is deprecated - use Run instead
+func (s *ShortUrlService) Start(ctx context.Context) error {
+	return s.Run(ctx)
 }
 
 // ----------- WATCHERS -----------
 
-func (s *ShortUrlService) shortUrlWatcher() error {
+func (s *ShortUrlService) shortUrlWatcher(ctx context.Context) error {
 	var (
 		watcher  jetstream.KeyWatcher
 		err      error
@@ -125,7 +149,7 @@ func (s *ShortUrlService) shortUrlWatcher() error {
 		shortUrl ShortUrl
 	)
 
-	watcher, err = s.shortUrlsKv.WatchAll(s.ctx)
+	watcher, err = s.shortUrlsKv.WatchAll(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to watch short urls: %w", err)
 	}
@@ -169,7 +193,7 @@ func (s *ShortUrlService) shortUrlWatcher() error {
 				default:
 					s.l.Error("unknown operation: %s", kv.Operation())
 				}
-			case <-s.ctx.Done():
+			case <-ctx.Done():
 				s.l.Debug("watcher: context done")
 				return
 			}

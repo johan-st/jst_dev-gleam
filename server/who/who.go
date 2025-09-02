@@ -88,7 +88,9 @@ func New(ctx context.Context, c *Conf) (*Who, error) {
 	return who, nil
 }
 
-func (w *Who) Start(ctx context.Context) error {
+// Run implements the service.Service interface
+// The service runs until the context is cancelled, then performs cleanup
+func (w *Who) Run(ctx context.Context) error {
 	if w.nc.Status() != nats.CONNECTED {
 		return fmt.Errorf("nats connection not connected: %s", w.nc.Status())
 	}
@@ -107,13 +109,13 @@ func (w *Who) Start(ctx context.Context) error {
 		History:      64,
 		Compression:  true,
 	}
-	kv, err := js.CreateOrUpdateKeyValue(w.ctx, confKv)
+	kv, err := js.CreateOrUpdateKeyValue(ctx, confKv)
 	if err != nil {
 		w.l.Error(fmt.Sprintf("create users kv store %s:%s", confKv.Bucket, err.Error()))
 		return fmt.Errorf("create users kv store %s:%w", confKv.Bucket, err)
 	}
 	w.usersKv = kv
-	if err := w.userWatcher(); err != nil {
+	if err := w.userWatcher(ctx); err != nil {
 		return fmt.Errorf("failed to start user watcher: %w", err)
 	}
 
@@ -168,12 +170,35 @@ func (w *Who) Start(ctx context.Context) error {
 	if err = authSvcGroup.AddEndpoint("auth_refresh", w.handleAuthRefresh(), micro.WithEndpointSubject(api.Subj.AuthRefresh)); err != nil {
 		return fmt.Errorf("add auth endpoint (auth_refresh): %w", err)
 	}
-	return nil
+
+	w.l.Info("who service started")
+	
+	// Wait for context cancellation
+	<-ctx.Done()
+	
+	// Cleanup
+	w.l.Info("who service stopping...")
+	if err := whoSvc.Stop(); err != nil {
+		w.l.Error("failed to stop who service: %v", err)
+	}
+	
+	w.l.Info("who service stopped")
+	return ctx.Err()
+}
+
+// Name returns the service name for identification
+func (w *Who) Name() string {
+	return "who"
+}
+
+// Start is deprecated - use Run instead
+func (w *Who) Start(ctx context.Context) error {
+	return w.Run(ctx)
 }
 
 // ----------- WATCHERS -----------
 
-func (w *Who) userWatcher() error {
+func (w *Who) userWatcher(ctx context.Context) error {
 	var (
 		watcher jetstream.KeyWatcher
 		kv      jetstream.KeyValueEntry
@@ -182,7 +207,7 @@ func (w *Who) userWatcher() error {
 	// Store the context in the Who struct
 	w.ctx = context.Background()
 
-	watcher, err := w.usersKv.WatchAll(w.ctx)
+	watcher, err := w.usersKv.WatchAll(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to watch users: %w", err)
 	}
@@ -228,7 +253,7 @@ func (w *Who) userWatcher() error {
 				default:
 					w.l.Error("unknown operation: %s", kv.Operation())
 				}
-			case <-w.ctx.Done():
+			case <-ctx.Done():
 				w.l.Debug("watcher: context done")
 				return
 			}

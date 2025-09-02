@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/signal"
 	"sync"
-	"syscall"
 	"time"
 
 	"jst_dev/server/articles"
@@ -19,54 +18,27 @@ import (
 	web "jst_dev/server/web"
 	"jst_dev/server/who"
 
+	"github.com/joho/godotenv"
 	"github.com/nats-io/nats.go"
 )
 
 // main is the entry point of the server application, initializing the context and running the server.
 // If an error occurs during startup or execution, it prints the error to standard error and exits with status code 1.
 func main() {
-	// ctx := context.Background()
-	// _ = godotenv.Load()
-	// if err := run(
-	// 	ctx,
-	// 	// os.Args,
-	// 	// os.Stdin,
-	// 	// os.Stdout,
-	// 	// os.Stderr,
-	// 	os.Getenv,
-	// 	// os.Getwd,
-	// ); err != nil {
-	// 	fmt.Fprintf(os.Stderr, "%s\n", err)
-	// 	os.Exit(1)
-	// }
-
-	// - example service
-	waitGroup := &sync.WaitGroup{}
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
-	svcExample1, _ := service.New(1)
-	serviceRunner(ctx, waitGroup, svcExample1)
-	svcExample2, _ := service.New(2)
-	serviceRunner(ctx, waitGroup, svcExample2)
-	svcExample3, _ := service.New(3)
-	serviceRunner(ctx, waitGroup, svcExample3)
-	svcExample4, _ := service.New(4)
-	serviceRunner(ctx, waitGroup, svcExample4)
-	svcExample5, _ := service.New(5)
-	serviceRunner(ctx, waitGroup, svcExample5)
-	fmt.Println("Example service started")
-	waitGroup.Wait()
-	fmt.Println("Example service stopped")
-}
-
-func serviceRunner(ctx context.Context, waitGroup *sync.WaitGroup, svc service.Service) {
-	waitGroup.Add(1)
-	go func() {
-		defer waitGroup.Done()
-		if err := svc.Run(ctx); err != nil {
-			fmt.Printf("- Service error %d: %v\n", svc.Name(), err)
-		}
-	}()
+	ctx := context.Background()
+	_ = godotenv.Load()
+	if err := run(
+		ctx,
+		// os.Args,
+		// os.Stdin,
+		// os.Stdout,
+		// os.Stderr,
+		os.Getenv,
+		// os.Getwd,
+	); err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		os.Exit(1)
+	}
 }
 
 // run initializes and starts all core services, manages their lifecycle, and handles graceful shutdown on interrupt signals.
@@ -81,7 +53,11 @@ func run(
 	getenv func(string) string, //	For reading environment variables
 	// getwd func() (string, error), //	Get the working directory
 ) error {
-	cleanShutdown := &sync.WaitGroup{}
+	var (
+		cleanShutdown = &sync.WaitGroup{}
+	)
+	
+	// Create signal context for graceful shutdown
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 	defer cancel()
 
@@ -94,10 +70,6 @@ func run(
 	// - logger (create)
 	lRoot := jst_log.NewLogger(conf.AppName, jst_log.DefaultSubjects())
 	l := lRoot.WithBreadcrumb("main")
-
-	// - context
-	ctx, cancel = context.WithCancel(ctx)
-	defer cancel()
 
 	// - talk
 	l.Debug("starting talk")
@@ -178,10 +150,6 @@ func run(
 	// if err != nil {
 	// 	return fmt.Errorf("new blog: %w", err)
 	// }
-	// err = blogSvc.Start(ctx)
-	// if err != nil {
-	// 	return fmt.Errorf("start blog: %w", err)
-	// }
 
 	// - ntfy
 	l.Debug("starting ntfy")
@@ -189,10 +157,7 @@ func run(
 	if err != nil {
 		return fmt.Errorf("new ntfy: %w", err)
 	}
-	err = ntfySvc.Start(ctx)
-	if err != nil {
-		return fmt.Errorf("start ntfy: %w", err)
-	}
+	service.Run(ctx, cleanShutdown, &ntfySvc)
 
 	// - who
 	l.Debug("starting who")
@@ -206,10 +171,7 @@ func run(
 	if err != nil {
 		return fmt.Errorf("new who: %w", err)
 	}
-	err = whoSvc.Start(ctx)
-	if err != nil {
-		return fmt.Errorf("start who: %w", err)
-	}
+	service.Run(ctx, cleanShutdown, whoSvc)
 
 	// - short url
 	l.Debug("starting short url service")
@@ -221,10 +183,7 @@ func run(
 	if err != nil {
 		return fmt.Errorf("new short url: %w", err)
 	}
-	err = shortUrlSvc.Start(ctx)
-	if err != nil {
-		return fmt.Errorf("start short url: %w", err)
-	}
+	service.Run(ctx, cleanShutdown, shortUrlSvc)
 
 	// - articles
 	l.Debug("starting articles")
@@ -236,7 +195,7 @@ func run(
 	// - web
 	l.Debug("http server, start")
 	httpServer := web.New(ctx, nc, conf.WebJwtSecret, lRoot.WithBreadcrumb("http"), articleRepo, conf.Flags.ProxyFrontend, conf.Flags.SlowSocket)
-	go httpServer.Run(cleanShutdown, conf.WebPort)
+	service.Run(ctx, cleanShutdown, httpServer)
 
 	// - time ticker publisher (NATS core)
 	go func() {
@@ -259,51 +218,46 @@ func run(
 		}
 	}()
 
-	// ------------------------------------------------------------
-	// RUNNING
-	// ------------------------------------------------------------
+	// - example
+	svcExample1, _ := service.New(1)
+	service.Run(ctx, cleanShutdown, svcExample1)
+	svcExample2, _ := service.New(2)
+	service.Run(ctx, cleanShutdown, svcExample2)
+	svcExample3, _ := service.New(3)
+	service.Run(ctx, cleanShutdown, svcExample3)
+	svcExample4, _ := service.New(4)
+	service.Run(ctx, cleanShutdown, svcExample4)
+	svcExample5, _ := service.New(5)
+	service.Run(ctx, cleanShutdown, svcExample5)
+	fmt.Println("Example service started")
 
 	l.Debug("started all services")
+
+	// Give services a moment to start up
+	time.Sleep(100 * time.Millisecond)
+	l.Info("All services are running. Press Ctrl+C to shutdown gracefully.")
 
 	// ------------------------------------------------------------
 	// SHUTDOWN
 	// ------------------------------------------------------------
 
 	// Wait for interrupt signal to gracefully shut down
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-
-	// Wait for first interrupt
-	<-sigCh
-	cancel()
-
+	<-ctx.Done()
 	l.Info("Received interrupt signal, starting graceful shutdown...")
-
-	// Drain connections
-	l.Debug("draining connections")
-	err = nc.Drain()
-	if err != nil {
-		l.Error("Failed to drain connections: %v", err)
-	}
-
-	// Check final connection status
-	if nc.Status() != nats.CLOSED {
-		l.Debug("closing NATS connection")
-		nc.Close()
-	}
 
 	// Wait for second interrupt for force quit
 	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt)
 		<-sigCh
-		l.Warn("Received second interrupt signal, force quitting...")
 		fmt.Println("Received second interrupt signal, force quitting...")
+
 		// Sleep for a short time to allow for logging operations to complete
 		time.Sleep(1 * time.Second)
 		os.Exit(1)
 	}()
 
-	// Shutdown talk
-	// talkSvc.Shutdown()
+	// Wait for all services to cleanly shutdown
 	cleanShutdown.Wait()
 	fmt.Println("Server shutdown complete")
 	return nil

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"time"
 )
 
@@ -22,7 +23,7 @@ func (s *ExampleService) Run(ctx context.Context) error {
 	<-ctx.Done()
 	fail := time.Now().UnixMicro()%3 == 0
 	if fail {
-		time.Sleep(5 * time.Second)
+		time.Sleep(5 + time.Duration(rand.Intn(10))*time.Second)
 		return fmt.Errorf("%s stopped: FAIL", s.name)
 	}
 

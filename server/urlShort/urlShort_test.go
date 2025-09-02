@@ -35,11 +35,15 @@ func TestShortUrlService(t *testing.T) {
 		t.Fatalf("Failed to create service: %v", err)
 	}
 
-	// Start service
-	err = service.Start(ctx)
-	if err != nil {
-		t.Fatalf("Failed to start service: %v", err)
-	}
+	// Start service in background
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	
+	go func() {
+		if err := service.Run(ctx); err != nil && err != context.Canceled {
+			t.Errorf("Service failed: %v", err)
+		}
+	}()
 
 	// Wait a bit for service to initialize
 	time.Sleep(100 * time.Millisecond)
