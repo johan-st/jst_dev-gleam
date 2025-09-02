@@ -172,16 +172,16 @@ func (w *Who) Run(ctx context.Context) error {
 	}
 
 	w.l.Info("who service started")
-	
+
 	// Wait for context cancellation
 	<-ctx.Done()
-	
+
 	// Cleanup
 	w.l.Info("who service stopping...")
 	if err := whoSvc.Stop(); err != nil {
 		w.l.Error("failed to stop who service: %v", err)
 	}
-	
+
 	w.l.Info("who service stopped")
 	return ctx.Err()
 }

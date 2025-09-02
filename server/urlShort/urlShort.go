@@ -115,16 +115,16 @@ func (s *ShortUrlService) Run(ctx context.Context) error {
 	}
 
 	s.l.Info("short url service started")
-	
+
 	// Wait for context cancellation
 	<-ctx.Done()
-	
+
 	// Cleanup
 	s.l.Info("short url service stopping...")
 	if err := shortUrlSvc.Stop(); err != nil {
 		s.l.Error("failed to stop short url service: %v", err)
 	}
-	
+
 	s.l.Info("short url service stopped")
 	return ctx.Err()
 }

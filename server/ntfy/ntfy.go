@@ -101,16 +101,16 @@ func (n *Ntfy) Run(ctx context.Context) error {
 	}
 
 	n.l.Info("ntfy service started")
-	
+
 	// Wait for context cancellation
 	<-ctx.Done()
-	
+
 	// Cleanup
 	n.l.Info("ntfy service stopping...")
 	if err := ntfySvc.Stop(); err != nil {
 		n.l.Error("failed to stop ntfy service: %v", err)
 	}
-	
+
 	n.l.Info("ntfy service stopped")
 	return ctx.Err()
 }

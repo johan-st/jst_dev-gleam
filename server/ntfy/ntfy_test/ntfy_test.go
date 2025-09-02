@@ -72,17 +72,17 @@ func setup() (*nats.Conn, func(), error) {
 	// Start ntfy service in background
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	
+
 	go func() {
 		if err := ntfyService.Run(ctx); err != nil && err != context.Canceled {
 			// Log error but don't fail test since this is in setup
 			_ = err
 		}
 	}()
-	
+
 	// Wait a bit for service to initialize
 	time.Sleep(100 * time.Millisecond)
-	
+
 	return nc,
 		func() {
 			cancel() // Cancel context to stop service

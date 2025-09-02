@@ -54,7 +54,8 @@ pub fn view(
         html.div([attr.class("flex items-center gap-3")], [
           // KV status indicator
           case kv.state {
-            sync.NotInitialized -> ui.status_badge("Not initialized", ui.ColorNeutral)
+            sync.NotInitialized ->
+              ui.status_badge("Not initialized", ui.ColorNeutral)
             sync.Connecting -> ui.status_badge("Connecting", ui.ColorTeal)
             sync.CatchingUp -> ui.status_badge("Catching up", ui.ColorOrange)
             sync.InSync -> ui.status_badge("In sync", ui.ColorGreen)

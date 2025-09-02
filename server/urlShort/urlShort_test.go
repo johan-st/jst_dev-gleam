@@ -38,7 +38,7 @@ func TestShortUrlService(t *testing.T) {
 	// Start service in background
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	
+
 	go func() {
 		if err := service.Run(ctx); err != nil && err != context.Canceled {
 			t.Errorf("Service failed: %v", err)

@@ -30,7 +30,6 @@ pub fn view(msg_nav_to: fn(uri.Uri) -> msg) -> List(Element(msg)) {
             "It too is a work in progress and I mostly keep it here for my own reference.",
           ),
         ]),
-
       ]),
     ]),
   ]

@@ -2,8 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"time"
 )
 
@@ -23,12 +24,14 @@ func (s *ExampleService) Run(ctx context.Context) error {
 	<-ctx.Done()
 	fail := time.Now().UnixMicro()%3 == 0
 	if fail {
-		time.Sleep(5 + time.Duration(rand.Intn(10))*time.Second)
+		// Int cannot return an error when using rand.Reader.
+		randInt, _ := rand.Int(rand.Reader, big.NewInt(10))
+		time.Sleep(5 + time.Duration(randInt.Int64())*time.Second)
 		return fmt.Errorf("%s stopped: FAIL", s.name)
 	}
 
 	fmt.Printf("%s stopped: OK\n", s.name)
-	return ctx.Err()
+	return nil
 }
 
 func (s *ExampleService) Name() string {

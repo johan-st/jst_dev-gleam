@@ -56,7 +56,7 @@ func run(
 	var (
 		cleanShutdown = &sync.WaitGroup{}
 	)
-	
+
 	// Create signal context for graceful shutdown
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 	defer cancel()
@@ -230,12 +230,6 @@ func run(
 	svcExample5, _ := service.New(5)
 	service.Run(ctx, cleanShutdown, svcExample5)
 	fmt.Println("Example service started")
-
-	l.Debug("started all services")
-
-	// Give services a moment to start up
-	time.Sleep(100 * time.Millisecond)
-	l.Info("All services are running. Press Ctrl+C to shutdown gracefully.")
 
 	// ------------------------------------------------------------
 	// SHUTDOWN
