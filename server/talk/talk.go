@@ -60,9 +60,9 @@ func EmbeddedServer(
 	}
 
 	go ns.Start()
-	if !ns.ReadyForConnections(4 * time.Second) {
+	if !ns.ReadyForConnections(1 * time.Second) {
 		ns.Shutdown()
-		return nil, fmt.Errorf("NATS server failed to start")
+		return nil, fmt.Errorf("NATS server failed to start. Timeout reached")
 	}
 
 	// Client options
