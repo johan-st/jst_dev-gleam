@@ -19,6 +19,7 @@ import (
 	"jst_dev/server/who"
 
 	"github.com/joho/godotenv"
+	"github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
 )
 
@@ -54,12 +55,14 @@ func run(
 	// getwd func() (string, error), //	Get the working directory
 ) error {
 	var (
-		cleanShutdown = &sync.WaitGroup{}
+		cleanShutdown                 = &sync.WaitGroup{}
+		ns            *server.Server  = nil
+		nc            *nats.Conn      = nil
 	)
 
 	// Create signal context for graceful shutdown
-	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
-	defer cancel()
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
+	defer stop()
 
 	// - conf
 	conf, err := loadConf(getenv)
@@ -73,13 +76,15 @@ func run(
 
 	// - talk
 	l.Debug("starting talk")
-	var nc *nats.Conn
 	if conf.Flags.NatsEmbedded {
-		nc, err = talk.EmbeddedServer(
+		nc, ns, err = talk.EmbeddedServer(
 			context.Background(),
 			conf.Talk,
 			lRoot.WithBreadcrumb("talk"),
 		)
+		if err != nil {
+			return fmt.Errorf("embedded NATS server: %w", err)
+		}
 	} else {
 		l.Info("connecting to nats..")
 		// nc, err = nats.Connect(
@@ -119,15 +124,14 @@ func run(
 	}
 	if err != nil {
 		// Panic on initial connection failure - server cannot function without NATS
-		l.Fatal("Failed to connect to NATS cluster: %v", err)
-		panic(fmt.Sprintf("Failed to connect to NATS cluster: %v", err))
+		l.Fatal("failed to connect to NATS cluster: %v", err)
+		return fmt.Errorf("failed to connect to NATS cluster: %v", err)
 	}
-	defer nc.Close()
 
 	// Verify connection is established
 	if nc.Status() != nats.CONNECTED {
 		l.Fatal("NATS connection not in CONNECTED state: %s", nc.Status())
-		panic(fmt.Sprintf("NATS connection not in CONNECTED state: %s", nc.Status()))
+		return fmt.Errorf("NATS connection not in CONNECTED state: %s", nc.Status())
 	}
 
 	l.Info("Successfully connected to NATS cluster")
@@ -219,40 +223,51 @@ func run(
 	}()
 
 	// - example
-	svcExample1, _ := service.New(1)
-	service.Run(ctx, cleanShutdown, svcExample1)
-	svcExample2, _ := service.New(2)
-	service.Run(ctx, cleanShutdown, svcExample2)
-	svcExample3, _ := service.New(3)
-	service.Run(ctx, cleanShutdown, svcExample3)
-	svcExample4, _ := service.New(4)
-	service.Run(ctx, cleanShutdown, svcExample4)
-	svcExample5, _ := service.New(5)
-	service.Run(ctx, cleanShutdown, svcExample5)
-	fmt.Println("Example service started")
+	if conf.Flags.DebugMode {
+		l.Info("starting example services")
+		svcExample1, _ := service.New(1)
+		service.Run(ctx, cleanShutdown, svcExample1)
+		svcExample2, _ := service.New(2)
+		service.Run(ctx, cleanShutdown, svcExample2)
+		svcExample3, _ := service.New(3)
+		service.Run(ctx, cleanShutdown, svcExample3)
+		svcExample4, _ := service.New(4)
+		service.Run(ctx, cleanShutdown, svcExample4)
+		svcExample5, _ := service.New(5)
+		service.Run(ctx, cleanShutdown, svcExample5)
+		l.Info("Example service started")
+	}
 
 	// ------------------------------------------------------------
 	// SHUTDOWN
 	// ------------------------------------------------------------
-
-	// Wait for interrupt signal to gracefully shut down
 	<-ctx.Done()
-	l.Info("Received interrupt signal, starting graceful shutdown...")
+	fmt.Println("starting graceful shutdown...")
 
-	// Wait for second interrupt for force quit
+	// Wait for all services to cleanly shutdown with timeout
+	shutdownDone := make(chan struct{})
 	go func() {
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, os.Interrupt)
-		<-sigCh
-		fmt.Println("Received second interrupt signal, force quitting...")
-
-		// Sleep for a short time to allow for logging operations to complete
-		time.Sleep(1 * time.Second)
-		os.Exit(1)
+		cleanShutdown.Wait()
+		close(shutdownDone)
 	}()
-
-	// Wait for all services to cleanly shutdown
-	cleanShutdown.Wait()
-	fmt.Println("Server shutdown complete")
+	
+	select {
+	case <-shutdownDone:
+		l.Info("all services shutdown gracefully")
+	case <-time.After(10 * time.Second):
+		l.Warn("shutdown timeout reached, forcing shutdown")
+	}
+	
+	// Close NATS connection with flush timeout
+	nc.FlushTimeout(5 * time.Second)
+	nc.Close()
+	
+	// Shutdown embedded NATS server if running (after connection is closed)
+	if ns != nil {
+		ns.Shutdown()
+		ns.WaitForShutdown()
+	}
+	
+	fmt.Println("shutdown complete")
 	return nil
 }

@@ -3,7 +3,6 @@ package jst_log
 
 import (
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -124,8 +123,6 @@ func (l *Logger) Error(msg string, args ...any) {
 
 func (l *Logger) Fatal(msg string, args ...any) {
 	l.log(Fatal, msg, args...)
-	<-time.After(1 * time.Second)
-	os.Exit(1)
 }
 
 func (l *Logger) log(level Level, msg string, args ...any) {
@@ -160,8 +157,7 @@ func (l *Logger) log(level Level, msg string, args ...any) {
 
 	// Publish the message
 	if err := l.nc.PublishMsg(m); err != nil {
-		// If we can't publish, print to stderr as fallback
-		fmt.Printf("Failed to publish log message: %v\n", err)
+		fmt.Printf("[local log, nats error] %s\n", msg)
 	}
 }
 

@@ -183,7 +183,7 @@ func (w *Who) Run(ctx context.Context) error {
 	}
 
 	w.l.Info("who service stopped")
-	return ctx.Err()
+	return nil
 }
 
 // Name returns the service name for identification

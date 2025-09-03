@@ -112,7 +112,7 @@ func (n *Ntfy) Run(ctx context.Context) error {
 	}
 
 	n.l.Info("ntfy service stopped")
-	return ctx.Err()
+	return nil
 }
 
 // Name returns the service name for identification

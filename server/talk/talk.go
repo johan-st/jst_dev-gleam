@@ -24,7 +24,7 @@ func EmbeddedServer(
 	ctx context.Context,
 	conf Conf,
 	l *jst_log.Logger,
-) (*nats.Conn, error) {
+) (*nats.Conn, *server.Server, error) {
 	var (
 		err        error
 		serverOpts *server.Options
@@ -33,7 +33,7 @@ func EmbeddedServer(
 		nc         *nats.Conn
 	)
 	if l == nil {
-		return nil, fmt.Errorf("logger can not be nil")
+		return nil, nil, fmt.Errorf("logger can not be nil")
 	}
 
 	// Server
@@ -47,22 +47,22 @@ func EmbeddedServer(
 		JetStreamDomain: "jet",
 		JetStream:       true,
 		StoreDir:        "./data",
+		NoSigs: true,
 	}
 	ns, err = server.NewServer(serverOpts)
 	if err != nil {
-		return nil, fmt.Errorf("new NATS server: %w", err)
+		return nil, nil, fmt.Errorf("new NATS server: %w", err)
 	}
 	if conf.EnableLogging {
 		ns.ConfigureLogger()
 	}
 	if ctx == nil {
-		return nil, fmt.Errorf("context is nil")
+		return nil, nil, fmt.Errorf("context is nil")
 	}
 
 	go ns.Start()
 	if !ns.ReadyForConnections(1 * time.Second) {
-		ns.Shutdown()
-		return nil, fmt.Errorf("NATS server failed to start. Timeout reached")
+		return nil, nil, fmt.Errorf("NATS server failed to be ready for connections. Timeout reached")
 	}
 
 	// Client options
@@ -74,20 +74,15 @@ func EmbeddedServer(
 	// Connect to server
 	nc, err = nats.Connect(ns.ClientURL(), clientOpts...)
 	if err != nil {
-		return nil, fmt.Errorf("connect to NATS: %w", err)
+		return nil, nil, fmt.Errorf("connect to NATS: %w", err)
 	}
-
-	go func() {
-		<-ctx.Done()
-		ns.Shutdown()
-	}()
 
 	err = subscriptions(nc, l)
 	if err != nil {
-		return nil, fmt.Errorf("subscriptions: %w", err)
+		return nil, nil, fmt.Errorf("subscriptions: %w", err)
 	}
 
-	return nc, nil
+	return nc, ns, nil
 }
 
 // subscriptions registers NATS message handlers for "ping" and "stats" subjects on the provided connection.

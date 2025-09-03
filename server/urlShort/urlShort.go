@@ -126,17 +126,12 @@ func (s *ShortUrlService) Run(ctx context.Context) error {
 	}
 
 	s.l.Info("short url service stopped")
-	return ctx.Err()
+	return nil
 }
 
 // Name returns the service name for identification
 func (s *ShortUrlService) Name() string {
 	return "shorturl"
-}
-
-// Start is deprecated - use Run instead
-func (s *ShortUrlService) Start(ctx context.Context) error {
-	return s.Run(ctx)
 }
 
 // ----------- WATCHERS -----------

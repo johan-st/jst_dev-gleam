@@ -8,7 +8,6 @@ import (
 	"jst_dev/server/talk"
 )
 
-// TODO: think this through.. atm all we need is an app name
 type GlobalConfig struct {
 	NatsJWT      string
 	NatsNKEY     string
@@ -27,6 +26,7 @@ type GlobalConfig struct {
 
 type Flags struct {
 	NatsEmbedded  bool
+	DebugMode     bool
 	ProxyFrontend bool
 	LogLevel      string
 	SlowSocket    time.Duration
@@ -35,14 +35,17 @@ type Flags struct {
 // loadConf returns a GlobalConfig instance with default settings for the talk component.
 func loadConf(getenv func(string) string) (*GlobalConfig, error) {
 	var (
-		natsEmbedded, proxyFrontend bool
-		logLevel                    string
-		slowSocket                  time.Duration
+		natsEmbedded  bool
+		proxyFrontend bool
+		debugMode     bool
+		logLevel      string
+		slowSocket    time.Duration
 	)
 	flag.BoolVar(&natsEmbedded, "local", false, "run an embedded nats server")
 	flag.BoolVar(&proxyFrontend, "proxy", false, "proxy frontend to dev server")
 	flag.StringVar(&logLevel, "log", "info", "set log level (debug, info, warn, error, fatal)")
 	flag.DurationVar(&slowSocket, "slow", 0, "add sleep delay to socket sends (e.g., 100ms, 1s)")
+	flag.BoolVar(&debugMode, "debug", false, "enable debug mode")
 	flag.Parse()
 
 	envNatsJwt := getenv("NATS_JWT")
@@ -70,6 +73,21 @@ func loadConf(getenv func(string) string) (*GlobalConfig, error) {
 		log.Fatalf("missing env-var: PORT")
 	}
 
+	appName := getenv("FLY_APP_NAME")
+	if appName == "" {
+		log.Fatalf("missing env-var: FLY_APP_NAME")
+	}
+
+	region := getenv("FLY_REGION")
+	if region == "" {
+		log.Fatalf("missing env-var: FLY_REGION")
+	}
+
+	primaryRegion := getenv("PRIMARY_REGION")
+	if primaryRegion == "" {
+		log.Fatalf("missing env-var: PRIMARY_REGION")
+	}
+
 	// NTFY_TOKEN is optional
 	envNtfyToken := getenv("NTFY_TOKEN")
 	if envNtfyToken == "" {
@@ -84,9 +102,9 @@ func loadConf(getenv func(string) string) (*GlobalConfig, error) {
 		WebPort:      envPort,
 		NtfyToken:    envNtfyToken,
 
-		AppName:       getenv("FLY_APP_NAME"),
-		Region:        getenv("FLY_REGION"),
-		PrimaryRegion: getenv("PRIMARY_REGION"),
+		AppName:       appName,
+		Region:        region,
+		PrimaryRegion: primaryRegion,
 		Talk: talk.Conf{
 			ServerName:        "jst",
 			EnableLogging:     false,
@@ -97,6 +115,7 @@ func loadConf(getenv func(string) string) (*GlobalConfig, error) {
 			ProxyFrontend: proxyFrontend,
 			LogLevel:      logLevel,
 			SlowSocket:    slowSocket,
+			DebugMode:     debugMode,
 		},
 	}
 

@@ -70,35 +70,45 @@ func (s *httpServer) GetMux() *http.ServeMux {
 
 // Run implements the service.Service interface
 // The service runs until the context is cancelled, then performs cleanup
+// Only returns after the server stops
 func (s *httpServer) Run(ctx context.Context) error {
-	httpServer := &http.Server{
-		Addr:              net.JoinHostPort("0.0.0.0", "8080"),
-		Handler:           s.handler, // Use the wrapped handler instead of s.mux
-		ReadHeaderTimeout: 20 * time.Second,
-	}
+	var (
+		fatalChan  = make(chan error)
+		httpServer = &http.Server{
+			Addr:              net.JoinHostPort("0.0.0.0", "8080"),
+			Handler:           s.handler,
+			ReadHeaderTimeout: 20 * time.Second,
+		}
+	)
 
 	// Start server in background
-	go func() {
+	go func(killChan <-chan error) {
 		s.l.Info("listening on %s", httpServer.Addr)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			s.l.Error("error listening and serving: %s", err)
+			fatalChan <- err
 		}
-	}()
+	}(fatalChan)
 
-	// Wait for context cancellation
-	<-ctx.Done()
+	// Wait for context cancellation or fatal error
+	select {
+	case err := <-fatalChan:
+		s.l.Fatal("error listening and serving: %s", err)
+		return err
+	case <-ctx.Done():
+		s.l.Info("http server stopping...")
+		//TODO: we should consider moving the timeout to a stop method on this struct.
+		//      That way we can control the timeout from the orchestrating main func
 
-	// Cleanup
-	s.l.Info("http server stopping...")
-	shutdownCtx := context.Background()
-	shutdownCtx, cancel := context.WithTimeout(shutdownCtx, 10*time.Second)
-	defer cancel()
-	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		s.l.Error("error shutting down http server: %s\n", err)
+		shutdownCtx := context.Background()
+		shutdownCtx, cancel := context.WithTimeout(shutdownCtx, 10*time.Second)
+		defer cancel()
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			s.l.Error("error shutting down http server: %s\n", err)
+		}
+		s.l.Info("http server stopped")
+		return nil
 	}
-
-	s.l.Info("http server stopped")
-	return ctx.Err()
 }
 
 // Name returns the service name for identification
