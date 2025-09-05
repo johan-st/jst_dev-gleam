@@ -16,6 +16,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"jst_dev/server/articles"
+	convoApi "jst_dev/server/convo/api"
 	"jst_dev/server/jst_log"
 	"jst_dev/server/ntfy"
 	shortUrlApi "jst_dev/server/urlShort/api"
@@ -72,6 +73,10 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 		mux.Handle("GET /dev/seed", handleSeed(l, repo))   // TODO: remove this
 		mux.Handle("GET /dev/purge", handlePurge(l, repo)) // TODO: remove this
 		mux.Handle("/", handleProxy(l.WithBreadcrumb("proxy_frontend"), "http://127.0.0.1:1234"))
+
+		// convo
+		mux.Handle("POST /convo/room", handleConvoRoom(l, nc))
+		mux.Handle("POST /convo/room/{room_id}", handleConvoMessage(l, nc))
 	} else {
 		mux.Handle("GET /", handleStaticFsFile(l, embeddedFS, "index.html"))
 		mux.Handle("GET /static/", handleStaticFs(l, embeddedFS))
@@ -1536,6 +1541,109 @@ func handleNotificationSend(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 			Message: "Notification sent successfully",
 			ID:      notification.ID,
 		}, http.StatusOK)
+	})
+}
+
+func handleConvoRoom(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+	logger := l.WithBreadcrumb("convo_room")
+	logger.Debug("ready")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Debug("called")
+
+		// Get user from context
+		// user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		// if !ok {
+		// 	logger.Warn("user not found in context")
+		// 	http.Error(w, "unauthorized", http.StatusUnauthorized)
+		// 	return
+		// }
+
+		// Create request
+		req := convoApi.RoomCreateRequest{
+			Public: true,
+			Users:  []string{"3f179150-0463-4f3c-8ce3-a18f71d28102"},
+		}
+		reqBytes, err := json.Marshal(req)
+		if err != nil {
+			logger.Error("failed to marshal request: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Send request to convo service
+		msg, err := nc.Request(convoApi.SubjConvoGroup+"."+convoApi.SubjRoomCreate, reqBytes, 5*time.Second)
+		if err != nil {
+			logger.Error("failed to create room: %v", err)
+			http.Error(w, "failed to create room", http.StatusInternalServerError)
+			return
+		}
+
+		// Check for service errors
+		if msg.Header.Get("Nats-Service-Error") != "" {
+			errorCode := msg.Header.Get("Nats-Service-Error-Code")
+			if errorCode == "400" {
+				http.Error(w, string(msg.Data), http.StatusBadRequest)
+				return
+			}
+			return
+		}
+	})
+}
+func handleConvoMessage(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+	type Req struct {
+		SessionID string `json:"session_id"` //TODO: implement session id
+		Message   string `json:"message"`
+	}
+
+	logger := l.WithBreadcrumb("convo_message")
+	logger.Debug("ready")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var (
+			req      Req
+			user     whoApi.User
+			convoMsg convoApi.Message
+		)
+		logger.Debug("called")
+
+		roomId := r.PathValue("room_id")
+		if roomId == "" {
+			http.Error(w, "room id is required", http.StatusBadRequest)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			logger.Error("failed to decode request: %v", err)
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		if req.Message == "" {
+			http.Error(w, "message is required", http.StatusBadRequest)
+			return
+		}
+		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		if !ok {
+			http.Error(w, "user not found", http.StatusUnauthorized)
+			return
+		}
+		if user.ID == "" {
+			http.Error(w, "user id is required", http.StatusBadRequest)
+			return
+		}
+
+		convoMsg = convoApi.Message{
+			User:      user.ID,
+			Content:   req.Message,
+			Room:      roomId,
+			Timestamp: time.Now(),
+		}
+		err := convoApi.MessagePub(nc, convoMsg)
+		if err != nil {
+			logger.Error("failed to publish message: %v", err)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+		respJson(w, "message sent", http.StatusOK)
 	})
 }
 

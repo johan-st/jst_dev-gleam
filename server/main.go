@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"jst_dev/server/articles"
+	"jst_dev/server/convo"
+	convoApi "jst_dev/server/convo/api"
 	"jst_dev/server/jst_log"
 	"jst_dev/server/ntfy"
 	"jst_dev/server/service"
@@ -55,9 +57,9 @@ func run(
 	// getwd func() (string, error), //	Get the working directory
 ) error {
 	var (
-		cleanShutdown                 = &sync.WaitGroup{}
-		ns            *server.Server  = nil
-		nc            *nats.Conn      = nil
+		cleanShutdown                = &sync.WaitGroup{}
+		ns            *server.Server = nil
+		nc            *nats.Conn     = nil
 	)
 
 	// Create signal context for graceful shutdown
@@ -196,6 +198,17 @@ func run(
 		return fmt.Errorf("new articles: %w", err)
 	}
 
+	// - convo
+	l.Debug("starting convo")
+	convoSvc, err := convo.New(&convo.Conf{
+		Logger:   lRoot.WithBreadcrumb("convo"),
+		NatsConn: nc,
+	})
+	if err != nil {
+		return fmt.Errorf("new convo: %w", err)
+	}
+	service.Run(ctx, cleanShutdown, convoSvc)
+
 	// - web
 	l.Debug("http server, start")
 	httpServer := web.New(ctx, nc, conf.WebJwtSecret, lRoot.WithBreadcrumb("http"), articleRepo, conf.Flags.ProxyFrontend, conf.Flags.SlowSocket)
@@ -238,11 +251,27 @@ func run(
 		l.Info("Example service started")
 	}
 
+	// - convo message DEBUG
+	msgChan, closeSub, err := convoApi.MessageSub(nc, l.WithBreadcrumb("convo-message"), "0442bf5b-10c8-482f-9d0b-769c3f2e3f3a")
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to messages: %w", err)
+	}
+	go func() {
+		time.Sleep(1 * time.Second)
+		l.Debug("subscribed to messages")
+		for msg := range msgChan {
+			l.Debug("message received: %v", msg)
+		}
+		l.Debug("unsubscribed from messages")
+	}()
+
 	// ------------------------------------------------------------
 	// SHUTDOWN
 	// ------------------------------------------------------------
 	<-ctx.Done()
 	fmt.Println("starting graceful shutdown...")
+
+	closeSub()
 
 	// Wait for all services to cleanly shutdown with timeout
 	shutdownDone := make(chan struct{})
@@ -250,24 +279,24 @@ func run(
 		cleanShutdown.Wait()
 		close(shutdownDone)
 	}()
-	
+
 	select {
 	case <-shutdownDone:
 		l.Info("all services shutdown gracefully")
 	case <-time.After(10 * time.Second):
 		l.Warn("shutdown timeout reached, forcing shutdown")
 	}
-	
+
 	// Close NATS connection with flush timeout
 	nc.FlushTimeout(5 * time.Second)
 	nc.Close()
-	
+
 	// Shutdown embedded NATS server if running (after connection is closed)
 	if ns != nil {
 		ns.Shutdown()
 		ns.WaitForShutdown()
 	}
-	
+
 	fmt.Println("shutdown complete")
 	return nil
 }

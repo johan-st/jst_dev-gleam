@@ -13,7 +13,7 @@ import (
 
 func BenchmarkMessagingInProcess(b *testing.B) {
 	// Initialize nats
-	nc, err := talk.EmbeddedServer(
+	nc, _, err := talk.EmbeddedServer(
 		context.Background(),
 		talk.Conf{
 			ServerName:        "test",
@@ -42,7 +42,7 @@ func BenchmarkMessagingInProcess(b *testing.B) {
 
 func BenchmarkMessagingLoopback(b *testing.B) {
 	// Initialize nats
-	nc, err := talk.EmbeddedServer(
+	nc, _, err := talk.EmbeddedServer(
 		context.Background(),
 		talk.Conf{
 			ServerName:        "test",

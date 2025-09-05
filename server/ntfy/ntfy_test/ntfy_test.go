@@ -47,7 +47,7 @@ func TestNtfy(t *testing.T) {
 
 func setup() (*nats.Conn, func(), error) {
 	// Start embedded NATS server using talk package
-	nc, err := talk.EmbeddedServer(
+	nc, _, err := talk.EmbeddedServer(
 		context.Background(),
 		talk.Conf{
 			ServerName:        "test-server-ntfy",

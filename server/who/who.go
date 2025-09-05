@@ -374,8 +374,8 @@ func (w *Who) handleUserGet() micro.HandlerFunc {
 		if reqData.ID != "" {
 			user = w.userGet(reqData.ID)
 			if user == nil {
-				l.Warn(fmt.Sprintf("error getting user: %s", err.Error()))
-				if err := req.Error("SERVER_ERROR", "server error while getting user", []byte(err.Error())); err != nil {
+				l.Warn(fmt.Sprintf("error getting user with id: %s", reqData.ID))
+				if err := req.Error("SERVER_ERROR", "server error while getting user", []byte("error getting user with id: "+reqData.ID)); err != nil {
 					l.Error("failed to respond to user get request: %v", err)
 				}
 				return
@@ -383,8 +383,8 @@ func (w *Who) handleUserGet() micro.HandlerFunc {
 		} else if reqData.Email != "" {
 			user = w.userByEmail(reqData.Email)
 			if user == nil {
-				l.Warn(fmt.Sprintf("user not found: %s", reqData.Email))
-				if err := req.Error("USER_NOT_FOUND", "user not found", []byte(reqData.Email)); err != nil {
+				l.Warn(fmt.Sprintf("error getting user with email: %s", reqData.Email))
+				if err := req.Error("USER_NOT_FOUND", "user not found", []byte("error getting user with email: "+reqData.Email)); err != nil {
 					l.Error("failed to respond to user get request: %v", err)
 				}
 				return
@@ -392,20 +392,12 @@ func (w *Who) handleUserGet() micro.HandlerFunc {
 		} else if reqData.Username != "" {
 			user = w.userByUsername(reqData.Username)
 			if user == nil {
-				l.Warn(fmt.Sprintf("user not found: %s", reqData.Username))
-				if err := req.Error("USER_NOT_FOUND", "user not found", []byte(reqData.Username)); err != nil {
+				l.Warn(fmt.Sprintf("error getting user with username: %s", reqData.Username))
+				if err := req.Error("USER_NOT_FOUND", "user not found", []byte("error getting user with username: "+reqData.Username)); err != nil {
 					l.Error("failed to respond to user get request: %v", err)
 				}
 				return
 			}
-		}
-
-		if err != nil {
-			l.Warn(fmt.Sprintf("user not found: %s", reqData.ID))
-			if err := req.Error("USER_NOT_FOUND", "user not found", []byte(reqData.ID)); err != nil {
-				l.Error("failed to respond to user get request: %v", err)
-			}
-			return
 		}
 		respData = api.UserFullResponse{
 			ID:          user.ID,
