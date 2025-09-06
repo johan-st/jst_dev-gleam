@@ -1,0 +1,17 @@
+meta {
+  name: send message
+  type: http
+  seq: 2
+}
+
+post {
+  url: http://localhost:8080/convo/room/96cfb2e8-b626-485f-964b-3d8f930797ae
+  body: json
+  auth: inherit
+}
+
+body:json {
+  { 
+    "message":"hello moto"
+  }
+}

@@ -215,25 +215,49 @@ func run(
 	service.Run(ctx, cleanShutdown, httpServer)
 
 	// - time ticker publisher (NATS core)
-	go func() {
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case t := <-ticker.C:
-				// Get Fly.io environment variables
-				flyAppName := os.Getenv("FLY_APP_NAME")
-				flyRegion := os.Getenv("FLY_REGION")
+	if conf.Region != "local" {
+		go func() {
+			ticker := time.NewTicker(5 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case t := <-ticker.C:
+					// Get Fly.io environment variables
+					flyAppName := os.Getenv("FLY_APP_NAME")
+					flyRegion := os.Getenv("FLY_REGION")
+					flyPrimaryRegion := os.Getenv("PRIMARY_REGION")
 
-				// Create payload with Fly.io identifiers
-				payload := fmt.Sprintf(`{"unixMilli": %d, "fly_app_name": "%s", "fly_region": "%s"}`,
-					t.UnixMilli(), flyAppName, flyRegion)
-				_ = nc.Publish("time.seconds", []byte(payload))
+					// Create payload with Fly.io identifiers
+					payload := fmt.Sprintf(`{"unixMilli": %d, "fly_app_name": "%s", "fly_region": "%s", "fly_primary_region": "%s"}`,
+						t.UnixMilli(), flyAppName, flyRegion, flyPrimaryRegion)
+					_ = nc.Publish("time.seconds", []byte(payload))
+				}
 			}
-		}
-	}()
+		}()
+	}
+
+	if conf.Region == "local" {
+		go func() {
+			ticker := time.NewTicker(5 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					// convo_message.0442bf5b-10c8-482f-9d0b-769c3f2e3f3a
+					convoApi.MessagePub(nc, convoApi.Message{
+						User:        "test",
+						Content:     "test",
+						Room:        "0442bf5b-10c8-482f-9d0b-769c3f2e3f3a",
+						TimestampMs: (int)(time.Now().UnixMilli()),
+					})
+				}
+			}
+		}()
+	}
 
 	// - example
 	if conf.Flags.DebugMode {
@@ -251,27 +275,13 @@ func run(
 		l.Info("Example service started")
 	}
 
-	// - convo message DEBUG
-	msgChan, closeSub, err := convoApi.MessageSub(nc, l.WithBreadcrumb("convo-message"), "0442bf5b-10c8-482f-9d0b-769c3f2e3f3a")
-	if err != nil {
-		return fmt.Errorf("failed to subscribe to messages: %w", err)
-	}
-	go func() {
-		time.Sleep(1 * time.Second)
-		l.Debug("subscribed to messages")
-		for msg := range msgChan {
-			l.Debug("message received: %v", msg)
-		}
-		l.Debug("unsubscribed from messages")
-	}()
-
 	// ------------------------------------------------------------
 	// SHUTDOWN
 	// ------------------------------------------------------------
 	<-ctx.Done()
 	fmt.Println("starting graceful shutdown...")
 
-	closeSub()
+	// closeSub()
 
 	// Wait for all services to cleanly shutdown with timeout
 	shutdownDone := make(chan struct{})

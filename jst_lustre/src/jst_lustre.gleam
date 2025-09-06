@@ -3,7 +3,7 @@
 import article.{type Article, ArticleV1}
 import birl
 import gleam/dict.{type Dict}
-import gleam/dynamic/decode
+import gleam/dynamic/decode.{type Decoder}
 import gleam/int
 import gleam/json
 import gleam/list
@@ -18,6 +18,7 @@ import gleam/set.{type Set}
 import gleam/string
 import gleam/uri.{type Uri}
 
+import chat
 import keyboard as key
 import lustre
 import lustre/attribute.{type Attribute} as attr
@@ -49,6 +50,8 @@ import view/page
 import view/page/about
 import view/page/article as view_article
 import view/page/article_list
+import view/page/chat_index
+import view/page/chat_room
 import view/page/debug as page_debug
 import view/page/index
 import view/page/url_index
@@ -102,9 +105,12 @@ type Model {
     ws: Option(ws.WebSocket),
     article_kv: sync.KV(String, article.Article),
     short_url_kv: sync.KV(String, short_url.ShortUrl),
+    chat_room_kv: sync.KV(String, chat.ChatRoom),
+    chat_message_subscription: sync.Subscription(chat.ChatMessage),
+    chat_user_name: Option(String),
+    sub_time: sync.Subscription(chat.TimeMsg),
     short_url_form_short_code: String,
     short_url_form_target_url: String,
-    // realtime_time: String,
   )
 }
 
@@ -213,6 +219,11 @@ pub type Msg {
   DebugWsDoConnect
   DebugStatus(String)
 
+  // Chat Request
+  ChatRequestClicked
+  ChatRequestResponse(Result(String, HttpError))
+  ChatUserNameSet(String)
+
   // Sync
   WebSocketMsg(ws.WebSocketEvent)
 }
@@ -275,7 +286,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
                   ..model,
                   debug_use_local_storage: True,
                   article_kv: model.article_kv
-                    |> sync.set_data(
+                    |> sync.kv_set_data(
                       articles
                       |> list.map(fn(article) { #(article.id, article) })
                       |> dict.from_list,
@@ -377,7 +388,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             Model(
               ..model,
               article_kv: model.article_kv
-                |> sync.set_data(
+                |> sync.kv_set_data(
                   dict.from_list(
                     list.map(articles, fn(article) { #(article.id, article) }),
                   ),
@@ -404,7 +415,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           let model =
             Model(
               ..model,
-              article_kv: model.article_kv |> sync.set_data(updated_articles),
+              article_kv: model.article_kv |> sync.kv_set_data(updated_articles),
             )
           #(model, effect.none())
         }
@@ -444,7 +455,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             Model(
               ..model,
               article_kv: model.article_kv
-                |> sync.set_data(dict.insert(
+                |> sync.kv_set_data(dict.insert(
                   model.article_kv.data,
                   article.id,
                   updated_article,
@@ -467,7 +478,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(
         Model(
           ..model,
-          article_kv: model.article_kv |> sync.set_data(updated_articles),
+          article_kv: model.article_kv |> sync.kv_set_data(updated_articles),
         ),
         effect.none(),
       )
@@ -483,7 +494,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(
         Model(
           ..model,
-          article_kv: model.article_kv |> sync.set_data(updated_articles),
+          article_kv: model.article_kv |> sync.kv_set_data(updated_articles),
         ),
         effect.none(),
       )
@@ -499,7 +510,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(
         Model(
           ..model,
-          article_kv: model.article_kv |> sync.set_data(updated_articles),
+          article_kv: model.article_kv |> sync.kv_set_data(updated_articles),
         ),
         effect.none(),
       )
@@ -513,7 +524,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         Model(
           ..model,
           article_kv: model.article_kv
-            |> sync.set_data(dict.insert(
+            |> sync.kv_set_data(dict.insert(
               model.article_kv.data,
               article.id,
               updated_article,
@@ -531,7 +542,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(
         Model(
           ..model,
-          article_kv: model.article_kv |> sync.set_data(updated_articles),
+          article_kv: model.article_kv |> sync.kv_set_data(updated_articles),
         ),
         modem.push(
           page.to_uri(page.PageArticle(article, model.session))
@@ -561,7 +572,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           #(
             Model(
               ..model,
-              article_kv: model.article_kv |> sync.set_data(updated_articles),
+              article_kv: model.article_kv |> sync.kv_set_data(updated_articles),
             ),
             effect.batch([
               article.article_update(
@@ -590,7 +601,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           #(
             Model(
               ..model,
-              article_kv: model.article_kv |> sync.set_data(updated_articles),
+              article_kv: model.article_kv |> sync.kv_set_data(updated_articles),
             ),
             effect.none(),
           )
@@ -709,11 +720,38 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         Error(_err) -> #(model, effect.none())
       }
     }
-    // CHAT
-    // ChatMsg(msg) -> {
-    //   let #(chat_model, chat_effect) = chat.update(msg, model.chat)
-    //   #(Model(..model, chat: chat_model), effect.map(chat_effect, ChatMsg))
-    // }
+    // CHAT REQUEST
+    ChatRequestClicked -> {
+      #(
+        model,
+        effect.map(chat.request_chat(), fn(chat_msg) {
+          case chat_msg {
+            chat.ChatRequestCreated(room_id) -> ChatRequestResponse(Ok(room_id))
+            chat.ChatRequestFailed(_error) ->
+              ChatRequestResponse(Error(http.NetworkError))
+            chat.RequestChat -> ChatRequestResponse(Error(http.NetworkError))
+          }
+        }),
+      )
+    }
+    ChatRequestResponse(result) -> {
+      case result {
+        Ok(room_id) -> {
+          let chat_route = routes.ChatRoom(room_id)
+          let uri = routes.to_uri(chat_route)
+          #(model, modem.push(uri.to_string(uri), None, None))
+        }
+        Error(_err) -> {
+          #(
+            Model(..model, notice: "Failed to create chat request"),
+            effect.none(),
+          )
+        }
+      }
+    }
+    ChatUserNameSet(name) -> {
+      #(Model(..model, chat_user_name: Some(name)), effect.none())
+    }
     // DJOT DEMO
     DjotDemoContentUpdated(content) -> {
       #(Model(..model, djot_demo_content: content), effect.none())
@@ -766,7 +804,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           #(
             Model(
               ..model,
-              article_kv: model.article_kv |> sync.set_data(updated_articles),
+              article_kv: model.article_kv |> sync.kv_set_data(updated_articles),
             ),
             // Navigate to edit the newly created article
             modem.push(
@@ -827,7 +865,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
           #(
             Model(
               ..model,
-              article_kv: model.article_kv |> sync.set_data(updated_articles),
+              article_kv: model.article_kv |> sync.kv_set_data(updated_articles),
             ),
             effect.none(),
           )
@@ -892,7 +930,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             Model(
               ..model,
               short_url_kv: model.short_url_kv
-                |> sync.set_data(dict.insert(
+                |> sync.kv_set_data(dict.insert(
                   model.short_url_kv.data,
                   short_url.id,
                   short_url,
@@ -940,7 +978,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             Model(
               ..model,
               short_url_kv: model.short_url_kv
-                |> sync.set_data(updated_short_urls),
+                |> sync.kv_set_data(updated_short_urls),
             ),
             modem.push(
               uri.to_string(routes.to_uri(routes.UrlShortIndex)),
@@ -996,7 +1034,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
             Model(
               ..model,
               short_url_kv: model.short_url_kv
-                |> sync.set_data(updated_short_urls),
+                |> sync.kv_set_data(updated_short_urls),
             ),
             effect.none(),
           )
@@ -1230,34 +1268,6 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     // Debug realtime messages
     DebugWsOpen(_sock) -> {
       #(model, effect.none())
-      // #(
-      //   Model(
-      //     ..model,
-      //     debug_connected: True,
-      //     debug_ws_retries: 0,
-      //     debug_ws_status: "Connected",
-      //   ),
-      //   effect.batch([
-      //     ws.send(
-      //       sock,
-      //       json.to_string(
-      //         json.object([
-      //           #("op", json.string("sub")),
-      //           #("target", json.string("time.seconds")),
-      //         ]),
-      //       ),
-      //     ),
-      //     ws.send(
-      //       sock,
-      //       json.to_string(
-      //         json.object([
-      //           #("op", json.string("kv_sub")),
-      //           #("target", json.string("article")),
-      //         ]),
-      //       ),
-      //     ),
-      //   ]),
-      // )
     }
     DebugWsClosed -> #(
       Model(..model, debug_connected: False, debug_ws_status: "Disconnected"),
@@ -1347,22 +1357,71 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     WebSocketMsg(msg) -> {
       case msg {
         ws.OnTextMessage(text) -> {
-          let #(kv_article, effect_article) =
-            sync.ws_text_message(model.article_kv, text)
-          let #(kv_short_url, effect_short_url) =
-            sync.ws_text_message(model.short_url_kv, text)
-          let model =
-            Model(..model, article_kv: kv_article, short_url_kv: kv_short_url)
-          let effect = effect.batch([effect_article, effect_short_url])
-          #(model, effect)
+          case json.parse(from: text, using: sync.decoder_envelope()) {
+            Ok(sync.Envelope("sub_msg", "time.seconds", body:)) -> {
+              let sub = model.sub_time |> sync.sub_ws_text_message(body)
+              #(Model(..model, sub_time: sub), effect.none())
+            }
+            Ok(sync.Envelope("sub_msg", "convo_message.*", body:)) -> {
+              let sub =
+                model.chat_message_subscription
+                |> sync.sub_ws_text_message(body)
+              #(Model(..model, chat_message_subscription: sub), effect.none())
+            }
+            Ok(sync.Envelope("kv_msg", "article", body:)) -> {
+              let #(kv, effect) =
+                model.article_kv |> sync.kv_ws_text_message(body)
+              #(Model(..model, article_kv: kv), effect)
+            }
+            Ok(sync.Envelope("kv_msg", "url_short", body:)) -> {
+              let #(kv, effect) =
+                model.short_url_kv |> sync.kv_ws_text_message(body)
+              #(Model(..model, short_url_kv: kv), effect)
+            }
+            Ok(sync.Envelope("kv_msg", "convo_room", body:)) -> {
+              let #(kv, effect) =
+                model.chat_room_kv |> sync.kv_ws_text_message(body)
+              #(Model(..model, chat_room_kv: kv), effect)
+            }
+            Error(errors) -> {
+              echo "Error parsing envelope"
+              echo errors
+              #(model, effect.none())
+            }
+            Ok(sync.Envelope(op, target, body: body)) -> {
+              echo "Unknown envelope"
+              echo "op: " <> op <> ", target: " <> target
+              echo body
+              #(model, effect.none())
+            }
+          }
         }
         ws.InvalidUrl -> {
           let kv_article =
             sync.KV(..model.article_kv, state: sync.KVError("Invalid URL"))
           let kv_short_url =
             sync.KV(..model.short_url_kv, state: sync.KVError("Invalid URL"))
+          let sub_time =
+            sync.Subscription(
+              ..model.sub_time,
+              state: sync.KVError("Invalid URL"),
+            )
+          let kv_chat_room =
+            sync.KV(..model.chat_room_kv, state: sync.KVError("Invalid URL"))
+          let sub_chat_message =
+            sync.Subscription(
+              ..model.chat_message_subscription,
+              state: sync.KVError("Invalid URL"),
+            )
           #(
-            Model(..model, article_kv: kv_article, short_url_kv: kv_short_url),
+            Model(
+              ..model,
+              article_kv: kv_article,
+              short_url_kv: kv_short_url,
+              chat_room_kv: kv_chat_room,
+              chat_message_subscription: sub_chat_message,
+              sub_time: sub_time,
+            ),
             effect.none(),
           )
         }
@@ -1377,27 +1436,88 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
               ..model.short_url_kv,
               state: sync.KVError("Binary message not supported"),
             )
+          let sub_time =
+            sync.Subscription(
+              ..model.sub_time,
+              state: sync.KVError("Binary message not supported"),
+            )
+          let kv_chat_room =
+            sync.KV(
+              ..model.chat_room_kv,
+              state: sync.KVError("Binary message not supported"),
+            )
+          let sub_chat_message =
+            sync.Subscription(
+              ..model.chat_message_subscription,
+              state: sync.KVError("Binary message not supported"),
+            )
           #(
-            Model(..model, article_kv: kv_article, short_url_kv: kv_short_url),
+            Model(
+              ..model,
+              article_kv: kv_article,
+              short_url_kv: kv_short_url,
+              chat_room_kv: kv_chat_room,
+              chat_message_subscription: sub_chat_message,
+              sub_time: sub_time,
+            ),
             effect.none(),
           )
         }
         ws.OnClose(reason) -> {
-          let #(kv_article, effect) = sync.ws_close(model.article_kv, reason)
+          let #(kv_article, effect) = sync.kv_ws_close(model.article_kv, reason)
           let #(kv_short_url, effect_short_url) =
-            sync.ws_close(model.short_url_kv, reason)
+            sync.kv_ws_close(model.short_url_kv, reason)
+          let #(sub_time, effect_sub_time) =
+            sync.sub_ws_close(model.sub_time, reason)
+          let #(kv_chat_room, effect_chat_room) =
+            sync.kv_ws_close(model.chat_room_kv, reason)
+          let #(sub_chat_message, effect_chat_message) =
+            sync.sub_ws_close(model.chat_message_subscription, reason)
           let model =
-            Model(..model, article_kv: kv_article, short_url_kv: kv_short_url)
-          let effect = effect.batch([effect, effect_short_url])
+            Model(
+              ..model,
+              article_kv: kv_article,
+              short_url_kv: kv_short_url,
+              chat_room_kv: kv_chat_room,
+              chat_message_subscription: sub_chat_message,
+              sub_time: sub_time,
+            )
+          let effect =
+            effect.batch([
+              effect,
+              effect_short_url,
+              effect_sub_time,
+              effect_chat_room,
+              effect_chat_message,
+            ])
           #(model, effect)
         }
         ws.OnOpen(w) -> {
-          let #(kv_article, effect) = sync.ws_open(model.article_kv, w)
+          let #(kv_article, effect) = sync.kv_ws_open(model.article_kv, w)
           let #(kv_short_url, effect_short_url) =
-            sync.ws_open(model.short_url_kv, w)
+            sync.kv_ws_open(model.short_url_kv, w)
+          let #(sub_time, effect_sub_time) = sync.sub_ws_open(model.sub_time, w)
+          let #(kv_chat_room, effect_chat_room) =
+            sync.kv_ws_open(model.chat_room_kv, w)
+          let #(sub_chat_message, effect_chat_message) =
+            sync.sub_ws_open(model.chat_message_subscription, w)
           let model =
-            Model(..model, article_kv: kv_article, short_url_kv: kv_short_url)
-          let effect = effect.batch([effect, effect_short_url])
+            Model(
+              ..model,
+              article_kv: kv_article,
+              short_url_kv: kv_short_url,
+              sub_time: sub_time,
+              chat_room_kv: kv_chat_room,
+              chat_message_subscription: sub_chat_message,
+            )
+          let effect =
+            effect.batch([
+              effect,
+              effect_short_url,
+              effect_sub_time,
+              effect_chat_room,
+              effect_chat_message,
+            ])
           #(model, effect)
         }
       }
@@ -1410,7 +1530,7 @@ fn fetch_articles_model(model_effect_touple) -> #(Model, Effect(Msg)) {
   let #(model, effect) = model_effect_touple
 
   let model =
-    Model(..model, article_kv: model.article_kv |> sync.set_data(dict.new()))
+    Model(..model, article_kv: model.article_kv |> sync.kv_set_data(dict.new()))
   let effect = effect.batch([effect])
 
   #(model, effect)
@@ -1434,7 +1554,7 @@ fn update_navigation(model: Model, uri: Uri) -> #(Model, Effect(Msg)) {
                   ..model,
                   route:,
                   article_kv: model.article_kv
-                    |> sync.set_data(updated_articles),
+                    |> sync.kv_set_data(updated_articles),
                 ),
                 effect.none(),
               )
@@ -1525,9 +1645,29 @@ fn view(model: Model) -> Element(Msg) {
     page.PageUrlShortInfo(short, _) -> view_url_info_page(model, short.id)
     page.PageDjotDemo(_, content) -> view_djot_demo(content)
     page.PageUiComponents -> view_ui_components()
+    page.PageChatIndex ->
+      chat_index.view(
+        model.chat_room_kv,
+        UserMouseDownNavigation,
+        ChatRequestClicked,
+      )
+    page.PageChatRoom(room_id) ->
+      chat_room.view(
+        room_id,
+        model.chat_message_subscription,
+        model.chat_user_name,
+        ChatUserNameSet,
+      )
     page.PageNotifications -> view_notifications(model)
     page.PageProfile(_) -> view_profile(model)
-    page.PageDebug -> page_debug.view(model.article_kv, model.short_url_kv)
+    page.PageDebug ->
+      page_debug.view(
+        model.article_kv,
+        model.short_url_kv,
+        model.sub_time,
+        model.chat_room_kv,
+        model.chat_message_subscription,
+      )
     page.PageNotFound(uri) -> view_not_found(uri)
   }
   let nav_hints_overlay = element.none()
@@ -1886,99 +2026,53 @@ fn view_header(model: Model) -> Element(Msg) {
                               "flex md:hidden flex-col border-b border-zinc-400",
                             ),
                           ],
-                          case model.session {
-                            session.Authenticated(_) -> [
-                              view_header_link(
-                                target: routes.Articles,
-                                current: model.route,
-                                label: "Articles",
-                                attributes: top_nav_attributes_small,
-                              ),
-                              view_header_link(
-                                target: routes.About,
-                                current: model.route,
-                                label: "About",
-                                attributes: top_nav_attributes_small,
-                              ),
-                              view_header_link(
-                                target: routes.UrlShortIndex,
-                                current: model.route,
-                                label: "URLs",
-                                attributes: top_nav_attributes_small,
-                              ),
-                              view_header_link(
-                                target: routes.Notifications,
-                                current: model.route,
-                                label: "Push",
-                                attributes: top_nav_attributes_small,
-                              ),
-                              view_header_link(
-                                target: routes.Debug,
-                                current: model.route,
-                                label: "Debug",
-                                attributes: top_nav_attributes_small,
-                              ),
-                              view_header_link(
-                                target: routes.UiComponents,
-                                current: model.route,
-                                label: "UI",
-                                attributes: top_nav_attributes_small,
-                              ),
-                            ]
-                            _ -> [
-                              view_header_link(
-                                target: routes.Articles,
-                                current: model.route,
-                                label: "Articles",
-                                attributes: top_nav_attributes_small,
-                              ),
-                              view_header_link(
-                                target: routes.About,
-                                current: model.route,
-                                label: "About",
-                                attributes: top_nav_attributes_small,
-                              ),
-                              view_header_link(
-                                target: routes.UrlShortIndex,
-                                current: model.route,
-                                label: "URLs",
-                                attributes: top_nav_attributes_small,
-                              ),
-                              view_header_link(
-                                target: routes.Notifications,
-                                current: model.route,
-                                label: "Push",
-                                attributes: top_nav_attributes_small,
-                              ),
-                              view_header_link(
-                                target: routes.UiComponents,
-                                current: model.route,
-                                label: "UI",
-                                attributes: top_nav_attributes_small,
-                              ),
-                              view_header_link(
-                                target: routes.Debug,
-                                current: model.route,
-                                label: "Debug",
-                                attributes: top_nav_attributes_small,
-                              ),
-                            ]
-                          },
+                          [
+                            view_header_link(
+                              target: routes.Articles,
+                              current: model.route,
+                              label: "Articles",
+                              attributes: top_nav_attributes_small,
+                            ),
+                            view_header_link(
+                              target: routes.About,
+                              current: model.route,
+                              label: "About",
+                              attributes: top_nav_attributes_small,
+                            ),
+                            view_header_link(
+                              target: routes.UrlShortIndex,
+                              current: model.route,
+                              label: "URLs",
+                              attributes: top_nav_attributes_small,
+                            ),
+                            view_header_link(
+                              target: routes.Notifications,
+                              current: model.route,
+                              label: "Push",
+                              attributes: top_nav_attributes_small,
+                            ),
+                          ],
                         ),
                         html.ul(
                           [],
                           list.flatten([
                             [
                               view_header_link(
-                                target: routes.Debug,
+                                target: routes.Chat,
                                 current: model.route,
-                                label: "Debug",
+                                label: "Chat",
                                 attributes: top_nav_attributes_small,
                               ),
                               view_header_link(
                                 target: routes.UiComponents,
                                 current: model.route,
                                 label: "UI",
+                                attributes: top_nav_attributes_small,
+                              ),
+                              view_header_link(
+                                target: routes.Debug,
+                                current: model.route,
+                                label: "Debug",
                                 attributes: top_nav_attributes_small,
                               ),
                             ],
@@ -2004,19 +2098,23 @@ fn view_header(model: Model) -> Element(Msg) {
                                 ]),
                               ]
                               session.Authenticated(_auth_sess) -> [
+                                view_header_link(
+                                  target: routes.Chat,
+                                  current: model.route,
+                                  label: "Chat",
+                                  attributes: top_nav_attributes_small,
+                                ),
                                 html.li([], [
-                                  html.li([], [
-                                    ui.button_menu(
-                                      "Profile",
-                                      ui.ColorTeal,
-                                      ui.ButtonStateNormal,
-                                      ProfileMenuAction(
-                                        UserNavigatedTo(routes.to_uri(
-                                          routes.Profile,
-                                        )),
-                                      ),
+                                  ui.button_menu(
+                                    "Profile",
+                                    ui.ColorTeal,
+                                    ui.ButtonStateNormal,
+                                    ProfileMenuAction(
+                                      UserNavigatedTo(routes.to_uri(
+                                        routes.Profile,
+                                      )),
                                     ),
-                                  ]),
+                                  ),
                                   ui.button_menu(
                                     "Logout",
                                     ui.ColorOrange,
@@ -4014,7 +4112,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
       // article_cache: dict.new(),
       // Sync
       ws: None,
-      article_kv: sync.new_kv(
+      article_kv: sync.kv_new(
         id: "article_kv",
         bucket: "article",
         filter: None,
@@ -4024,7 +4122,7 @@ fn init(_) -> #(Model, Effect(Msg)) {
         decoder_value: article.decoder(),
         start_revision: 0,
       ),
-      short_url_kv: sync.new_kv(
+      short_url_kv: sync.kv_new(
         id: "url_short_kv",
         bucket: "url_short",
         filter: None,
@@ -4032,6 +4130,31 @@ fn init(_) -> #(Model, Effect(Msg)) {
         encoder_value: short_url.encoder,
         decoder_key: decode.string,
         decoder_value: short_url.decoder(),
+        start_revision: 0,
+      ),
+      chat_room_kv: sync.kv_new(
+        id: "chat_room_kv",
+        bucket: "convo_room",
+        filter: None,
+        encoder_key: json.string,
+        encoder_value: chat.room_encoder,
+        decoder_key: decode.string,
+        decoder_value: chat.room_decoder(),
+        start_revision: 0,
+      ),
+      chat_message_subscription: sync.sub_new(
+        id: "chat_message_subscription",
+        subject: "convo_message.*",
+        encoder_value: chat.message_encoder,
+        decoder_value: chat.message_decoder(),
+        start_revision: 0,
+      ),
+      chat_user_name: None,
+      sub_time: sync.sub_new(
+        id: "sub_time",
+        subject: "time.seconds",
+        encoder_value: chat.encoder_time_msg,
+        decoder_value: chat.decoder_time_msg(),
         start_revision: 0,
       ),
     )

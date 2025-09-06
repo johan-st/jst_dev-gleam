@@ -29,10 +29,10 @@ type clientMsg struct {
 }
 
 type serverMsg struct {
-	Op     string      `json:"op"`
-	Target string      `json:"target"`
-	Inbox  string      `json:"inbox,omitempty"`
-	Data   interface{} `json:"data,omitempty"`
+	Op     string          `json:"op"`
+	Target string          `json:"target"`
+	Inbox  string          `json:"inbox,omitempty"`
+	Data   json.RawMessage `json:"data,omitempty"`
 }
 
 type serverKvMsg struct {
@@ -123,7 +123,7 @@ func HandleRealtimeWebSocket(l *jst_log.Logger, nc *nats.Conn, slow time.Duratio
 
 	js, err := nc.JetStream()
 	if err != nil {
-		_ = conn.WriteJSON(serverMsg{Op: "error", Data: map[string]string{"reason": "jetstream unavailable"}})
+		_ = conn.WriteJSON(serverMsg{Op: "error", Data: json.RawMessage(`{"reason": "jetstream unavailable"}`)})
 		_ = conn.Close()
 		return
 	}
@@ -163,8 +163,15 @@ func userIDFromRequest(r *http.Request) string {
 // Authorization bootstrap TODO: implement proper
 func authorizeInitial(l *jst_log.Logger, s *server, userID string) capabilities {
 	caps := capabilities{
-		Subjects: []string{"time.seconds"},
-		Buckets:  map[string][]string{"article": {">"}, "url_short": {">"}},
+		Subjects: []string{
+			"time.seconds",
+			"convo_message.*",
+		},
+		Buckets: map[string][]string{
+			"article":    {">"},
+			"url_short":  {">"},
+			"convo_room": {">"},
+		},
 		Commands: []string{},
 		Streams:  map[string][]string{},
 	}
@@ -210,8 +217,7 @@ func (c *rtClient) writeLoop() {
 			}
 			if err := c.conn.WriteJSON(msg); err != nil {
 				c.log.Error("ws write: %v", err)
-				c.closeWithError("write error")
-				return
+				continue
 			}
 		}
 	}
@@ -228,7 +234,7 @@ func (c *rtClient) send(msg serverMsg) {
 }
 
 func (c *rtClient) closeWithError(reason string) {
-	_ = c.conn.WriteJSON(serverMsg{Op: "error", Data: map[string]string{"reason": reason}})
+	_ = c.conn.WriteJSON(serverMsg{Op: "error", Data: json.RawMessage(`{"reason": "` + reason + `"}`)})
 	c.cancel()
 	_ = c.conn.Close()
 	c.unsubscribeAll()
@@ -248,7 +254,7 @@ func (c *rtClient) readLoop() {
 		}
 		var m clientMsg
 		if err := json.Unmarshal(data, &m); err != nil {
-			c.send(serverMsg{Op: "error", Data: map[string]string{"reason": "bad json"}})
+			c.send(serverMsg{Op: "error", Data: json.RawMessage(`{"reason": "bad json"}`)})
 			continue
 		}
 		switch m.Op {
@@ -359,11 +365,7 @@ func (c *rtClient) handleSub(subject string) {
 		return
 	}
 	sub, err := c.srv.nc.Subscribe(subject, func(m *nats.Msg) {
-		var payload interface{}
-		if err := json.Unmarshal(m.Data, &payload); err != nil {
-			payload = string(m.Data)
-		}
-		c.send(serverMsg{Op: "sub_msg", Target: subject, Data: payload})
+		c.send(serverMsg{Op: "sub_msg", Target: subject, Data: m.Data})
 	})
 	if err != nil {
 		return
@@ -424,7 +426,7 @@ func (c *rtClient) handleKVSub(bucket, pattern string) {
 				return
 			case entry := <-watcher.Updates():
 				if entry == nil {
-					c.send(serverMsg{Op: "kv_msg", Target: bucket, Data: serverKvMsg{Op: "in_sync", Rev: 0, Key: "", Value: ""}})
+					c.send(serverMsg{Op: "kv_msg", Target: bucket, Data: json.RawMessage(`{"op": "in_sync", "rev": 0}`)})
 					continue
 				}
 
@@ -439,15 +441,20 @@ func (c *rtClient) handleKVSub(bucket, pattern string) {
 				default:
 					opStr = "unknown"
 				}
+				jsonData, err := json.Marshal(serverKvMsg{
+					Op:    opStr,
+					Rev:   entry.Revision(),
+					Key:   entry.Key(),
+					Value: string(entry.Value()),
+				})
+				if err != nil {
+					c.log.Error("Failed to marshal KV message: %v", err)
+					continue
+				}
 				c.send(serverMsg{
 					Op:     "kv_msg",
 					Target: bucket,
-					Data: serverKvMsg{
-						Op:    opStr,
-						Rev:   entry.Revision(),
-						Key:   entry.Key(),
-						Value: string(entry.Value()),
-					},
+					Data:   jsonData,
 				})
 			}
 		}
@@ -503,8 +510,13 @@ func (c *rtClient) handleJSSub(stream string, startSeq uint64, batch int, filter
 					return
 				}
 				for _, msg := range msgs {
+					jsonData, err := json.Marshal(serverMsg{Op: "js_msg", Target: stream, Data: json.RawMessage(msg.Data)})
+					if err != nil {
+						c.log.Error("Failed to marshal JS message: %v", err)
+						continue
+					}
 					// Forward to client; on backpressure, send() will close the connection
-					c.send(serverMsg{Op: "js_msg", Target: stream, Data: json.RawMessage(msg.Data)})
+					c.send(serverMsg{Op: "js_msg", Target: stream, Data: jsonData})
 					if c.ctx.Err() != nil {
 						// Connection closed; messages will be redelivered to next consumer with same durable name
 						// TODO: Consider implementing a resume mechanism with sequence tracking
@@ -558,12 +570,7 @@ func (c *rtClient) watchAuthKV() {
 				if entry == nil {
 					continue
 				}
-				var newCaps capabilities
-				if err := json.Unmarshal(entry.Value(), &newCaps); err != nil {
-					continue
-				}
-				c.applyCapabilities(newCaps)
-				c.send(serverMsg{Op: "cap_update", Data: newCaps})
+				c.send(serverMsg{Op: "cap_update", Data: entry.Value()})
 			}
 		}
 	}()

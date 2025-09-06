@@ -1,10 +1,13 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"jst_dev/server/jst_log"
+	"strconv"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 )
 
@@ -21,24 +24,26 @@ const (
 
 type Room struct {
 	Id     string   `json:"id"`
+	Name   string   `json:"name"`
 	Public bool     `json:"public"`
 	Users  []string `json:"users"`
 }
 
 type Request struct {
-	Id        string    `json:"id"`
-	From      string    `json:"from"`
-	To        string    `json:"to"`
-	Room      string    `json:"room"`
-	Message   string    `json:"message"`
-	Timestamp time.Time `json:"timestamp"`
+	Id          string `json:"id"`
+	From        string `json:"from"`
+	To          string `json:"to"`
+	Room        string `json:"room"`
+	Message     string `json:"message"`
+	TimestampMs int    `json:"timestamp_ms"`
 }
 
 type Message struct {
-	User      string    `json:"user"`
-	Room      string    `json:"room"`
-	Content   string    `json:"content"`
-	Timestamp time.Time `json:"timestamp"`
+	Id          string `json:"id"`
+	User        string `json:"user_id"`
+	Room        string `json:"room_id"`
+	Content     string `json:"content"`
+	TimestampMs int    `json:"timestamp_ms"`
 }
 
 const (
@@ -55,14 +60,27 @@ func MessagePub(nc *nats.Conn, message Message) error {
 	if message.Content == "" {
 		return fmt.Errorf("content is required")
 	}
-
+	uuid, err := uuid.NewRandom()
+	if err != nil {
+		return fmt.Errorf("failed to generate uuid: %w", err)
+	}
+	message.TimestampMs = (int)(time.Now().UnixMilli())
+	timestampStr := strconv.Itoa(message.TimestampMs)
 	headers := make(nats.Header)
 	headers.Set("sender", message.User)
-	headers.Set("timestamp", message.Timestamp.Format(time.RFC3339))
+	headers.Set("room", message.Room)
+	headers.Set("timestamp", timestampStr)
+	headers.Set("id", uuid.String())
+
+	message.Id = uuid.String()
+	messageJson, err := json.Marshal(message)
+	if err != nil {
+		return fmt.Errorf("failed to marshal message: %w", err)
+	}
 
 	return nc.PublishMsg(&nats.Msg{
 		Subject: messageJetStreamSubject + "." + message.Room,
-		Data:    []byte(message.Content),
+		Data:    messageJson,
 		Header:  headers,
 	})
 }
@@ -77,18 +95,15 @@ func MessageSub(nc *nats.Conn, l *jst_log.Logger, room string) (<-chan Message, 
 	sub, err = nc.Subscribe(messageJetStreamSubject+"."+room, func(m *nats.Msg) {
 		var message Message
 		l.Debug("got message: %+v\n", m)
-		if sender := m.Header.Get("sender"); sender != "" {
-			message.User = sender
-			l.Debug("sender: %s\n", sender)
-		}
-		if timestampStr := m.Header.Get("timestamp"); timestampStr != "" {
-			if timestamp, err := time.Parse(time.RFC3339, timestampStr); err == nil {
-				message.Timestamp = timestamp
-				l.Debug("timestamp: %s\n", timestampStr)
-			}
-		}
 		message.Content = string(m.Data)
 		message.Room = room
+		message.User = m.Header.Get("user_id")
+		ts, err := strconv.Atoi(m.Header.Get("timestamp_ms"))
+		if err != nil {
+			l.Error("failed to convert timestamp to int: %v", err)
+			ts = 0
+		}
+		message.TimestampMs = ts
 
 		l.Debug("sending message: %v\n", message)
 		msgChan <- message
@@ -104,6 +119,7 @@ func MessageSub(nc *nats.Conn, l *jst_log.Logger, room string) (<-chan Message, 
 // ROOM
 
 type RoomCreateRequest struct {
+	Name   string   `json:"name"`
 	Public bool     `json:"public"`
 	Users  []string `json:"users"`
 }

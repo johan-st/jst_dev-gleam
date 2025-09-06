@@ -1,10 +1,11 @@
 import article.{type Article}
+import chat
 import gleam/dict
 import gleam/list
 import gleam/uri.{type Uri}
 import routes.{type Route}
 import session.{type Session}
-import sync.{type KV, type KVState}
+import sync.{type KV, type Subscription, type SyncState}
 import utils/http.{type HttpError}
 import utils/short_url.{type ShortUrl}
 
@@ -37,6 +38,10 @@ pub type Page {
 
   // UI Components showcase
   PageUiComponents
+
+  // Chat
+  PageChatIndex
+  PageChatRoom(room_id: String)
 
   // Notifications
   PageNotifications
@@ -99,6 +104,14 @@ pub fn to_uri(page: Page) -> Uri {
     }
     PageUiComponents -> {
       let assert Ok(uri) = uri.parse("/ui-components")
+      uri
+    }
+    PageChatIndex -> {
+      let assert Ok(uri) = uri.parse("/chat")
+      uri
+    }
+    PageChatRoom(room_id) -> {
+      let assert Ok(uri) = uri.parse("/chat/" <> room_id)
       uri
     }
     PageNotifications -> {
@@ -237,6 +250,8 @@ pub fn from_route(
       }
     }
     routes.UiComponents -> PageUiComponents
+    routes.Chat -> PageChatIndex
+    routes.ChatRoom(room_id) -> PageChatRoom(room_id)
     routes.Notifications -> PageNotifications
     routes.Profile -> {
       case session {

@@ -89,10 +89,7 @@ func loadConf(getenv func(string) string) (*GlobalConfig, error) {
 	}
 
 	// NTFY_TOKEN is optional
-	envNtfyToken := getenv("NTFY_TOKEN")
-	if envNtfyToken == "" {
-		log.Fatalf("missing env-var: NTFY_TOKEN")
-	}
+	// envNtfyToken := getenv("NTFY_TOKEN")
 
 	conf := &GlobalConfig{
 		NatsJWT:      envNatsJwt,
@@ -100,7 +97,7 @@ func loadConf(getenv func(string) string) (*GlobalConfig, error) {
 		WebJwtSecret: envJwtSecret,
 		WebHashSalt:  envHashSalt,
 		WebPort:      envPort,
-		NtfyToken:    envNtfyToken,
+		NtfyToken:    "",
 
 		AppName:       appName,
 		Region:        region,

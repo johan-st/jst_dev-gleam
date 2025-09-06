@@ -62,6 +62,9 @@ func routes(mux *http.ServeMux, l *jst_log.Logger, repo articles.ArticleRepo, nc
 	// notifications
 	mux.Handle("POST /api/notifications", handleNotificationSend(l, nc))
 
+	// chat request
+	mux.Handle("POST /api/chat/request", handleChatRequest(l, nc))
+
 	// realtime websocket bridge
 	mux.Handle("GET /ws", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		HandleRealtimeWebSocket(l.WithBreadcrumb("ws"), nc, slow, w, r)
@@ -1561,6 +1564,7 @@ func handleConvoRoom(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 
 		// Create request
 		req := convoApi.RoomCreateRequest{
+			Name:   "new-room",
 			Public: true,
 			Users:  []string{"3f179150-0463-4f3c-8ce3-a18f71d28102"},
 		}
@@ -1592,8 +1596,8 @@ func handleConvoRoom(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 }
 func handleConvoMessage(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 	type Req struct {
-		SessionID string `json:"session_id"` //TODO: implement session id
-		Message   string `json:"message"`
+		Message string `json:"message"`
+		User    string `json:"user"`
 	}
 
 	logger := l.WithBreadcrumb("convo_message")
@@ -1612,31 +1616,38 @@ func handleConvoMessage(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 			http.Error(w, "room id is required", http.StatusBadRequest)
 			return
 		}
+		logger.Debug("room id: %s", roomId)
+
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			logger.Error("failed to decode request: %v", err)
 			http.Error(w, "invalid request body", http.StatusBadRequest)
 			return
 		}
+		logger.Debug("message: %v", req)
+
 		if req.Message == "" {
 			http.Error(w, "message is required", http.StatusBadRequest)
 			return
 		}
-		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
-		if !ok {
-			http.Error(w, "user not found", http.StatusUnauthorized)
-			return
-		}
+		// user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		// if !ok {
+		// 	http.Error(w, "user not found", http.StatusUnauthorized)
+		// 	return
+		// }
 		if user.ID == "" {
-			http.Error(w, "user id is required", http.StatusBadRequest)
+			// http.Error(w, "user id is required", http.StatusBadRequest)
+			user.ID = "no_user"
 			return
 		}
 
 		convoMsg = convoApi.Message{
-			User:      user.ID,
-			Content:   req.Message,
-			Room:      roomId,
-			Timestamp: time.Now(),
+			User:        user.ID,
+			Content:     req.Message,
+			Room:        roomId,
+			TimestampMs: (int)(time.Now().UnixMilli()),
 		}
+
+		logger.Debug("convo msg: %v", convoMsg)
 		err := convoApi.MessagePub(nc, convoMsg)
 		if err != nil {
 			logger.Error("failed to publish message: %v", err)
@@ -1644,6 +1655,92 @@ func handleConvoMessage(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 			return
 		}
 		respJson(w, "message sent", http.StatusOK)
+		logger.Debug("message sent: %v", convoMsg)
+	})
+}
+
+func handleChatRequest(l *jst_log.Logger, nc *nats.Conn) http.Handler {
+	type Resp struct {
+		RoomID string `json:"room_id"`
+	}
+
+	logger := l.WithBreadcrumb("chat_request")
+	logger.Debug("ready")
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Debug("called")
+
+		// 1. Generate room_id
+		roomID := uuid.New().String()
+		logger.Debug("generated room_id: %s", roomID)
+
+		// 2. Create room metadata
+		room := convoApi.Room{
+			Id:     roomID,
+			Name:   "Chat Request",
+			Public: true,
+			Users:  []string{},
+		}
+
+		// 3. Store in KV
+		roomBytes, err := json.Marshal(room)
+		if err != nil {
+			logger.Error("failed to marshal room: %v", err)
+			http.Error(w, "failed to create room", http.StatusInternalServerError)
+			return
+		}
+
+		js, err := nc.JetStream()
+		if err != nil {
+			logger.Error("failed to get JetStream: %v", err)
+			http.Error(w, "failed to create room", http.StatusInternalServerError)
+			return
+		}
+
+		kv, err := js.KeyValue("convo_room")
+		if err != nil {
+			logger.Error("failed to get convo_room KV: %v", err)
+			http.Error(w, "failed to create room", http.StatusInternalServerError)
+			return
+		}
+
+		_, err = kv.Put(roomID, roomBytes)
+		if err != nil {
+			logger.Error("failed to store room in KV: %v", err)
+			http.Error(w, "failed to create room", http.StatusInternalServerError)
+			return
+		}
+
+		// 4. Send ntfy notification via ntfy service
+		notification := ntfy.Notification{
+			ID:        uuid.New().String(),
+			UserID:    "", // Anonymous request
+			Title:     "New Chat Request",
+			Message:   fmt.Sprintf("New chat request: https://jst.dev/chat/%s", roomID),
+			Category:  "jst.dev",
+			Priority:  ntfy.PriorityHigh,
+			NtfyTopic: "jst",
+			Data:      map[string]interface{}{"room_id": roomID},
+			CreatedAt: time.Now(),
+		}
+
+		notificationBytes, err := json.Marshal(notification)
+		if err != nil {
+			logger.Error("failed to marshal notification: %v", err)
+			// Don't fail the request if notification fails
+		} else {
+			_, err = nc.Request(ntfy.SubjectNotification, notificationBytes, 10*time.Second)
+			if err != nil {
+				logger.Error("failed to send notification: %v", err)
+				// Don't fail the request if notification fails
+			} else {
+				logger.Debug("notification sent successfully")
+			}
+		}
+
+		// 5. Return response
+		logger.Debug("chat request created successfully: %s", roomID)
+		respJson(w, Resp{RoomID: roomID}, http.StatusOK)
 	})
 }
 

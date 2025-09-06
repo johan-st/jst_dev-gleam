@@ -9,6 +9,10 @@ pub type Route {
   About
   DjotDemo
 
+  // CHAT
+  Chat
+  ChatRoom(String)
+
   // URL SHORTENER 
   UrlShortIndex
   UrlShortInfo(String)
@@ -52,6 +56,8 @@ pub fn from_uri(uri: Uri) -> Route {
     ["article", id, "edit"] -> ArticleEdit(id)
     ["about"] -> About
     ["djot-demo"] -> DjotDemo
+    ["chat"] -> Chat
+    ["chat", room_id] -> ChatRoom(room_id)
     ["url"] -> UrlShortIndex
     ["url", uid] -> UrlShortInfo(uid)
     ["ui-components"] -> UiComponents
@@ -70,6 +76,8 @@ pub fn to_string(route: Route) -> String {
     Article(slug) -> "/article/" <> slug
     ArticleEdit(id) -> "/article/" <> id <> "/edit"
     DjotDemo -> "/djot-demo"
+    Chat -> "/chat"
+    ChatRoom(room_id) -> "/chat/" <> room_id
     UrlShortIndex -> "/url"
     UrlShortInfo(short) -> "/url/" <> short
     UiComponents -> "/ui-components"
