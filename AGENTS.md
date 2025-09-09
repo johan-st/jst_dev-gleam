@@ -10,7 +10,7 @@
   - Check: ``
 
 - **Gleam Frontend**:
-  - Build: `gleam build`
+  - Check code: `gleam check`
   - Run tests: `gleam test`
   - Run single test: `gleam test -m test_name_test`
 
@@ -23,6 +23,8 @@
 - Use context for cancellation and timeouts
 - Format code with `gofmt -s` and `goimports -local jst_dev/server`
 - Avoid unnecessary whitespace (leading/trailing newlines)
+- Use nats for inter service communication (if possible)
+- Use `package/api` for defining interactions from other go code within the server.
 
 ### Gleam
 - Use snake_case for function and variable names
@@ -42,6 +44,10 @@
       }
     }
     ```
+- Grouping code in gleam looks like this:
+```gleam
+  let i = 0 + {3 * 2}
+```
 
 ### General
 - Document public APIs with comments
