@@ -87,7 +87,6 @@ func NewRepo[K RepoKey, V RepoValue](
 	kv jetstream.KeyValue,
 	stringToKey func(string) K,
 ) (Repo[K, V], error) {
-
 	return &repo[K, V]{
 		updates:      make(chan RepoUpdate[K, V]),
 		ctx:          ctx,

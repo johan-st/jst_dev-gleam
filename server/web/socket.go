@@ -576,35 +576,6 @@ func (c *rtClient) watchAuthKV() {
 	}()
 }
 
-func (c *rtClient) applyCapabilities(newCaps capabilities) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	// Unsubscribe from disallowed subjects
-	for subject, sub := range c.subs {
-		if subject == "" {
-			continue
-		}
-		if !containsPattern(newCaps.Subjects, subject) {
-			_ = sub.Unsubscribe()
-			delete(c.subs, subject)
-		}
-	}
-	for bucket, w := range c.kvWatchers {
-		allowed := false
-		for bucketPattern := range newCaps.Buckets {
-			if subjectMatch(bucketPattern, bucket) {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			_ = w.Stop()
-			delete(c.kvWatchers, bucket)
-		}
-	}
-	c.caps = newCaps
-}
-
 // ---- Article Handlers ----
 
 // func (c *rtClient) handleArticleList(inbox string) {

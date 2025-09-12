@@ -249,12 +249,14 @@ func run(
 					return
 				case <-ticker.C:
 					// convo_message.0442bf5b-10c8-482f-9d0b-769c3f2e3f3a
-					convoApi.MessagePub(nc, convoApi.Message{
+					if err := convoApi.MessagePub(nc, convoApi.Message{
 						User:        "test",
 						Content:     "now: " + time.Now().Format("2006-01-02 15:04:05"),
 						Room:        "0442bf5b-10c8-482f-9d0b-769c3f2e3f3a",
 						TimestampMs: (int)(time.Now().UnixMilli()),
-					})
+					}); err != nil {
+						l.Error("failed to publish test message: %v", err)
+					}
 				}
 			}
 		}()
@@ -299,7 +301,9 @@ func run(
 	}
 
 	// Close NATS connection with flush timeout
-	nc.FlushTimeout(5 * time.Second)
+	if err := nc.FlushTimeout(5 * time.Second); err != nil {
+		l.Error("failed to flush NATS connection: %v", err)
+	}
 	nc.Close()
 
 	// Shutdown embedded NATS server if running (after connection is closed)

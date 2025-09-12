@@ -34,10 +34,8 @@ func (c *Convo) Name() string {
 }
 
 type Conf struct {
-	Logger      *jst_log.Logger
-	NatsConn    *nats.Conn
-	location    string
-	environment string
+	Logger   *jst_log.Logger
+	NatsConn *nats.Conn
 }
 
 func New(c *Conf) (core.Service, error) {
@@ -142,7 +140,6 @@ func (c *Convo) Run(ctx context.Context) error {
 // ----------- HANDLERS -----------
 
 func (c *Convo) handleRoomCreate() micro.HandlerFunc {
-
 	return func(req micro.Request) {
 		var (
 			err      error
@@ -191,7 +188,9 @@ func (c *Convo) handleRoomCreate() micro.HandlerFunc {
 			}
 			return
 		}
-		req.Respond(respPayload)
+		if err := req.Respond(respPayload); err != nil {
+			c.l.Error("failed to respond to room create request: %v", err)
+		}
 	}
 }
 
@@ -234,7 +233,9 @@ func (c *Convo) handleRoomGetByUser() micro.HandlerFunc {
 			}
 			return
 		}
-		req.Respond(respPayload)
+		if err := req.Respond(respPayload); err != nil {
+			c.l.Error("failed to respond to room get by user request: %v", err)
+		}
 	}
 }
 
@@ -298,7 +299,7 @@ func (c *Convo) roomGetByUser(userId string) ([]api.Room, error) {
 			return nil, err
 		}
 		room := api.Room{}
-		err = json.Unmarshal(roomValue.Value(), room)
+		err = json.Unmarshal(roomValue.Value(), &room)
 		if err != nil {
 			return nil, err
 		}

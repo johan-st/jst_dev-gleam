@@ -545,41 +545,6 @@ func handleUserUpdateByID(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 	})
 }
 
-// handleSeed creates a handler for seeding the database with test articles
-func handleSeed(l *jst_log.Logger, repo core.Repo[articles.Key, articles.Article]) http.Handler {
-	logger := l.WithBreadcrumb("seed")
-	logger.Debug("ready")
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger.Debug("seed handler called")
-
-		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
-		if !ok || user.ID == "" {
-			logger.Warn("user not found in context")
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		art := articles.TestArticle()
-		err := repo.Put(articles.Key{Id: art.Id}, art)
-		if err != nil {
-			logger.Error("failed to put test article in repo: %s", err.Error())
-			http.Error(w, "failed to put test article in repo", http.StatusInternalServerError)
-			return
-		}
-
-		art = articles.NatsAllTheWayDown()
-		err = repo.Put(articles.Key{Id: art.Id}, art)
-		if err != nil {
-			logger.Error("failed to put nats all the way down article in repo: %s", err.Error())
-			http.Error(w, "failed to put nats all the way down article in repo", http.StatusInternalServerError)
-			return
-		}
-
-		respJson(w, "seeded", http.StatusOK)
-	})
-}
-
 // - articles
 
 // handleArticleList creates a handler for listing all articles
