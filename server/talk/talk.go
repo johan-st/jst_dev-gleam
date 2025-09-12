@@ -47,7 +47,7 @@ func EmbeddedServer(
 		JetStreamDomain: "jet",
 		JetStream:       true,
 		StoreDir:        "./data",
-		NoSigs: true,
+		NoSigs:          true,
 	}
 	ns, err = server.NewServer(serverOpts)
 	if err != nil {

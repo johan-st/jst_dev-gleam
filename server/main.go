@@ -12,9 +12,9 @@ import (
 	"jst_dev/server/articles"
 	"jst_dev/server/convo"
 	convoApi "jst_dev/server/convo/api"
+	"jst_dev/server/core"
 	"jst_dev/server/jst_log"
 	"jst_dev/server/ntfy"
-	"jst_dev/server/service"
 	"jst_dev/server/talk"
 	"jst_dev/server/urlShort"
 	web "jst_dev/server/web"
@@ -163,7 +163,7 @@ func run(
 	if err != nil {
 		return fmt.Errorf("new ntfy: %w", err)
 	}
-	service.Run(ctx, cleanShutdown, &ntfySvc)
+	core.Run(ctx, cleanShutdown, &ntfySvc)
 
 	// - who
 	l.Debug("starting who")
@@ -177,7 +177,7 @@ func run(
 	if err != nil {
 		return fmt.Errorf("new who: %w", err)
 	}
-	service.Run(ctx, cleanShutdown, whoSvc)
+	core.Run(ctx, cleanShutdown, whoSvc)
 
 	// - short url
 	l.Debug("starting short url service")
@@ -189,11 +189,11 @@ func run(
 	if err != nil {
 		return fmt.Errorf("new short url: %w", err)
 	}
-	service.Run(ctx, cleanShutdown, shortUrlSvc)
+	core.Run(ctx, cleanShutdown, shortUrlSvc)
 
 	// - articles
 	l.Debug("starting articles")
-	articleRepo, err := articles.Repo(ctx, nc, lRoot.WithBreadcrumb("articles"))
+	articleRepo, err := articles.NewRepo(ctx, nc, lRoot.WithBreadcrumb("articles"))
 	if err != nil {
 		return fmt.Errorf("new articles: %w", err)
 	}
@@ -207,12 +207,12 @@ func run(
 	if err != nil {
 		return fmt.Errorf("new convo: %w", err)
 	}
-	service.Run(ctx, cleanShutdown, convoSvc)
+	core.Run(ctx, cleanShutdown, convoSvc)
 
 	// - web
 	l.Debug("http server, start")
 	httpServer := web.New(ctx, nc, conf.WebJwtSecret, lRoot.WithBreadcrumb("http"), articleRepo, conf.Flags.ProxyFrontend, conf.Flags.SlowSocket)
-	service.Run(ctx, cleanShutdown, httpServer)
+	core.Run(ctx, cleanShutdown, httpServer)
 
 	// - time ticker publisher (NATS core)
 	if conf.Region != "local" {
@@ -238,6 +238,7 @@ func run(
 		}()
 	}
 
+	// if conf.Flags.DebugMode &&
 	if conf.Region == "local" {
 		go func() {
 			ticker := time.NewTicker(5 * time.Second)
@@ -250,7 +251,7 @@ func run(
 					// convo_message.0442bf5b-10c8-482f-9d0b-769c3f2e3f3a
 					convoApi.MessagePub(nc, convoApi.Message{
 						User:        "test",
-						Content:     "test",
+						Content:     "now: " + time.Now().Format("2006-01-02 15:04:05"),
 						Room:        "0442bf5b-10c8-482f-9d0b-769c3f2e3f3a",
 						TimestampMs: (int)(time.Now().UnixMilli()),
 					})
@@ -262,16 +263,16 @@ func run(
 	// - example
 	if conf.Flags.DebugMode {
 		l.Info("starting example services")
-		svcExample1, _ := service.New(1)
-		service.Run(ctx, cleanShutdown, svcExample1)
-		svcExample2, _ := service.New(2)
-		service.Run(ctx, cleanShutdown, svcExample2)
-		svcExample3, _ := service.New(3)
-		service.Run(ctx, cleanShutdown, svcExample3)
-		svcExample4, _ := service.New(4)
-		service.Run(ctx, cleanShutdown, svcExample4)
-		svcExample5, _ := service.New(5)
-		service.Run(ctx, cleanShutdown, svcExample5)
+		svcExample1, _ := core.New(1)
+		core.Run(ctx, cleanShutdown, svcExample1)
+		svcExample2, _ := core.New(2)
+		core.Run(ctx, cleanShutdown, svcExample2)
+		svcExample3, _ := core.New(3)
+		core.Run(ctx, cleanShutdown, svcExample3)
+		svcExample4, _ := core.New(4)
+		core.Run(ctx, cleanShutdown, svcExample4)
+		svcExample5, _ := core.New(5)
+		core.Run(ctx, cleanShutdown, svcExample5)
 		l.Info("Example service started")
 	}
 

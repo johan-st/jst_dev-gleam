@@ -15,8 +15,8 @@ import (
 	"github.com/nats-io/nats.go/micro"
 
 	"jst_dev/server/convo/api"
+	"jst_dev/server/core"
 	"jst_dev/server/jst_log"
-	"jst_dev/server/service"
 	whoApi "jst_dev/server/who/api"
 )
 
@@ -40,7 +40,7 @@ type Conf struct {
 	environment string
 }
 
-func New(c *Conf) (service.Service, error) {
+func New(c *Conf) (core.Service, error) {
 	if c.Logger == nil {
 		return nil, fmt.Errorf("logger can not be nil")
 	}

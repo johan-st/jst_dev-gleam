@@ -12,6 +12,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"jst_dev/server/articles"
+	"jst_dev/server/core"
 	"jst_dev/server/jst_log"
 )
 
@@ -19,7 +20,7 @@ type httpServer struct {
 	nc          *nats.Conn
 	l           *jst_log.Logger
 	ctx         context.Context
-	articleRepo articles.ArticleRepo
+	articleRepo core.Repo[articles.Key, articles.Article]
 	mux         *http.ServeMux // For defining routes
 	handler     http.Handler   // Final wrapped handler for serving requests
 	embedFs     fs.FS
@@ -31,7 +32,7 @@ var embedded embed.FS
 
 // New initializes and returns a new httpServer instance with embedded static files and an article repository.
 // Returns nil if the static files or article repository cannot be initialized.
-func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger, articleRepo articles.ArticleRepo, dev bool, slow time.Duration) *httpServer {
+func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger, articleRepo core.Repo[articles.Key, articles.Article], dev bool, slow time.Duration) *httpServer {
 	fs, err := fs.Sub(embedded, "static")
 	if err != nil {
 		l.Error("Failed to load static folder")

@@ -9,26 +9,13 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"jst_dev/server/core"
 	"jst_dev/server/jst_log"
 )
 
-type ArticleRepo interface {
-	Get(id uuid.UUID) (Article, error)
-	GetBySLug(slug string) (Article, error)
-	AllNoContent() ([]Article, error)
-	Create(art Article) (Article, error)
-	Update(art Article) (Article, error)
-	Delete(id uuid.UUID) error
-	GetHistory(id uuid.UUID) ([]Article, error)
-	GetRevision(id uuid.UUID, revision uint64) (Article, error)
-	Context() context.Context
-	Purge() error
-	WatchAll() (jetstream.KeyWatcher, error)
-}
-
-type ArticleRepoWithWatchAll interface {
-	ArticleRepo
-	WatchAll() (jetstream.KeyWatcher, error)
+type repo struct {
+	ctx context.Context
+	kv  jetstream.KeyValue
 }
 
 // --- ARTICLE ---
@@ -50,20 +37,54 @@ type Article struct {
 	Tags          []string  `json:"tags"`
 	Content       string    `json:"content,omitempty"`
 }
+type Key struct {
+	Id uuid.UUID
+}
+
+func (A Article) Bytes() []byte {
+	data, err := json.Marshal(A)
+	if err != nil {
+		panic("Article.Bytes") // TODO: evaluate this. Do I need another interface for the repo?
+	}
+	return data
+}
+
+func (A Article) FromBytes(value []byte) error {
+	return json.Unmarshal(value, &A)
+}
+func (k Key) String() string {
+	return k.Id.String()
+}
+
+func (k Key) Bytes() []byte {
+	return []byte(k.Id.String())
+}
+
+func (k Key) FromBytes(value []byte) error {
+	return k.Id.UnmarshalText(value)
+}
 
 // --- REPO ---
 
 // Repo initializes and returns an ArticleRepo backed by a JetStream key-value store.
 // Returns an error if the key-value store cannot be set up.
-func Repo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (ArticleRepo, error) {
+func NewRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (core.Repo[Key, Article], error) {
 	kv, err := setup(ctx, nc)
 	if err != nil {
 		return nil, fmt.Errorf("repo setup: %w", err)
 	}
-	return &articleRepo{
-		ctx: ctx,
-		kv:  kv,
-	}, nil
+
+	stringToKey := func(s string) Key {
+		id, _ := uuid.Parse(s)
+		return Key{Id: id}
+	}
+
+	repo, err := core.NewRepo[Key, Article](ctx, kv, stringToKey)
+	if err != nil {
+		return nil, fmt.Errorf("create repo: %w", err)
+	}
+
+	return repo, nil
 }
 
 func (r *articleRepo) Get(id uuid.UUID) (Article, error) {
@@ -269,128 +290,6 @@ func (r *articleRepo) Purge() error {
 	}
 	return nil
 }
-
-// --- REPO WITH IN MEM CACHE ---
-
-// WithInMemCache wraps an ArticleRepoWithWatchAll with an in-memory cache that is kept in sync with JetStream updates.
-// It returns a new ArticleRepo instance that serves reads from the cache and propagates writes to the underlying repository.
-// The cache is updated in real time using a background goroutine that listens for key-value changes.
-// func WithInMemCache(repo ArticleRepoWithWatchAll, l *jst_log.Logger) (ArticleRepo, error) {
-
-// 	repoWrapped := &articleRepoInMem{
-// 		repo:     repo,
-// 		articles: make(map[string]*Article),
-// 		lock:     sync.RWMutex{},
-// 	}
-
-// 	watcher, err := repo.WatchAll()
-// 	if err != nil {
-// 		return nil, fmt.Errorf("watchAll: %w", err)
-// 	}
-// 	go repoWrapped.updater(repo.Context(), watcher, l.WithBreadcrumb("watcher"))
-// 	return repoWrapped, nil
-// }
-
-// // Get returns an article by slug.
-// func (r *articleRepoInMem) Get(slug string) (*Article, error) {
-// 	r.lock.RLock()
-// 	defer r.lock.RUnlock()
-// 	art, ok := r.articles[slug]
-// 	if !ok {
-// 		return nil, fmt.Errorf("article with slug %s not found", slug)
-// 	}
-// 	return art, nil
-// }
-
-// func (r *articleRepoInMem) AllNoContent() ([]ArticleMetadata, error) {
-// 	r.lock.RLock()
-// 	defer r.lock.RUnlock()
-// 	articles := make([]ArticleMetadata, 0, len(r.articles))
-// 	for _, art := range r.articles {
-// 		articles = append(articles, ArticleMetadata{
-// 			StructVersion: art.StructVersion,
-// 			Id:            art.Id,
-// 			Rev:           art.Rev,
-// 			Slug:          art.Slug,
-// 			Title:         art.Title,
-// 			Subtitle:      art.Subtitle,
-// 			Leading:       art.Leading,
-// 		})
-// 	}
-// 	return articles, nil
-// }
-
-// func (r *articleRepoInMem) Create(art Article) (uint64, error) {
-// 	var (
-// 		err error
-// 	)
-// 	rev, err := r.repo.Create(art)
-// 	if err != nil {
-// 		return 0, fmt.Errorf("create article: %w", err)
-// 	}
-
-// 	return rev, nil
-// }
-
-// func (r *articleRepoInMem) Update(art Article) (uint64, error) {
-// 	var (
-// 		err error
-// 	)
-// 	rev, err := r.repo.Update(art)
-// 	if err != nil {
-// 		return 0, fmt.Errorf("update article: %w", err)
-// 	}
-// 	return rev, nil
-// }
-
-// func (r *articleRepoInMem) Context() context.Context {
-// 	return r.repo.Context()
-// }
-
-// func (r *articleRepoInMem) updater(ctx context.Context, w jetstream.KeyWatcher, l *jst_log.Logger) {
-// 	var (
-// 		err error
-// 		art *Article
-// 	)
-// 	defer w.Stop()
-// 	for {
-// 		select {
-// 		case <-ctx.Done():
-// 			l.Info("context done, stopping")
-// 			return
-// 		case update, ok := <-w.Updates():
-// 			if !ok {
-// 				l.Warn("Channel unexpectedly closed")
-// 				return
-// 			}
-// 			if update == nil {
-// 				l.Debug("up to date")
-// 				continue
-// 			}
-
-// 			op := update.Operation()
-// 			switch op {
-// 			case jetstream.KeyValuePut:
-// 				l.Debug("PUT - %s:%d", update.Key(), update.Revision())
-// 				art = &Article{}
-// 				err = json.Unmarshal(update.Value(), art)
-// 				if err != nil {
-// 					l.Error("decode put: %w", err)
-// 				}
-// 				art.Rev = update.Revision()
-// 				r.articles[art.Slug] = art
-// 			case jetstream.KeyValueDelete:
-// 				l.Debug("DELETE - %s:%d", update.Key(), update.Revision())
-// 				delete(r.articles, update.Key())
-// 			case jetstream.KeyValuePurge:
-// 				l.Debug("PURGE - %s:%d", update.Key(), update.Revision())
-// 				l.Error("Purge not handled")
-// 			default:
-// 				l.Debug("UNKNOWN update (%s), on %s:%d", op, update.Key(), update.Revision())
-// 			}
-// 		}
-// 	}
-// }
 
 // --- SETUP ---
 
