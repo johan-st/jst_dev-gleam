@@ -1116,6 +1116,11 @@ func handleShortUrlGet(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 			5*time.Second,
 		)
 		if err != nil {
+			if err == nats.ErrTimeout {
+				logger.Error("failed to get short url: timeout")
+				http.Error(w, "gateway timeout while fetching short url", http.StatusGatewayTimeout)
+				return
+			}
 			logger.Error("failed to get short url: %v", err)
 			http.Error(w, "failed to get short url", http.StatusInternalServerError)
 			return
