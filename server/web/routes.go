@@ -257,6 +257,11 @@ func handleAuth(l *jst_log.Logger, nc *nats.Conn, jwtSecret string) http.Handler
 
 		whoMsg, err = nc.Request(fmt.Sprintf("%s.%s", whoApi.Subj.AuthGroup, whoApi.Subj.AuthLogin), whoBytes, 10*time.Second)
 		if err != nil {
+			if err == nats.ErrTimeout {
+				l.Debug("error requesting auth: timeout\n")
+				http.Error(w, "gateway timeout while requesting auth", http.StatusGatewayTimeout)
+				return
+			}
 			l.Debug("error requesting auth: %s\n", err)
 			http.Error(w, "error requesting auth", http.StatusInternalServerError)
 			return
@@ -347,6 +352,10 @@ func handleAuthRefresh(l *jst_log.Logger, nc *nats.Conn, jwtSecret string) http.
 		}
 		whoMsg, err = nc.Request(fmt.Sprintf("%s.%s", whoApi.Subj.AuthGroup, whoApi.Subj.AuthRefresh), whoBytes, 10*time.Second)
 		if err != nil {
+			if err == nats.ErrTimeout {
+				http.Error(w, "gateway timeout while refreshing auth", http.StatusGatewayTimeout)
+				return
+			}
 			http.Error(w, "error requesting auth refresh", http.StatusInternalServerError)
 			return
 		}
@@ -462,6 +471,11 @@ func handleUserGetByID(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 
 		msg, err = nc.Request(whoApi.Subj.UserGroup+"."+whoApi.Subj.UserGet, reqBytes, 5*time.Second)
 		if err != nil {
+			if err == nats.ErrTimeout {
+				logger.Error("failed to request who: timeout")
+				http.Error(w, "gateway timeout while requesting who", http.StatusGatewayTimeout)
+				return
+			}
 			logger.Error("failed to request who: %v", err)
 			http.Error(w, "server error", http.StatusInternalServerError)
 			return
@@ -534,6 +548,11 @@ func handleUserUpdateByID(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 
 		msg, err = nc.Request(whoApi.Subj.UserGroup+"."+whoApi.Subj.UserUpdate, reqBytes, 5*time.Second)
 		if err != nil {
+			if err == nats.ErrTimeout {
+				logger.Error("failed to request who: timeout")
+				http.Error(w, "gateway timeout while requesting who", http.StatusGatewayTimeout)
+				return
+			}
 			logger.Error("failed to request who: %v", err)
 			http.Error(w, "server error", http.StatusInternalServerError)
 			return
@@ -654,6 +673,11 @@ func handleArticleNew(l *jst_log.Logger, repo core.Repo[articles.Key, articles.A
 			5*time.Second,
 		)
 		if err != nil {
+			if err == nats.ErrTimeout {
+				logger.Error("failed to get user data: timeout")
+				http.Error(w, "gateway timeout while getting user data", http.StatusGatewayTimeout)
+				return
+			}
 			logger.Error("failed to get user data: %w", err)
 			http.Error(w, "failed to get user data", http.StatusInternalServerError)
 			return
@@ -985,6 +1009,11 @@ func handleShortUrlList(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 			5*time.Second,
 		)
 		if err != nil {
+			if err == nats.ErrTimeout {
+				logger.Error("failed to request short urls: timeout")
+				http.Error(w, "gateway timeout while requesting short urls", http.StatusGatewayTimeout)
+				return
+			}
 			logger.Error("failed to request short urls: %v", err)
 			http.Error(w, "failed to get short urls", http.StatusInternalServerError)
 			return
@@ -1048,6 +1077,11 @@ func handleShortUrlCreate(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 			5*time.Second,
 		)
 		if err != nil {
+			if err == nats.ErrTimeout {
+				logger.Error("failed to create short url: timeout")
+				http.Error(w, "gateway timeout while creating short url", http.StatusGatewayTimeout)
+				return
+			}
 			logger.Error("failed to create short url: %v", err)
 			http.Error(w, "failed to create short url", http.StatusInternalServerError)
 			return
@@ -1196,6 +1230,11 @@ func handleShortUrlUpdate(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 			5*time.Second,
 		)
 		if err != nil {
+			if err == nats.ErrTimeout {
+				logger.Error("failed to update short url: timeout")
+				http.Error(w, "gateway timeout while updating short url", http.StatusGatewayTimeout)
+				return
+			}
 			logger.Error("failed to update short url: %v", err)
 			http.Error(w, "failed to update short url", http.StatusInternalServerError)
 			return
@@ -1274,6 +1313,11 @@ func handleShortUrlDelete(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 			5*time.Second,
 		)
 		if err != nil {
+			if err == nats.ErrTimeout {
+				logger.Error("failed to delete short url: timeout")
+				http.Error(w, "gateway timeout while deleting short url", http.StatusGatewayTimeout)
+				return
+			}
 			logger.Error("failed to delete short url: %v", err)
 			http.Error(w, "failed to delete short url", http.StatusInternalServerError)
 			return
@@ -1336,6 +1380,11 @@ func handleShortUrlRedirect(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 			5*time.Second,
 		)
 		if err != nil {
+			if err == nats.ErrTimeout {
+				logger.Error("failed to get short url: timeout")
+				http.Error(w, "gateway timeout while fetching short url", http.StatusGatewayTimeout)
+				return
+			}
 			logger.Error("failed to get short url: %v", err)
 			http.Error(w, "failed to get short url", http.StatusInternalServerError)
 			return
@@ -1384,6 +1433,10 @@ func handleShortUrlRedirect(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 				2*time.Second,
 			)
 			if err != nil {
+				if err == nats.ErrTimeout {
+					logger.Error("failed to track access: timeout")
+					return
+				}
 				logger.Error("failed to track access: %v", err)
 				return
 			}
@@ -1439,6 +1492,11 @@ func handleNotificationSend(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 
 			msg, err := nc.Request(whoApi.Subj.UserGroup+"."+whoApi.Subj.UserGet, whoReqBytes, 2*time.Second)
 			if err != nil {
+				if err == nats.ErrTimeout {
+					logger.Error("failed to get user: timeout")
+					http.Error(w, "gateway timeout while getting user", http.StatusGatewayTimeout)
+					return
+				}
 				logger.Error("failed to get user: %v", err)
 				http.Error(w, "internal server error", http.StatusInternalServerError)
 				return
@@ -1491,6 +1549,11 @@ func handleNotificationSend(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		// Send notification via NATS
 		msg, err := nc.Request(ntfy.SubjectNotification, notificationBytes, 10*time.Second)
 		if err != nil {
+			if err == nats.ErrTimeout {
+				logger.Error("failed to send notification: timeout")
+				http.Error(w, "gateway timeout while sending notification", http.StatusGatewayTimeout)
+				return
+			}
 			logger.Error("failed to send notification: %v", err)
 			http.Error(w, "failed to send notification", http.StatusInternalServerError)
 			return
@@ -1547,6 +1610,11 @@ func handleConvoRoom(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		// Send request to convo service
 		msg, err := nc.Request(convoApi.SubjConvoGroup+"."+convoApi.SubjRoomCreate, reqBytes, 5*time.Second)
 		if err != nil {
+			if err == nats.ErrTimeout {
+				logger.Error("failed to create room: timeout")
+				http.Error(w, "gateway timeout while creating room", http.StatusGatewayTimeout)
+				return
+			}
 			logger.Error("failed to create room: %v", err)
 			http.Error(w, "failed to create room", http.StatusInternalServerError)
 			return
@@ -1700,6 +1768,11 @@ func handleChatRequest(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		} else {
 			_, err = nc.Request(ntfy.SubjectNotification, notificationBytes, 10*time.Second)
 			if err != nil {
+				if err == nats.ErrTimeout {
+					logger.Error("failed to send notification: timeout")
+					http.Error(w, "gateway timeout while sending notification", http.StatusGatewayTimeout)
+					return
+				}
 				logger.Error("failed to send notification: %v", err)
 				// Don't fail the request if notification fails
 			} else {
