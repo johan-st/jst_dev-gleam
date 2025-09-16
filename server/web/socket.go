@@ -101,14 +101,18 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	CheckOrigin: func(r *http.Request) bool {
-		// TODO: Configure allowed origins based on environment
-		allowedOrigins := []string{"https://jst.dev", "https://jst-dev.fly.dev", "http://localhost:8080", "https://jst-dev-preview.fly.dev"}
+		// Configure allowed origins based on environment
+		allowedOrigins := AllowedOrigins()
 		origin := r.Header.Get("Origin")
+		fmt.Println("origin", origin)
+		fmt.Println("allowedOrigins", allowedOrigins)
 		for _, allowed := range allowedOrigins {
 			if origin == allowed {
+				fmt.Println("allowed", allowed)
 				return true
 			}
 		}
+		fmt.Println("not allowed")
 		return false
 	},
 }

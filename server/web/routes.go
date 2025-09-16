@@ -113,11 +113,14 @@ func logger(l *jst_log.Logger, next http.Handler) http.Handler {
 func cors(_ *jst_log.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if origin == "http://localhost:8080" || origin == "http://127.0.0.1:8080" {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-		} else {
-			w.Header().Set("Access-Control-Allow-Origin", "https://server-small-dream-1266.fly.dev")
+		allowedOrigins := AllowedOrigins()
+		for _, allowed := range allowedOrigins {
+			if origin == allowed {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				break
+			}
 		}
+		// If no origin matched, don't set CORS headers (browser will block)
 
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")

@@ -148,3 +148,16 @@ func (s *httpServer) RunWithWaitGroup(cleanShutdown *sync.WaitGroup, port string
 	wg.Wait()
 	cleanShutdown.Done()
 }
+
+func AllowedOrigins() []string {
+	return []string{
+		"https://jst.dev",
+		"https://jst-dev.fly.dev",
+		"https://jst-dev-preview.fly.dev",
+		"https://server-small-dream-1266.fly.dev",
+		"http://localhost:8080",
+		"http://127.0.0.1:8080",
+		"http://localhost:1234",
+		"http://127.0.0.1:1234",
+	}
+}
