@@ -394,9 +394,22 @@ func (c *rtClient) handleKVSub(bucket, pattern string) {
 		c.log.Debug("KV subscription not allowed for bucket=%s, pattern=%s", bucket, pattern)
 		return
 	}
-	kv, err := c.srv.js.KeyValue(bucket)
+	// Retry opening the KV bucket to handle transient JetStream states (e.g., leader election)
+	var (
+		kv  nats.KeyValue
+		err error
+	)
+	for attempt := 1; attempt <= 5; attempt++ {
+		kv, err = c.srv.js.KeyValue(bucket)
+		if err == nil {
+			break
+		}
+		// Backoff between attempts
+		c.log.Warn("Retry %d to get KV bucket %s after error: %v", attempt, bucket, err)
+		time.Sleep(time.Duration(attempt*100) * time.Millisecond)
+	}
 	if err != nil {
-		c.log.Error("Failed to get KV bucket %s: %v", bucket, err)
+		c.log.Error("Failed to get KV bucket %s after retries: %v", bucket, err)
 		return
 	}
 	c.log.Debug("Successfully got KV bucket %s", bucket)

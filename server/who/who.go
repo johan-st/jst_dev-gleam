@@ -409,9 +409,14 @@ func (w *Who) handleUserUpdate() micro.HandlerFunc {
 			}
 			return
 		}
-		user.Revision = rev
+		// Get updated user to get the new revision
+		updatedUser := w.userGet(user.ID)
+		if updatedUser != nil {
+			rev = updatedUser.Revision
+		}
 		respData = api.UserUpdateResponse{
 			ID:              user.ID,
+			Revision:        rev,
 			Username:        user.Username,
 			Email:           user.Email,
 			PasswordChanged: passwordChanged,
@@ -666,6 +671,7 @@ func (w *Who) handleAuth() micro.HandlerFunc {
 			}
 			return
 		}
+		l.Debug("reqData: %+v", reqData)
 		if reqData.Username == "" && reqData.Email == "" {
 			l.Warn("username and email are empty")
 			if err := req.Error("INVALID_REQUEST", "username and email are empty", []byte("username and email are empty")); err != nil {
@@ -673,13 +679,23 @@ func (w *Who) handleAuth() micro.HandlerFunc {
 			}
 			return
 		}
-
+		l.Debug("got username or email")
+		if reqData.Password == "" {
+			l.Warn("password empty for user %s", reqData.Username)
+			if err := req.Error("INVALID_REQUEST", "password required", nil); err != nil {
+				l.Error("failed to respond to auth request: %v", err)
+			}
+			return
+		}
+		l.Debug("password not empty")
 		if reqData.Email != "" {
 			user = w.userByEmail(reqData.Email)
 		}
+		l.Debug("no user by email")
 		if user == nil && reqData.Username != "" {
 			user = w.userByUsername(reqData.Username)
 		}
+		l.Debug("no user by username")
 		if user == nil {
 			l.Warn(fmt.Sprintf("user not found: %s", reqData.Username))
 			if err := req.Error("NOT_FOUND", "user not found", []byte(reqData.Username)); err != nil {
@@ -687,15 +703,7 @@ func (w *Who) handleAuth() micro.HandlerFunc {
 			}
 			return
 		}
-		// Verify password
-		if reqData.Password == "" {
-			l.Warn("password empty for user %s", user.Email)
-			if err := req.Error("INVALID_REQUEST", "password required", nil); err != nil {
-				l.Error("failed to respond to auth request: %v", err)
-			}
-			return
-		}
-
+		l.Debug("user found: %+v", user)
 		providedHash := w.hash.Sum([]byte(reqData.Password))
 		if user.PasswordHash != hex.EncodeToString(providedHash) {
 			l.Warn("invalid credentials for user %s", user.Email)
@@ -715,8 +723,10 @@ func (w *Who) handleAuth() micro.HandlerFunc {
 		}
 		l.Debug("got token %s", token)
 		respData = api.AuthResponse{
-			Token:     token,
-			ExpiresAt: time.Now().Add(jwtExpiresAfterTime).Unix(),
+			Subject:     user.ID,
+			Token:       token,
+			ExpiresAt:   time.Now().Add(jwtExpiresAfterTime).Unix(),
+			Permissions: user.Permissions,
 		}
 		if err := req.RespondJSON(respData); err != nil {
 			l.Error("failed to respond to auth request: %v", err)
@@ -843,17 +853,25 @@ func (w *Who) userGet(id string) *userStorage {
 	return &user
 }
 func (w *Who) userByUsername(username string) *userStorage {
+	l := w.l.WithBreadcrumb("user_by_username")
+	l.Debug("username: %s", username)
 	keys, err := w.userRepo.Keys()
+	l.Debug("got user keys: %+v", keys)
+	l.Debug("err: %v", err)
 	if err != nil {
-		w.l.Error("failed to get user keys: %v", err)
+		l.Error("failed to get user keys: %v", err)
 		return nil
 	}
-
+	l.Debug("got user keys: %+v", keys)
 	for key := range keys {
 		userRepoValue, err := w.userRepo.Get(key)
 		if err != nil {
+			l.Debug("got user repo value: %+v", userRepoValue)
+			l.Debug("err: %v", err)
 			continue
 		}
+		l.Debug("got user repo value: %+v", userRepoValue)
+		l.Debug("err: %v", err)
 		if userRepoValue.Username == username {
 			user := repoValueToUserStorage(userRepoValue)
 			return &user
@@ -862,12 +880,13 @@ func (w *Who) userByUsername(username string) *userStorage {
 	return nil
 }
 func (w *Who) userByEmail(email string) *userStorage {
+	l := w.l.WithBreadcrumb("user_by_email")
+	l.Debug("email: %s", email)
 	keys, err := w.userRepo.Keys()
 	if err != nil {
 		w.l.Error("failed to get user keys: %v", err)
 		return nil
 	}
-
 	for key := range keys {
 		userRepoValue, err := w.userRepo.Get(key)
 		if err != nil {

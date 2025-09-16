@@ -26,6 +26,7 @@ type RepoValue interface {
 	FromBytes(value []byte) error
 }
 
+// Repo common interface.
 type Repo[K RepoKey, V RepoValue] interface {
 	Keys() (<-chan K, error)
 	Get(key K) (V, error)
@@ -135,8 +136,7 @@ func NewRepoKv[K RepoKey, V RepoValue](
 				if entry == nil {
 					r.l.Debug("inSyncWg.Done")
 					r.inSyncWg.Done()
-
-					return
+					continue
 				}
 				r.lastRevision = entry.Revision()
 				r.handleUpdateNoLock(entry)
@@ -145,6 +145,7 @@ func NewRepoKv[K RepoKey, V RepoValue](
 	}(r)
 	go func(r *repoKv[K, V]) {
 		r.inSyncWg.Wait()
+		r.l.Debug("repo in sync, starting broadcast loop")
 		r.broadcastLoop()
 	}(r)
 	return r, nil

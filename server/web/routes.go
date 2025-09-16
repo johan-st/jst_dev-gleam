@@ -252,24 +252,25 @@ func handleAuth(l *jst_log.Logger, nc *nats.Conn, jwtSecret string) http.Handler
 			http.Error(w, "error marshalling request", http.StatusInternalServerError)
 			return
 		}
+		subject := whoApi.Subj.AuthGroup + "." + whoApi.Subj.AuthLogin
 		l.Debug("request: %s\n", string(whoBytes))
-		l.Debug("subject: %s\n", whoApi.Subj.AuthGroup+"."+whoApi.Subj.AuthLogin)
+		l.Debug("subject: %s\n", subject)
 
-		whoMsg, err = nc.Request(fmt.Sprintf("%s.%s", whoApi.Subj.AuthGroup, whoApi.Subj.AuthLogin), whoBytes, 10*time.Second)
+		whoMsg, err = nc.Request(fmt.Sprintf("%s.%s", whoApi.Subj.AuthGroup, whoApi.Subj.AuthLogin), whoBytes, 4*time.Second)
 		if err != nil {
 			if err == nats.ErrTimeout {
-				l.Debug("error requesting auth: timeout\n")
+				l.Error("error requesting auth (subject: %s): timeout\n", subject)
 				http.Error(w, "gateway timeout while requesting auth", http.StatusGatewayTimeout)
 				return
 			}
-			l.Debug("error requesting auth: %s\n", err)
+			l.Error("error requesting auth (subject: %s): %s\n", subject, err)
 			http.Error(w, "error requesting auth", http.StatusInternalServerError)
 			return
 		}
 		l.Debug("msg.Data: %s\n", string(whoMsg.Data))
 		err = json.Unmarshal(whoMsg.Data, &whoResp)
 		if err != nil {
-			l.Debug("error unmarshalling auth response: %s\n", err)
+			l.Error("error unmarshalling auth response (subject: %s): %s\n", subject, err)
 			http.Error(w, "error unmarshalling auth response", http.StatusInternalServerError)
 			return
 		}
@@ -277,7 +278,7 @@ func handleAuth(l *jst_log.Logger, nc *nats.Conn, jwtSecret string) http.Handler
 		l.Debug("token: %s\n", whoResp.Token)
 		subject, permissions, err := whoApi.JwtVerify(jwtSecret, audience, whoResp.Token)
 		if err != nil {
-			l.Debug("error verifying jwt: %s\n", err)
+			l.Error("error verifying jwt (subject: %s): %s\n", subject, err)
 			http.Error(w, "error verifying jwt", http.StatusInternalServerError)
 			return
 		}
@@ -296,7 +297,7 @@ func handleAuth(l *jst_log.Logger, nc *nats.Conn, jwtSecret string) http.Handler
 		}
 		err = cookie.Valid()
 		if err != nil {
-			l.Debug("error validating cookie: %s\n", err)
+			l.Error("error validating cookie: %s\n", err)
 			http.Error(w, "error validating cookie", http.StatusInternalServerError)
 			return
 		}
@@ -347,23 +348,28 @@ func handleAuthRefresh(l *jst_log.Logger, nc *nats.Conn, jwtSecret string) http.
 		whoReq = whoApi.AuthRefreshRequest{Subject: subject}
 		whoBytes, err = json.Marshal(whoReq)
 		if err != nil {
+			l.Error("error marshalling request: %s\n", err)
 			http.Error(w, "error marshalling request", http.StatusInternalServerError)
 			return
 		}
-		whoMsg, err = nc.Request(fmt.Sprintf("%s.%s", whoApi.Subj.AuthGroup, whoApi.Subj.AuthRefresh), whoBytes, 10*time.Second)
+		whoMsg, err = nc.Request(fmt.Sprintf("%s.%s", whoApi.Subj.AuthGroup, whoApi.Subj.AuthRefresh), whoBytes, 4*time.Second)
 		if err != nil {
 			if err == nats.ErrTimeout {
+				l.Error("error requesting auth refresh: timeout\n")
 				http.Error(w, "gateway timeout while refreshing auth", http.StatusGatewayTimeout)
 				return
 			}
+			l.Error("error requesting auth refresh: %s\n", err)
 			http.Error(w, "error requesting auth refresh", http.StatusInternalServerError)
 			return
 		}
 		if whoMsg.Header.Get("Nats-Service-Error") != "" {
+			l.Error("error requesting auth refresh: %s\n", string(whoMsg.Data))
 			http.Error(w, string(whoMsg.Data), http.StatusBadGateway)
 			return
 		}
 		if err := json.Unmarshal(whoMsg.Data, &whoResp); err != nil {
+			l.Error("error unmarshalling refresh response: %s\n", err)
 			http.Error(w, "error unmarshalling refresh response", http.StatusInternalServerError)
 			return
 		}
@@ -371,6 +377,7 @@ func handleAuthRefresh(l *jst_log.Logger, nc *nats.Conn, jwtSecret string) http.
 		// Verify refreshed token and set cookie
 		subject2, permissions2, err := whoApi.JwtVerify(jwtSecret, audience, whoResp.Token)
 		if err != nil {
+			l.Error("error verifying jwt: %s\n", err)
 			http.Error(w, "error verifying jwt", http.StatusInternalServerError)
 			return
 		}
@@ -385,6 +392,7 @@ func handleAuthRefresh(l *jst_log.Logger, nc *nats.Conn, jwtSecret string) http.
 			SameSite: http.SameSiteStrictMode,
 		}
 		if err := cookie.Valid(); err != nil {
+			l.Error("error validating cookie: %s\n", err)
 			http.Error(w, "error validating cookie", http.StatusInternalServerError)
 			return
 		}
@@ -448,15 +456,18 @@ func handleUserGetByID(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 
 		authUser, ok := r.Context().Value(who.UserKey).(whoApi.User)
 		if !ok || authUser.ID == "" {
+			l.Info("user not found in context\n")
 			http.Error(w, "not authorized", http.StatusUnauthorized)
 			return
 		}
 		id := r.PathValue("id")
 		if id == "" {
+			l.Warn("invalid id\n")
 			http.Error(w, "invalid id", http.StatusBadRequest)
 			return
 		}
 		if authUser.ID != id {
+			l.Info("forbidden\n")
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -469,7 +480,7 @@ func handleUserGetByID(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 			return
 		}
 
-		msg, err = nc.Request(whoApi.Subj.UserGroup+"."+whoApi.Subj.UserGet, reqBytes, 5*time.Second)
+		msg, err = nc.Request(whoApi.Subj.UserGroup+"."+whoApi.Subj.UserGet, reqBytes, 4*time.Second)
 		if err != nil {
 			if err == nats.ErrTimeout {
 				logger.Error("failed to request who: timeout")
@@ -546,7 +557,7 @@ func handleUserUpdateByID(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 			return
 		}
 
-		msg, err = nc.Request(whoApi.Subj.UserGroup+"."+whoApi.Subj.UserUpdate, reqBytes, 5*time.Second)
+		msg, err = nc.Request(whoApi.Subj.UserGroup+"."+whoApi.Subj.UserUpdate, reqBytes, 4*time.Second)
 		if err != nil {
 			if err == nats.ErrTimeout {
 				logger.Error("failed to request who: timeout")
@@ -670,7 +681,7 @@ func handleArticleNew(l *jst_log.Logger, repo core.Repo[articles.Key, articles.A
 		msg, err := nc.Request(
 			whoApi.Subj.UserGroup+"."+whoApi.Subj.UserGet,
 			whoReq,
-			5*time.Second,
+			4*time.Second,
 		)
 		if err != nil {
 			if err == nats.ErrTimeout {
@@ -1006,7 +1017,7 @@ func handleShortUrlList(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		msg, err := nc.Request(
 			shortUrlApi.Subj.ShortUrlGroup+"."+shortUrlApi.Subj.ShortUrlList,
 			reqBytes,
-			5*time.Second,
+			4*time.Second,
 		)
 		if err != nil {
 			if err == nats.ErrTimeout {
@@ -1074,7 +1085,7 @@ func handleShortUrlCreate(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		msg, err := nc.Request(
 			shortUrlApi.Subj.ShortUrlGroup+"."+shortUrlApi.Subj.ShortUrlCreate,
 			reqBytes,
-			5*time.Second,
+			4*time.Second,
 		)
 		if err != nil {
 			if err == nats.ErrTimeout {
@@ -1147,7 +1158,7 @@ func handleShortUrlGet(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		msg, err := nc.Request(
 			shortUrlApi.Subj.ShortUrlGroup+"."+shortUrlApi.Subj.ShortUrlGet,
 			reqBytes,
-			5*time.Second,
+			4*time.Second,
 		)
 		if err != nil {
 			if err == nats.ErrTimeout {
@@ -1227,7 +1238,7 @@ func handleShortUrlUpdate(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		msg, err := nc.Request(
 			shortUrlApi.Subj.ShortUrlGroup+"."+shortUrlApi.Subj.ShortUrlUpdate,
 			reqBytes,
-			5*time.Second,
+			4*time.Second,
 		)
 		if err != nil {
 			if err == nats.ErrTimeout {
@@ -1310,7 +1321,7 @@ func handleShortUrlDelete(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		msg, err := nc.Request(
 			shortUrlApi.Subj.ShortUrlGroup+"."+shortUrlApi.Subj.ShortUrlDelete,
 			reqBytes,
-			5*time.Second,
+			4*time.Second,
 		)
 		if err != nil {
 			if err == nats.ErrTimeout {
@@ -1377,7 +1388,7 @@ func handleShortUrlRedirect(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		msg, err := nc.Request(
 			shortUrlApi.Subj.ShortUrlGroup+"."+shortUrlApi.Subj.ShortUrlGet,
 			reqBytes,
-			5*time.Second,
+			4*time.Second,
 		)
 		if err != nil {
 			if err == nats.ErrTimeout {
@@ -1430,7 +1441,7 @@ func handleShortUrlRedirect(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 			accessMsg, err := nc.Request(
 				shortUrlApi.Subj.ShortUrlGroup+"."+shortUrlApi.Subj.ShortUrlAccess,
 				accessReqBytes,
-				2*time.Second,
+				4*time.Second,
 			)
 			if err != nil {
 				if err == nats.ErrTimeout {
@@ -1490,7 +1501,7 @@ func handleNotificationSend(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 				return
 			}
 
-			msg, err := nc.Request(whoApi.Subj.UserGroup+"."+whoApi.Subj.UserGet, whoReqBytes, 2*time.Second)
+			msg, err := nc.Request(whoApi.Subj.UserGroup+"."+whoApi.Subj.UserGet, whoReqBytes, 4*time.Second)
 			if err != nil {
 				if err == nats.ErrTimeout {
 					logger.Error("failed to get user: timeout")
@@ -1547,7 +1558,7 @@ func handleNotificationSend(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		}
 
 		// Send notification via NATS
-		msg, err := nc.Request(ntfy.SubjectNotification, notificationBytes, 10*time.Second)
+		msg, err := nc.Request(ntfy.SubjectNotification, notificationBytes, 4*time.Second)
 		if err != nil {
 			if err == nats.ErrTimeout {
 				logger.Error("failed to send notification: timeout")
@@ -1608,7 +1619,7 @@ func handleConvoRoom(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		}
 
 		// Send request to convo service
-		msg, err := nc.Request(convoApi.SubjConvoGroup+"."+convoApi.SubjRoomCreate, reqBytes, 5*time.Second)
+		msg, err := nc.Request(convoApi.SubjConvoGroup+"."+convoApi.SubjRoomCreate, reqBytes, 4*time.Second)
 		if err != nil {
 			if err == nats.ErrTimeout {
 				logger.Error("failed to create room: timeout")
@@ -1766,7 +1777,7 @@ func handleChatRequest(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 			logger.Error("failed to marshal notification: %v", err)
 			// Don't fail the request if notification fails
 		} else {
-			_, err = nc.Request(ntfy.SubjectNotification, notificationBytes, 10*time.Second)
+			_, err = nc.Request(ntfy.SubjectNotification, notificationBytes, 4*time.Second)
 			if err != nil {
 				if err == nats.ErrTimeout {
 					logger.Error("failed to send notification: timeout")
