@@ -125,18 +125,18 @@ func (n *Ntfy) handleNotification() micro.HandlerFunc {
 	return func(req micro.Request) {
 		var notification Notification
 		if err := json.Unmarshal(req.Data(), &notification); err != nil {
-			n.l.Error("failed to unmarshal notification", "error", err)
+			n.l.Error("failed to unmarshal notification: %v", err)
 			if err := req.Error("400", fmt.Sprintf("failed to unmarshal notification: %v", err), nil); err != nil {
-				n.l.Error("failed to send error response", "error", err)
+				n.l.Error("failed to send error response: %v", err)
 			}
 			return
 		}
 
 		// Validate required fields
 		if err := n.validateNotification(&notification); err != nil {
-			n.l.Error("invalid notification", "error", err, "notification_id", notification.ID)
+			n.l.Error("invalid notification: %v (notification_id: %s)", err, notification.ID)
 			if err := req.Error("400", fmt.Sprintf("invalid notification: %v", err), nil); err != nil {
-				n.l.Error("failed to send error response", "error", err)
+				n.l.Error("failed to send error response: %v", err)
 			}
 			return
 		}
@@ -152,14 +152,14 @@ func (n *Ntfy) handleNotification() micro.HandlerFunc {
 		// Send notification via ntfy
 		err := n.sendNtfyNotification(notification)
 		if err != nil {
-			n.l.Error("failed to send ntfy notification", "error", err, "notification_id", notification.ID)
+			n.l.Error("failed to send ntfy notification: %v (notification_id: %s)", err, notification.ID)
 			if err := req.Error("500", fmt.Sprintf("failed to send notification: %v", err), nil); err != nil {
-				n.l.Error("failed to send error response", "error", err)
+				n.l.Error("failed to send error response: %v", err)
 			}
 		} else {
-			n.l.Info("ntfy notification sent successfully", "notification_id", notification.ID, "topic", notification.NtfyTopic)
+			n.l.Info("ntfy notification sent successfully (notification_id: %s, topic: %s)", notification.ID, notification.NtfyTopic)
 			if err := req.Respond([]byte("success")); err != nil {
-				n.l.Error("failed to send success response", "error", err)
+				n.l.Error("failed to send success response: %v", err)
 			}
 		}
 	}

@@ -70,7 +70,7 @@ func NewRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (core.Repo[K
 		return Key{Id: id}
 	}
 
-	repo, err := core.NewRepo[Key, Article](ctx, kv, stringToKey)
+	repo, err := core.NewRepoKv[Key, Article](ctx, l, kv, stringToKey)
 	if err != nil {
 		return nil, fmt.Errorf("create repo: %w", err)
 	}

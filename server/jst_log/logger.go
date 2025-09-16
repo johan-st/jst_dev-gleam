@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -47,6 +48,7 @@ type Logger struct {
 	level       Level
 	queue       []LogMessage
 	children    []*Logger
+	mu          sync.RWMutex // Protects queue and children access
 }
 
 // NewLogger creates a new Logger instance with the specified application name and subject configuration. The logger starts with the Info level, no NATS connection, and empty breadcrumbs and children.
@@ -62,6 +64,8 @@ func NewLogger(appName string, subjects LoggerSubjects) *Logger {
 	return logger
 }
 func (l *Logger) Connect(nc *nats.Conn) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.nc = nc
 
 	// publish queued messages
@@ -94,6 +98,9 @@ func DefaultSubjects() LoggerSubjects {
 }
 
 func (l *Logger) WithBreadcrumb(breadcrumb string) *Logger {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	newLogger := &Logger{
 		nc:          l.nc,
 		conf:        l.conf,
@@ -135,7 +142,9 @@ func (l *Logger) log(level Level, msg string, args ...any) {
 
 	if l.nc == nil {
 		fmt.Printf("[local] %s\n", msg)
+		l.mu.Lock()
 		l.queue = append(l.queue, LogMessage{level, msg, args})
+		l.mu.Unlock()
 		return
 	}
 	unixMicro := strconv.FormatInt(time.Now().UnixMicro(), 10)

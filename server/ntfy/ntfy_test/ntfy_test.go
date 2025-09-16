@@ -3,6 +3,7 @@ package ntfy_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -71,7 +72,6 @@ func setup() (*nats.Conn, func(), error) {
 
 	// Start ntfy service in background
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	go func() {
 		if err := ntfyService.Run(ctx); err != nil && err != context.Canceled {
@@ -80,8 +80,12 @@ func setup() (*nats.Conn, func(), error) {
 		}
 	}()
 
-	// Wait a bit for service to initialize
-	time.Sleep(100 * time.Millisecond)
+	// Wait for service to be ready by checking if the endpoint is available
+	if err := waitForService(nc, ntfy.SubjectNotification, 5*time.Second); err != nil {
+		cancel()
+		nc.Close()
+		return nil, nil, err
+	}
 
 	return nc,
 		func() {
@@ -89,4 +93,31 @@ func setup() (*nats.Conn, func(), error) {
 			nc.Close()
 		},
 		nil
+}
+
+// waitForService waits for a NATS service endpoint to be available
+func waitForService(nc *nats.Conn, subject string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		// Try to discover the service by sending a request with a very short timeout
+		// If we get a "no responders" error, the service isn't ready yet
+		_, err := nc.Request(subject, []byte("{}"), 100*time.Millisecond)
+		if err == nil {
+			// Service is ready
+			return nil
+		}
+
+		// Check if it's a "no responders" error (service not ready)
+		if err != nats.ErrNoResponders {
+			// Some other error occurred, service might be ready but request failed
+			// This is acceptable for our discovery check
+			return nil
+		}
+
+		// Service not ready yet, wait a bit
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	return fmt.Errorf("service not ready after %v", timeout)
 }

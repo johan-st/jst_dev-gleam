@@ -8,28 +8,42 @@ import (
 	"strings"
 	"time"
 
+	"jst_dev/server/core"
 	"jst_dev/server/jst_log"
 	"jst_dev/server/urlShort/api"
 
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
-	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nats.go/micro"
 )
 
 const ShortUrlKey = "shorturl_url"
 
 type ShortUrlService struct {
-	shortUrls   []ShortUrl
-	l           *jst_log.Logger
-	nc          *nats.Conn
-	shortUrlsKv jetstream.KeyValue
-	ctx         context.Context
+	shortUrlRepo core.Repo[ShortUrlRepoKey, ShortUrlRepoValue]
+	l            *jst_log.Logger
+	nc           *nats.Conn
+	ctx          context.Context
 }
 
 type ShortUrl struct {
 	api.ShortUrl
 	revision uint64
+}
+
+// Helper functions to convert between old and new data types
+func shortUrlToRepoValue(su ShortUrl) ShortUrlRepoValue {
+	return ShortUrlRepoValue{
+		ShortUrl: su.ShortUrl,
+		Revision: su.revision,
+	}
+}
+
+func repoValueToShortUrl(rv ShortUrlRepoValue) ShortUrl {
+	return ShortUrl{
+		ShortUrl: rv.ShortUrl,
+		revision: rv.Revision,
+	}
 }
 
 type Conf struct {
@@ -39,11 +53,17 @@ type Conf struct {
 
 // New creates a new ShortUrlService instance with the provided configuration.
 func New(ctx context.Context, c *Conf) (*ShortUrlService, error) {
+	// Initialize short URL repository
+	shortUrlRepo, err := NewShortUrlRepo(ctx, c.NatsConn, c.Logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create short URL repo: %w", err)
+	}
+
 	service := &ShortUrlService{
-		l:         c.Logger,
-		nc:        c.NatsConn,
-		ctx:       ctx,
-		shortUrls: []ShortUrl{},
+		shortUrlRepo: shortUrlRepo,
+		l:            c.Logger,
+		nc:           c.NatsConn,
+		ctx:          ctx,
 	}
 
 	return service, nil
@@ -56,29 +76,7 @@ func (s *ShortUrlService) Run(ctx context.Context) error {
 		return fmt.Errorf("nats connection not connected: %s", s.nc.Status())
 	}
 
-	js, err := jetstream.New(s.nc)
-	if err != nil {
-		return fmt.Errorf("failed to get JetStream context: %w", err)
-	}
-
-	confKv := jetstream.KeyValueConfig{
-		Bucket:       "url_short",
-		Description:  "short url mappings",
-		Storage:      jetstream.FileStorage,
-		MaxValueSize: 1 * 1024,         // 1 KB
-		MaxBytes:     50 * 1024 * 1024, // 50 MB
-		History:      1,
-		Compression:  false,
-	}
-	kv, err := js.CreateOrUpdateKeyValue(ctx, confKv)
-	if err != nil {
-		s.l.Error(fmt.Sprintf("create short urls kv store %s:%s", confKv.Bucket, err.Error()))
-		return fmt.Errorf("create short urls kv store %s:%w", confKv.Bucket, err)
-	}
-	s.shortUrlsKv = kv
-	if err := s.shortUrlWatcher(ctx); err != nil {
-		return fmt.Errorf("failed to start short url watcher: %w", err)
-	}
+	// Short URL repository is already initialized in New()
 
 	svcMetadata := map[string]string{}
 	svcMetadata["location"] = "unknown"
@@ -136,67 +134,7 @@ func (s *ShortUrlService) Name() string {
 
 // ----------- WATCHERS -----------
 
-func (s *ShortUrlService) shortUrlWatcher(ctx context.Context) error {
-	var (
-		watcher  jetstream.KeyWatcher
-		err      error
-		kv       jetstream.KeyValueEntry
-		shortUrl ShortUrl
-	)
-
-	watcher, err = s.shortUrlsKv.WatchAll(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to watch short urls: %w", err)
-	}
-
-	go func() {
-		for {
-			select {
-			case kv = <-watcher.Updates():
-				if kv == nil {
-					s.l.Info("up to date. %d short urls loaded", len(s.shortUrls))
-					continue
-				}
-				switch kv.Operation() {
-				case jetstream.KeyValuePut:
-					err = json.Unmarshal(kv.Value(), &shortUrl)
-					if err != nil {
-						s.l.Error("failed to unmarshal short url: %s", err.Error())
-						continue
-					}
-					found := false
-					for i, existingShortUrl := range s.shortUrls {
-						if existingShortUrl.ID == shortUrl.ID {
-							s.shortUrls[i] = shortUrl
-							found = true
-							s.l.Debug("updated short url(%s). %d short urls loaded", shortUrl.ID, len(s.shortUrls))
-							break
-						}
-					}
-					if !found {
-						s.shortUrls = append(s.shortUrls, shortUrl)
-						s.l.Debug("new short url(%s). %d short urls loaded", shortUrl.ID, len(s.shortUrls))
-					}
-				case jetstream.KeyValueDelete:
-					for i, existingShortUrl := range s.shortUrls {
-						if existingShortUrl.ID == kv.Key() {
-							s.shortUrls = append(s.shortUrls[:i], s.shortUrls[i+1:]...)
-							s.l.Debug("deleted short url(%s). %d short urls loaded", kv.Key(), len(s.shortUrls))
-							break
-						}
-					}
-				default:
-					s.l.Error("unknown operation: %s", kv.Operation())
-				}
-			case <-ctx.Done():
-				s.l.Debug("watcher: context done")
-				return
-			}
-		}
-	}()
-
-	return nil
-}
+// shortUrlWatcher removed - repository handles watching automatically
 
 // ----------- HANDLERS -----------
 
@@ -319,11 +257,9 @@ func (s *ShortUrlService) handleShortUrlUpdate() micro.HandlerFunc {
 	l := s.l.WithBreadcrumb("shorturl_update")
 	return func(req micro.Request) {
 		var (
-			err       error
-			shortUrl  *ShortUrl
-			reqData   api.ShortUrlUpdateRequest
-			userBytes []byte
-			rev       uint64
+			err      error
+			shortUrl *ShortUrl
+			reqData  api.ShortUrlUpdateRequest
 		)
 
 		l.Debug("got request")
@@ -365,15 +301,10 @@ func (s *ShortUrlService) handleShortUrlUpdate() micro.HandlerFunc {
 		}
 		shortUrl.UpdatedAt = time.Now().Unix()
 
-		userBytes, err = json.Marshal(shortUrl)
-		if err != nil {
-			l.Warn(fmt.Sprintf("failed to marshal short url: %s", err.Error()))
-			if err := req.Error("SERVER_ERROR", "server error while updating short url", []byte(err.Error())); err != nil {
-				l.Error("failed to respond to short url update request: %v", err)
-			}
-			return
-		}
-		rev, err = s.shortUrlsKv.Put(s.ctx, shortUrl.ID, userBytes)
+		// Convert to repo value and update
+		shortUrlRepoValue := shortUrlToRepoValue(*shortUrl)
+		key := ShortUrlRepoKey{ID: shortUrl.ID}
+		err = s.shortUrlRepo.Put(key, shortUrlRepoValue)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to update short url: %s", err.Error()))
 			if err := req.Error("SERVER_ERROR", "server error while updating short url", []byte(err.Error())); err != nil {
@@ -381,7 +312,6 @@ func (s *ShortUrlService) handleShortUrlUpdate() micro.HandlerFunc {
 			}
 			return
 		}
-		shortUrl.revision = rev
 		if err := req.RespondJSON(shortUrl.ShortUrl); err != nil {
 			l.Error("failed to respond to short url update request: %v", err)
 		}
@@ -414,7 +344,8 @@ func (s *ShortUrlService) handleShortUrlDelete() micro.HandlerFunc {
 			}
 			return
 		}
-		err = s.shortUrlsKv.Delete(s.ctx, shortUrl.ID)
+		key := ShortUrlRepoKey{ID: shortUrl.ID}
+		err = s.shortUrlRepo.Delete(key)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to delete short url: %s", err.Error()))
 			if err := req.Error("SERVER_ERROR", "server error while deleting short url", []byte(err.Error())); err != nil {
@@ -557,10 +488,8 @@ func (s *ShortUrlService) handleShortUrlAccess() micro.HandlerFunc {
 
 func (s *ShortUrlService) shortUrlCreate(shortCode, targetURL, createdBy string) (*ShortUrl, error) {
 	var (
-		err           error
-		shortUrl      *ShortUrl
-		shortUrlBytes []byte
-		rev           uint64
+		err               error
+		shortUrlRepoValue ShortUrlRepoValue
 	)
 
 	if shortCode == "" || targetURL == "" {
@@ -571,7 +500,7 @@ func (s *ShortUrlService) shortUrlCreate(shortCode, targetURL, createdBy string)
 	shortCode = strings.ToLower(strings.TrimSpace(shortCode))
 
 	nowUnix := time.Now().Unix()
-	shortUrl = &ShortUrl{
+	shortUrlRepoValue = ShortUrlRepoValue{
 		ShortUrl: api.ShortUrl{
 			ID:          uuid.New().String(),
 			ShortCode:   shortCode,
@@ -582,33 +511,47 @@ func (s *ShortUrlService) shortUrlCreate(shortCode, targetURL, createdBy string)
 			AccessCount: 0,
 			IsActive:    true,
 		},
+		Revision: 0, // Will be set by the repo
 	}
 
-	shortUrlBytes, err = json.Marshal(shortUrl)
+	key := ShortUrlRepoKey{ID: shortUrlRepoValue.ID}
+	err = s.shortUrlRepo.Put(key, shortUrlRepoValue)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal short url: %w", err)
+		return nil, fmt.Errorf("failed to put short url in repo: %w", err)
 	}
-	rev, err = s.shortUrlsKv.Create(s.ctx, shortUrl.ID, shortUrlBytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to put short url in kv: %w", err)
-	}
-	s.l.Debug("short url created %s, rev %d", shortUrl.ShortCode, rev)
-	return shortUrl, nil
+	s.l.Debug("short url created %s", shortUrlRepoValue.ShortCode)
+
+	// Convert back to ShortUrl for compatibility
+	shortUrl := repoValueToShortUrl(shortUrlRepoValue)
+	return &shortUrl, nil
 }
 
 func (s *ShortUrlService) shortUrlGet(id string) *ShortUrl {
-	for _, shortUrl := range s.shortUrls {
-		if shortUrl.ID == id {
-			return &shortUrl
-		}
+	key := ShortUrlRepoKey{ID: id}
+	shortUrlRepoValue, err := s.shortUrlRepo.Get(key)
+	if err != nil {
+		s.l.Debug("short URL not found: %s", id)
+		return nil
 	}
-	return nil
+	shortUrl := repoValueToShortUrl(shortUrlRepoValue)
+	return &shortUrl
 }
 
 func (s *ShortUrlService) shortUrlByShortCode(shortCode string) *ShortUrl {
 	shortCode = strings.ToLower(strings.TrimSpace(shortCode))
-	for _, shortUrl := range s.shortUrls {
-		if shortUrl.ShortCode == shortCode {
+	keys, err := s.shortUrlRepo.Keys()
+	if err != nil {
+		s.l.Error("failed to get short URL keys: %v", err)
+		return nil
+	}
+
+	for key := range keys {
+		shortUrlRepoValue, err := s.shortUrlRepo.Get(key)
+		if err != nil {
+			continue
+		}
+		if shortUrlRepoValue.ShortCode == shortCode {
+			shortUrl := repoValueToShortUrl(shortUrlRepoValue)
 			return &shortUrl
 		}
 	}
@@ -616,13 +559,20 @@ func (s *ShortUrlService) shortUrlByShortCode(shortCode string) *ShortUrl {
 }
 
 func (s *ShortUrlService) filterShortUrls(createdBy string) []ShortUrl {
-	if createdBy == "" {
-		return s.shortUrls
+	keys, err := s.shortUrlRepo.Keys()
+	if err != nil {
+		s.l.Error("failed to get short URL keys: %v", err)
+		return []ShortUrl{}
 	}
 
 	filtered := make([]ShortUrl, 0)
-	for _, shortUrl := range s.shortUrls {
-		if shortUrl.CreatedBy == createdBy {
+	for key := range keys {
+		shortUrlRepoValue, err := s.shortUrlRepo.Get(key)
+		if err != nil {
+			continue
+		}
+		if createdBy == "" || shortUrlRepoValue.CreatedBy == createdBy {
+			shortUrl := repoValueToShortUrl(shortUrlRepoValue)
 			filtered = append(filtered, shortUrl)
 		}
 	}
@@ -638,13 +588,12 @@ func (s *ShortUrlService) IncrementAccessCount(shortCode string) error {
 	shortUrl.AccessCount++
 	shortUrl.UpdatedAt = time.Now().Unix()
 
-	shortUrlBytes, err := json.Marshal(shortUrl)
+	// Convert to repo value and update
+	shortUrlRepoValue := shortUrlToRepoValue(*shortUrl)
+	key := ShortUrlRepoKey{ID: shortUrl.ID}
+	err := s.shortUrlRepo.Put(key, shortUrlRepoValue)
 	if err != nil {
-		return fmt.Errorf("failed to marshal short url: %w", err)
-	}
-	_, err = s.shortUrlsKv.Put(s.ctx, shortUrl.ID, shortUrlBytes)
-	if err != nil {
-		return fmt.Errorf("failed to update short url in KV store: %w", err)
+		return fmt.Errorf("failed to update short url in repository: %w", err)
 	}
 
 	return nil

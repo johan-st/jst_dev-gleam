@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"jst_dev/server/core"
 	"jst_dev/server/jst_log"
 	"jst_dev/server/urlShort/api"
 
@@ -222,8 +223,9 @@ func TestShortUrlAPIStructs(t *testing.T) {
 
 func TestShortCodeGeneration(t *testing.T) {
 	// Create a minimal service for testing generation functions
+	repo := core.NewRepoSimple[ShortUrlRepoKey, ShortUrlRepoValue]()
 	service := &ShortUrlService{
-		shortUrls: []ShortUrl{},
+		shortUrlRepo: repo,
 	}
 
 	// Test generateShortCode
@@ -261,10 +263,8 @@ func TestShortCodeGeneration(t *testing.T) {
 	}
 
 	// Test generateUniqueShortCode with existing codes
-	service.shortUrls = []ShortUrl{
-		{ShortUrl: api.ShortUrl{ShortCode: "abcd"}},
-		{ShortUrl: api.ShortUrl{ShortCode: "efgh"}},
-	}
+	service.shortUrlRepo.Put(ShortUrlRepoKey{ID: "abcd"}, ShortUrlRepoValue{ShortUrl: api.ShortUrl{ShortCode: "abcd"}})
+	service.shortUrlRepo.Put(ShortUrlRepoKey{ID: "efgh"}, ShortUrlRepoValue{ShortUrl: api.ShortUrl{ShortCode: "efgh"}})
 
 	uniqueCode2, err := service.generateUniqueShortCode()
 	if err != nil {
@@ -285,8 +285,9 @@ func TestShortCodeGeneration(t *testing.T) {
 
 func TestShortCodeLengthProgression(t *testing.T) {
 	// Create a service with many existing codes to force length progression
+	repo := core.NewRepoSimple[ShortUrlRepoKey, ShortUrlRepoValue]()
 	service := &ShortUrlService{
-		shortUrls: []ShortUrl{},
+		shortUrlRepo: repo,
 	}
 
 	// Fill up with many 4-character codes to force progression to 5 characters
@@ -298,9 +299,7 @@ func TestShortCodeLengthProgression(t *testing.T) {
 			charset[(i+2)%len(charset)],
 			charset[(i+3)%len(charset)])
 
-		service.shortUrls = append(service.shortUrls, ShortUrl{
-			ShortUrl: api.ShortUrl{ShortCode: code},
-		})
+		service.shortUrlRepo.Put(ShortUrlRepoKey{ID: code}, ShortUrlRepoValue{ShortUrl: api.ShortUrl{ShortCode: code}})
 	}
 
 	// Generate a unique code - should be 5 characters due to collisions
@@ -318,8 +317,16 @@ func TestShortCodeLengthProgression(t *testing.T) {
 	}
 
 	// Verify it's unique
-	for _, existing := range service.shortUrls {
-		if existing.ShortCode == uniqueCode {
+	keys, err := service.shortUrlRepo.Keys()
+	if err != nil {
+		t.Fatalf("Failed to get short URL keys: %v", err)
+	}
+	for key := range keys {
+		existing, err := service.shortUrlRepo.Get(key)
+		if err != nil {
+			t.Fatalf("Failed to get short URL: %v", err)
+		}
+		if existing.ShortUrl.ShortCode == uniqueCode {
 			t.Errorf("Generated code should be unique: %s", uniqueCode)
 		}
 	}
@@ -328,7 +335,7 @@ func TestShortCodeLengthProgression(t *testing.T) {
 func TestShortUrlAuthentication(t *testing.T) {
 	// Create a minimal service for testing
 	service := &ShortUrlService{
-		shortUrls: []ShortUrl{},
+		shortUrlRepo: core.NewRepoSimple[ShortUrlRepoKey, ShortUrlRepoValue](),
 	}
 
 	// Test creating short URL with createdBy (mock the KV store call)
@@ -345,7 +352,7 @@ func TestShortUrlAuthentication(t *testing.T) {
 			IsActive:    true,
 		},
 	}
-	service.shortUrls = append(service.shortUrls, *shortUrl1)
+	service.shortUrlRepo.Put(ShortUrlRepoKey{ID: shortUrl1.ShortUrl.ID}, ShortUrlRepoValue{ShortUrl: shortUrl1.ShortUrl})
 
 	// Test creating short URL without createdBy
 	shortUrl2 := &ShortUrl{
@@ -360,7 +367,7 @@ func TestShortUrlAuthentication(t *testing.T) {
 			IsActive:    true,
 		},
 	}
-	service.shortUrls = append(service.shortUrls, *shortUrl2)
+	service.shortUrlRepo.Put(ShortUrlRepoKey{ID: shortUrl2.ShortUrl.ID}, ShortUrlRepoValue{ShortUrl: shortUrl2.ShortUrl})
 
 	// Test filtering - should work with both
 	filtered := service.filterShortUrls("user123")

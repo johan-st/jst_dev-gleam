@@ -13,9 +13,9 @@ import (
 	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
-	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nats-io/nats.go/micro"
 
+	"jst_dev/server/core"
 	"jst_dev/server/jst_log"
 	"jst_dev/server/who/api"
 )
@@ -31,13 +31,12 @@ var PermissionsAll = []api.Permission{
 }
 
 type Who struct {
-	users   []userStorage
-	l       *jst_log.Logger
-	nc      *nats.Conn
-	hash    hash.Hash
-	secret  []byte
-	usersKv jetstream.KeyValue
-	ctx     context.Context
+	userRepo core.Repo[UserRepoKey, UserRepoValue]
+	l        *jst_log.Logger
+	nc       *nats.Conn
+	hash     hash.Hash
+	secret   []byte
+	ctx      context.Context
 }
 
 // userStorage is the JSON representation persisted in KV. It mirrors User but
@@ -46,6 +45,15 @@ type userStorage struct {
 	api.User
 	PasswordHash string `json:"passwordHash"`
 	Revision     uint64 `json:"revision"`
+}
+
+// Helper functions to convert between old and new data types
+func userStorageToRepoValue(us userStorage) UserRepoValue {
+	return UserRepoValue(us)
+}
+
+func repoValueToUserStorage(rv UserRepoValue) userStorage {
+	return userStorage(rv)
 }
 
 type Conf struct {
@@ -75,14 +83,19 @@ func New(ctx context.Context, c *Conf) (*Who, error) {
 		return nil, fmt.Errorf("failed to write hash salt: %w", err)
 	}
 
+	// Initialize user repository
+	userRepo, err := NewUserRepo(ctx, c.NatsConn, c.Logger)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create user repo: %w", err)
+	}
+
 	who = &Who{
-		l:       c.Logger,
-		nc:      c.NatsConn,
-		ctx:     ctx,
-		hash:    hash,
-		users:   []userStorage{},
-		secret:  c.JwtSecret,
-		usersKv: nil,
+		userRepo: userRepo,
+		l:        c.Logger,
+		nc:       c.NatsConn,
+		ctx:      ctx,
+		hash:     hash,
+		secret:   c.JwtSecret,
 	}
 
 	return who, nil
@@ -95,29 +108,7 @@ func (w *Who) Run(ctx context.Context) error {
 		return fmt.Errorf("nats connection not connected: %s", w.nc.Status())
 	}
 
-	js, err := jetstream.New(w.nc)
-	if err != nil {
-		return fmt.Errorf("failed to get JetStream context: %w", err)
-	}
-
-	confKv := jetstream.KeyValueConfig{
-		Bucket:       "who_users",
-		Description:  "who users by id",
-		Storage:      jetstream.FileStorage,
-		MaxValueSize: 1024 * 1024 * 1,  // 1 MB
-		MaxBytes:     1024 * 1024 * 50, // 50 MB,
-		History:      64,
-		Compression:  true,
-	}
-	kv, err := js.CreateOrUpdateKeyValue(ctx, confKv)
-	if err != nil {
-		w.l.Error(fmt.Sprintf("create users kv store %s:%s", confKv.Bucket, err.Error()))
-		return fmt.Errorf("create users kv store %s:%w", confKv.Bucket, err)
-	}
-	w.usersKv = kv
-	if err := w.userWatcher(ctx); err != nil {
-		return fmt.Errorf("failed to start user watcher: %w", err)
-	}
+	// User repository is already initialized in New()
 
 	svcMetadata := map[string]string{}
 	svcMetadata["location"] = "unknown"
@@ -198,70 +189,7 @@ func (w *Who) Start(ctx context.Context) error {
 
 // ----------- WATCHERS -----------
 
-func (w *Who) userWatcher(ctx context.Context) error {
-	var (
-		watcher jetstream.KeyWatcher
-		kv      jetstream.KeyValueEntry
-	)
-
-	// Store the context in the Who struct
-	w.ctx = context.Background()
-
-	watcher, err := w.usersKv.WatchAll(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to watch users: %w", err)
-	}
-
-	go func() {
-		for {
-			select {
-			case kv = <-watcher.Updates():
-				if kv == nil {
-					w.l.Info("up to date. %d users loaded", len(w.users))
-					continue
-				}
-				switch kv.Operation() {
-				case jetstream.KeyValuePut:
-					var store userStorage
-					err = json.Unmarshal(kv.Value(), &store)
-					if err != nil {
-						w.l.Error("failed to unmarshal user: %s", err.Error())
-						continue
-					}
-					user := userStorage{User: store.User, PasswordHash: store.PasswordHash, Revision: store.Revision}
-					found := false
-					for i, existingUser := range w.users {
-						if existingUser.ID == user.ID {
-							w.users[i] = user
-							found = true
-							w.l.Debug("updated user(%s). %d users loaded", user.ID, len(w.users))
-							break
-						}
-					}
-					if !found {
-						w.users = append(w.users, user)
-						w.l.Debug("new user(%s). %d users loaded", user.ID, len(w.users))
-					}
-				case jetstream.KeyValueDelete:
-					for i, existingUser := range w.users {
-						if existingUser.ID == kv.Key() {
-							w.users = append(w.users[:i], w.users[i+1:]...)
-							w.l.Debug("deleted user(%s). %d users loaded", kv.Key(), len(w.users))
-							break
-						}
-					}
-				default:
-					w.l.Error("unknown operation: %s", kv.Operation())
-				}
-			case <-ctx.Done():
-				w.l.Debug("watcher: context done")
-				return
-			}
-		}
-	}()
-
-	return nil
-}
+// userWatcher removed - repository handles watching automatically
 
 // ----------- HANDLERS -----------
 // - Users
@@ -332,7 +260,7 @@ func (w *Who) handleUserCreate() micro.HandlerFunc {
 			return
 		}
 
-		w.users = append(w.users, *user)
+		// User is already stored in the repository
 		respData = api.UserFullResponse{
 			ID:          user.ID,
 			Username:    user.Username,
@@ -520,7 +448,8 @@ func (w *Who) handleUserDelete() micro.HandlerFunc {
 			}
 			return
 		}
-		err = w.usersKv.Delete(w.ctx, user.ID)
+		key := UserRepoKey{ID: user.ID}
+		err = w.userRepo.Delete(key)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to delete user: %s", err.Error()))
 			if err := req.Error("SERVER_ERROR", "server error while deleting user", []byte(err.Error())); err != nil {
@@ -857,11 +786,9 @@ func (w *Who) handleAuthRefresh() micro.HandlerFunc {
 
 func (w *Who) userCreate(username, email, password string) (*userStorage, error) {
 	var (
-		err          error
-		user         *userStorage
-		userBytes    []byte
-		passwordHash []byte
-		rev          uint64
+		err           error
+		passwordHash  []byte
+		userRepoValue UserRepoValue
 	)
 
 	if username == "" || email == "" || password == "" {
@@ -869,7 +796,7 @@ func (w *Who) userCreate(username, email, password string) (*userStorage, error)
 	}
 
 	passwordHash = w.hash.Sum([]byte(password))
-	user = &userStorage{
+	userRepoValue = UserRepoValue{
 		User: api.User{
 			Version:     1,
 			ID:          uuid.New().String(),
@@ -878,29 +805,27 @@ func (w *Who) userCreate(username, email, password string) (*userStorage, error)
 			Permissions: []api.Permission{},
 		},
 		PasswordHash: hex.EncodeToString(passwordHash),
+		Revision:     0, // Will be set by the repo
 	}
-	userBytes, err = json.Marshal(user)
+
+	key := UserRepoKey{ID: userRepoValue.ID}
+	err = w.userRepo.Put(key, userRepoValue)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal user: %w", err)
+		return nil, fmt.Errorf("failed to put user in repo: %w", err)
 	}
-	rev, err = w.usersKv.Create(w.ctx, user.ID, userBytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to put user in kv: %w", err)
-	}
-	w.l.Debug("user created %s, rev %d", user.Email, rev)
-	return user, nil
+	w.l.Debug("user created %s", userRepoValue.Email)
+
+	// Convert back to userStorage for compatibility
+	user := repoValueToUserStorage(userRepoValue)
+	return &user, nil
 }
 
 func (w *Who) userUpdate(user *userStorage) error {
-	userBytes, err := json.Marshal(user)
+	userRepoValue := userStorageToRepoValue(*user)
+	key := UserRepoKey{ID: user.ID}
+	err := w.userRepo.Put(key, userRepoValue)
 	if err != nil {
-		return fmt.Errorf("failed to marshal user: %w", err)
-	}
-	fmt.Println("\n\nuserBytes", string(userBytes))
-	fmt.Println("\n\nuser", user)
-	_, err = w.usersKv.Put(w.ctx, user.ID, userBytes)
-	if err != nil {
-		return fmt.Errorf("failed to put user in kv: %w", err)
+		return fmt.Errorf("failed to put user in repo: %w", err)
 	}
 	w.l.Debug("user updated %s", user.Email)
 	w.l.Debug("hash %s", user.PasswordHash)
@@ -908,24 +833,48 @@ func (w *Who) userUpdate(user *userStorage) error {
 }
 
 func (w *Who) userGet(id string) *userStorage {
-	for _, user := range w.users {
-		if user.ID == id {
-			return &user
-		}
+	key := UserRepoKey{ID: id}
+	userRepoValue, err := w.userRepo.Get(key)
+	if err != nil {
+		w.l.Debug("user not found: %s", id)
+		return nil
 	}
-	return nil
+	user := repoValueToUserStorage(userRepoValue)
+	return &user
 }
 func (w *Who) userByUsername(username string) *userStorage {
-	for _, user := range w.users {
-		if user.Username == username {
+	keys, err := w.userRepo.Keys()
+	if err != nil {
+		w.l.Error("failed to get user keys: %v", err)
+		return nil
+	}
+
+	for key := range keys {
+		userRepoValue, err := w.userRepo.Get(key)
+		if err != nil {
+			continue
+		}
+		if userRepoValue.Username == username {
+			user := repoValueToUserStorage(userRepoValue)
 			return &user
 		}
 	}
 	return nil
 }
 func (w *Who) userByEmail(email string) *userStorage {
-	for _, user := range w.users {
-		if user.Email == email {
+	keys, err := w.userRepo.Keys()
+	if err != nil {
+		w.l.Error("failed to get user keys: %v", err)
+		return nil
+	}
+
+	for key := range keys {
+		userRepoValue, err := w.userRepo.Get(key)
+		if err != nil {
+			continue
+		}
+		if userRepoValue.Email == email {
+			user := repoValueToUserStorage(userRepoValue)
 			return &user
 		}
 	}
@@ -942,11 +891,7 @@ func (w *Who) permGranted(user *userStorage, perms []api.Permission) bool {
 }
 
 func (w *Who) userAddPermission(user *userStorage, perm api.Permission) (bool, error) {
-	var (
-		err       error
-		userBytes []byte
-		rev       uint64
-	)
+	var err error
 
 	if !slices.Contains(PermissionsAll, perm) {
 		return false, fmt.Errorf("permission %s is not a valid permission", perm)
@@ -956,26 +901,17 @@ func (w *Who) userAddPermission(user *userStorage, perm api.Permission) (bool, e
 	}
 	user.Permissions = append(user.Permissions, perm)
 
-	// Persist the updated user to KV store
-	userBytes, err = json.Marshal(user)
+	// Persist the updated user to repository
+	err = w.userUpdate(user)
 	if err != nil {
-		return false, fmt.Errorf("failed to marshal user: %w", err)
+		return false, fmt.Errorf("failed to update user in repository: %w", err)
 	}
-	rev, err = w.usersKv.Put(w.ctx, user.ID, userBytes)
-	if err != nil {
-		return false, fmt.Errorf("failed to update user in KV store: %w", err)
-	}
-	user.Revision = rev
 
 	return true, nil
 }
 
 func (w *Who) userRemovePermission(user *userStorage, perm api.Permission) (bool, error) {
-	var (
-		err       error
-		userBytes []byte
-		rev       uint64
-	)
+	var err error
 
 	if !slices.Contains(PermissionsAll, perm) {
 		return false, fmt.Errorf("permission %s is not a valid permission", perm)
@@ -988,16 +924,11 @@ func (w *Who) userRemovePermission(user *userStorage, perm api.Permission) (bool
 		return p == perm
 	})
 
-	// Persist the updated user to KV store
-	userBytes, err = json.Marshal(user)
+	// Persist the updated user to repository
+	err = w.userUpdate(user)
 	if err != nil {
-		return false, fmt.Errorf("failed to marshal user: %w", err)
+		return false, fmt.Errorf("failed to update user in repository: %w", err)
 	}
-	rev, err = w.usersKv.Put(w.ctx, user.ID, userBytes)
-	if err != nil {
-		return false, fmt.Errorf("failed to update user in KV store: %w", err)
-	}
-	user.Revision = rev
 
 	return true, nil
 }

@@ -21,12 +21,10 @@ import (
 )
 
 type Convo struct {
-	ctx context.Context
-	nc  *nats.Conn
-	l   *jst_log.Logger
-	// rooms    map[string]*api.Room
-	// requests map[string]*api.Request
-	roomsKv jetstream.KeyValue
+	roomRepo core.Repo[RoomRepoKey, RoomRepoValue]
+	ctx      context.Context
+	nc       *nats.Conn
+	l        *jst_log.Logger
 }
 
 func (c *Convo) Name() string {
@@ -38,6 +36,18 @@ type Conf struct {
 	NatsConn *nats.Conn
 }
 
+// Helper functions to convert between old and new data types
+func roomToRepoValue(room api.Room) RoomRepoValue {
+	return RoomRepoValue{
+		Room:     room,
+		Revision: 0, // Will be set by the repo
+	}
+}
+
+func repoValueToRoom(rv RoomRepoValue) api.Room {
+	return rv.Room
+}
+
 func New(c *Conf) (core.Service, error) {
 	if c.Logger == nil {
 		return nil, fmt.Errorf("logger can not be nil")
@@ -45,12 +55,10 @@ func New(c *Conf) (core.Service, error) {
 	if c.NatsConn == nil {
 		return nil, fmt.Errorf("nats conn can not be nil")
 	}
+
 	return &Convo{
 		nc: c.NatsConn,
 		l:  c.Logger,
-		// rooms:    make(map[string]*api.Room),
-		// requests: make(map[string]*api.Request),
-		// roomsKv: nil,
 	}, nil
 }
 
@@ -64,26 +72,18 @@ func (c *Convo) Run(ctx context.Context) error {
 	}
 	c.ctx = ctx
 
+	// Initialize room repository
+	roomRepo, err := newRoomRepo(ctx, c.nc, c.l)
+	if err != nil {
+		return fmt.Errorf("failed to create room repo: %w", err)
+	}
+	c.roomRepo = roomRepo
+
+	// Initialize JetStream for message streams
 	js, err := jetstream.New(c.nc)
 	if err != nil {
 		return fmt.Errorf("failed to get JetStream context: %w", err)
 	}
-
-	// Create/Update KV bucket for conversation rooms
-	kvConf := jetstream.KeyValueConfig{
-		Bucket:       "convo_room",
-		Description:  "conversation rooms by id",
-		Storage:      jetstream.FileStorage,
-		MaxValueSize: 1024 * 16,        // 16 KB per value
-		MaxBytes:     1024 * 1024 * 50, // 50 MB total
-		History:      32,
-		Compression:  true,
-	}
-	kv, err := js.CreateOrUpdateKeyValue(ctx, kvConf)
-	if err != nil {
-		return fmt.Errorf("create convo_room kv store %s: %w", kvConf.Bucket, err)
-	}
-	c.roomsKv = kv
 
 	// Create/Update stream for conversation messages per room: convo_message.<room>
 	streamConf := jetstream.StreamConfig{
@@ -274,35 +274,30 @@ func (c *Convo) roomCreate(usersIds []string) (*api.Room, error) {
 		}(c, userId)
 	}
 	wg.Wait()
-	roomBytes, err := json.Marshal(room)
+	// Convert to repo value and store
+	roomRepoValue := roomToRepoValue(*room)
+	key := RoomRepoKey{ID: room.Id}
+	err := c.roomRepo.Put(key, roomRepoValue)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to put room in repo: %w", err)
 	}
-	rev, err := c.roomsKv.Create(c.ctx, room.Id, roomBytes)
-	if err != nil {
-		return nil, err
-	}
-	c.l.Debug("room created %s, rev %d", room.Id, rev)
+	c.l.Debug("room created %s", room.Id)
 
 	return room, nil
 }
 
 func (c *Convo) roomGetByUser(userId string) ([]api.Room, error) {
 	rooms := []api.Room{}
-	keys, err := c.roomsKv.Keys(c.ctx)
+	keys, err := c.roomRepo.Keys()
 	if err != nil {
 		return nil, err
 	}
-	for _, key := range keys {
-		roomValue, err := c.roomsKv.Get(c.ctx, key)
+	for key := range keys {
+		roomRepoValue, err := c.roomRepo.Get(key)
 		if err != nil {
-			return nil, err
+			continue
 		}
-		room := api.Room{}
-		err = json.Unmarshal(roomValue.Value(), &room)
-		if err != nil {
-			return nil, err
-		}
+		room := repoValueToRoom(roomRepoValue)
 		if slices.Contains(room.Users, userId) {
 			rooms = append(rooms, room)
 		}
