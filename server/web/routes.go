@@ -256,7 +256,7 @@ func handleAuth(l *jst_log.Logger, nc *nats.Conn, jwtSecret string) http.Handler
 		l.Debug("request: %s\n", string(whoBytes))
 		l.Debug("subject: %s\n", subject)
 
-		whoMsg, err = nc.Request(fmt.Sprintf("%s.%s", whoApi.Subj.AuthGroup, whoApi.Subj.AuthLogin), whoBytes, 4*time.Second)
+		whoMsg, err = nc.Request(fmt.Sprintf("%s.%s", whoApi.Subj.AuthGroup, whoApi.Subj.AuthLogin), whoBytes, 10*time.Second)
 		if err != nil {
 			if err == nats.ErrTimeout {
 				l.Error("error requesting auth (subject: %s): timeout\n", subject)

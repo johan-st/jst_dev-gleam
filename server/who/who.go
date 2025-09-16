@@ -690,12 +690,20 @@ func (w *Who) handleAuth() micro.HandlerFunc {
 		l.Debug("password not empty")
 		if reqData.Email != "" {
 			user = w.userByEmail(reqData.Email)
+			if user != nil {
+				l.Debug("user found by email: %s", user.Email)
+			} else {
+				l.Debug("no user found by email: %s", reqData.Email)
+			}
 		}
-		l.Debug("no user by email")
 		if user == nil && reqData.Username != "" {
 			user = w.userByUsername(reqData.Username)
+			if user != nil {
+				l.Debug("user found by username: %s", user.Username)
+			} else {
+				l.Debug("no user found by username: %s", reqData.Username)
+			}
 		}
-		l.Debug("no user by username")
 		if user == nil {
 			l.Warn(fmt.Sprintf("user not found: %s", reqData.Username))
 			if err := req.Error("NOT_FOUND", "user not found", []byte(reqData.Username)); err != nil {
@@ -855,44 +863,85 @@ func (w *Who) userGet(id string) *userStorage {
 func (w *Who) userByUsername(username string) *userStorage {
 	l := w.l.WithBreadcrumb("user_by_username")
 	l.Debug("username: %s", username)
+	
+	// Use a more efficient approach - get keys and process in batches
 	keys, err := w.userRepo.Keys()
-	l.Debug("got user keys: %+v", keys)
-	l.Debug("err: %v", err)
 	if err != nil {
 		l.Error("failed to get user keys: %v", err)
 		return nil
 	}
-	l.Debug("got user keys: %+v", keys)
+	
+	// Process keys in smaller batches to avoid timeout
+	keySlice := make([]UserRepoKey, 0, 100)
 	for key := range keys {
-		userRepoValue, err := w.userRepo.Get(key)
-		if err != nil {
-			l.Debug("got user repo value: %+v", userRepoValue)
-			l.Debug("err: %v", err)
-			continue
-		}
-		l.Debug("got user repo value: %+v", userRepoValue)
-		l.Debug("err: %v", err)
-		if userRepoValue.Username == username {
-			user := repoValueToUserStorage(userRepoValue)
-			return &user
+		keySlice = append(keySlice, key)
+		if len(keySlice) >= 100 { // Process in batches of 100
+			user := w.findUserInBatch(keySlice, username, true)
+			if user != nil {
+				return user
+			}
+			keySlice = keySlice[:0] // Reset slice
 		}
 	}
+	
+	// Process remaining keys
+	if len(keySlice) > 0 {
+		user := w.findUserInBatch(keySlice, username, true)
+		if user != nil {
+			return user
+		}
+	}
+	
 	return nil
 }
 func (w *Who) userByEmail(email string) *userStorage {
 	l := w.l.WithBreadcrumb("user_by_email")
 	l.Debug("email: %s", email)
+	
+	// Use a more efficient approach - get keys and process in batches
 	keys, err := w.userRepo.Keys()
 	if err != nil {
-		w.l.Error("failed to get user keys: %v", err)
+		l.Error("failed to get user keys: %v", err)
 		return nil
 	}
+	
+	// Process keys in smaller batches to avoid timeout
+	keySlice := make([]UserRepoKey, 0, 100)
 	for key := range keys {
+		keySlice = append(keySlice, key)
+		if len(keySlice) >= 100 { // Process in batches of 100
+			user := w.findUserInBatch(keySlice, email, false)
+			if user != nil {
+				return user
+			}
+			keySlice = keySlice[:0] // Reset slice
+		}
+	}
+	
+	// Process remaining keys
+	if len(keySlice) > 0 {
+		user := w.findUserInBatch(keySlice, email, false)
+		if user != nil {
+			return user
+		}
+	}
+	
+	return nil
+}
+
+// findUserInBatch searches for a user in a batch of keys
+// isUsername: true for username search, false for email search
+func (w *Who) findUserInBatch(keys []UserRepoKey, searchTerm string, isUsername bool) *userStorage {
+	for _, key := range keys {
 		userRepoValue, err := w.userRepo.Get(key)
 		if err != nil {
 			continue
 		}
-		if userRepoValue.Email == email {
+		
+		if isUsername && userRepoValue.Username == searchTerm {
+			user := repoValueToUserStorage(userRepoValue)
+			return &user
+		} else if !isUsername && userRepoValue.Email == searchTerm {
 			user := repoValueToUserStorage(userRepoValue)
 			return &user
 		}
