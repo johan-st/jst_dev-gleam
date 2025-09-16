@@ -104,15 +104,11 @@ var upgrader = websocket.Upgrader{
 		// Configure allowed origins based on environment
 		allowedOrigins := AllowedOrigins()
 		origin := r.Header.Get("Origin")
-		fmt.Println("origin", origin)
-		fmt.Println("allowedOrigins", allowedOrigins)
 		for _, allowed := range allowedOrigins {
 			if origin == allowed {
-				fmt.Println("allowed", allowed)
 				return true
 			}
 		}
-		fmt.Println("not allowed")
 		return false
 	},
 }
