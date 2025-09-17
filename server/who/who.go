@@ -864,31 +864,22 @@ func (w *Who) userByUsername(username string) *userStorage {
 	l := w.l.WithBreadcrumb("user_by_username")
 	l.Debug("username: %s", username)
 	
-	// Use a more efficient approach - get keys and process in batches
 	keys, err := w.userRepo.Keys()
 	if err != nil {
 		l.Error("failed to get user keys: %v", err)
 		return nil
 	}
 	
-	// Process keys in smaller batches to avoid timeout
-	keySlice := make([]UserRepoKey, 0, 100)
+	// Process keys from channel
 	for key := range keys {
-		keySlice = append(keySlice, key)
-		if len(keySlice) >= 100 { // Process in batches of 100
-			user := w.findUserInBatch(keySlice, username, true)
-			if user != nil {
-				return user
-			}
-			keySlice = keySlice[:0] // Reset slice
+		userRepoValue, err := w.userRepo.Get(key)
+		if err != nil {
+			l.Debug("failed to get user: %v", err)
+			continue
 		}
-	}
-	
-	// Process remaining keys
-	if len(keySlice) > 0 {
-		user := w.findUserInBatch(keySlice, username, true)
-		if user != nil {
-			return user
+		if userRepoValue.Username == username {
+			user := repoValueToUserStorage(userRepoValue)
+			return &user
 		}
 	}
 	
@@ -898,56 +889,28 @@ func (w *Who) userByEmail(email string) *userStorage {
 	l := w.l.WithBreadcrumb("user_by_email")
 	l.Debug("email: %s", email)
 	
-	// Use a more efficient approach - get keys and process in batches
 	keys, err := w.userRepo.Keys()
 	if err != nil {
 		l.Error("failed to get user keys: %v", err)
 		return nil
 	}
 	
-	// Process keys in smaller batches to avoid timeout
-	keySlice := make([]UserRepoKey, 0, 100)
+	// Process keys from channel
 	for key := range keys {
-		keySlice = append(keySlice, key)
-		if len(keySlice) >= 100 { // Process in batches of 100
-			user := w.findUserInBatch(keySlice, email, false)
-			if user != nil {
-				return user
-			}
-			keySlice = keySlice[:0] // Reset slice
+		userRepoValue, err := w.userRepo.Get(key)
+		if err != nil {
+			l.Debug("failed to get user: %v", err)
+			continue
 		}
-	}
-	
-	// Process remaining keys
-	if len(keySlice) > 0 {
-		user := w.findUserInBatch(keySlice, email, false)
-		if user != nil {
-			return user
+		if userRepoValue.Email == email {
+			user := repoValueToUserStorage(userRepoValue)
+			return &user
 		}
 	}
 	
 	return nil
 }
 
-// findUserInBatch searches for a user in a batch of keys
-// isUsername: true for username search, false for email search
-func (w *Who) findUserInBatch(keys []UserRepoKey, searchTerm string, isUsername bool) *userStorage {
-	for _, key := range keys {
-		userRepoValue, err := w.userRepo.Get(key)
-		if err != nil {
-			continue
-		}
-		
-		if isUsername && userRepoValue.Username == searchTerm {
-			user := repoValueToUserStorage(userRepoValue)
-			return &user
-		} else if !isUsername && userRepoValue.Email == searchTerm {
-			user := repoValueToUserStorage(userRepoValue)
-			return &user
-		}
-	}
-	return nil
-}
 
 func (w *Who) permGranted(user *userStorage, perms []api.Permission) bool {
 	for _, perm := range perms {
