@@ -66,9 +66,12 @@ func NewWithConfig(ctx context.Context, nc *nats.Conn, l *jst_log.Logger, ntfySe
 
 	// Create HTTP client with timeout
 	httpClient := &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: 2 * time.Second,
 	}
 
+	l.Debug("ntfy server: %s", ntfyServer)
+	l.Debug("ntfy token: %s", ntfyToken)
+	l.Debug("http client timeout: %s", httpClient.Timeout)
 	return Ntfy{
 		nc:         nc,
 		l:          l,

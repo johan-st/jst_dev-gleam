@@ -20,7 +20,7 @@ import (
 const ShortUrlKey = "shorturl_url"
 
 type ShortUrlService struct {
-	shortUrlRepo core.Repo[ShortUrlRepoKey, ShortUrlRepoValue]
+	shortUrlRepo core.Repo[ShortUrlRepoValue]
 	l            *jst_log.Logger
 	nc           *nats.Conn
 	ctx          context.Context
@@ -303,8 +303,7 @@ func (s *ShortUrlService) handleShortUrlUpdate() micro.HandlerFunc {
 
 		// Convert to repo value and update
 		shortUrlRepoValue := shortUrlToRepoValue(*shortUrl)
-		key := ShortUrlRepoKey{ID: shortUrl.ID}
-		err = s.shortUrlRepo.Put(key, shortUrlRepoValue)
+		err = s.shortUrlRepo.Put(shortUrl.ID, shortUrlRepoValue)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to update short url: %s", err.Error()))
 			if err := req.Error("SERVER_ERROR", "server error while updating short url", []byte(err.Error())); err != nil {
@@ -344,8 +343,7 @@ func (s *ShortUrlService) handleShortUrlDelete() micro.HandlerFunc {
 			}
 			return
 		}
-		key := ShortUrlRepoKey{ID: shortUrl.ID}
-		err = s.shortUrlRepo.Delete(key)
+		err = s.shortUrlRepo.Delete(shortUrl.ID)
 		if err != nil {
 			l.Warn(fmt.Sprintf("failed to delete short url: %s", err.Error()))
 			if err := req.Error("SERVER_ERROR", "server error while deleting short url", []byte(err.Error())); err != nil {
@@ -514,8 +512,7 @@ func (s *ShortUrlService) shortUrlCreate(shortCode, targetURL, createdBy string)
 		Revision: 0, // Will be set by the repo
 	}
 
-	key := ShortUrlRepoKey{ID: shortUrlRepoValue.ID}
-	err = s.shortUrlRepo.Put(key, shortUrlRepoValue)
+	err = s.shortUrlRepo.Put(shortUrlRepoValue.ID, shortUrlRepoValue)
 	if err != nil {
 		return nil, fmt.Errorf("failed to put short url in repo: %w", err)
 	}
@@ -527,8 +524,7 @@ func (s *ShortUrlService) shortUrlCreate(shortCode, targetURL, createdBy string)
 }
 
 func (s *ShortUrlService) shortUrlGet(id string) *ShortUrl {
-	key := ShortUrlRepoKey{ID: id}
-	shortUrlRepoValue, err := s.shortUrlRepo.Get(key)
+	shortUrlRepoValue, err := s.shortUrlRepo.Get(id)
 	if err != nil {
 		s.l.Debug("short URL not found: %s", id)
 		return nil
@@ -590,8 +586,7 @@ func (s *ShortUrlService) IncrementAccessCount(shortCode string) error {
 
 	// Convert to repo value and update
 	shortUrlRepoValue := shortUrlToRepoValue(*shortUrl)
-	key := ShortUrlRepoKey{ID: shortUrl.ID}
-	err := s.shortUrlRepo.Put(key, shortUrlRepoValue)
+	err := s.shortUrlRepo.Put(shortUrl.ID, shortUrlRepoValue)
 	if err != nil {
 		return fmt.Errorf("failed to update short url in repository: %w", err)
 	}

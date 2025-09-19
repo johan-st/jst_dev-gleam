@@ -2058,12 +2058,6 @@ fn view_header(model: Model) -> Element(Msg) {
                           list.flatten([
                             [
                               view_header_link(
-                                target: routes.Chat,
-                                current: model.route,
-                                label: "Chat",
-                                attributes: top_nav_attributes_small,
-                              ),
-                              view_header_link(
                                 target: routes.UiComponents,
                                 current: model.route,
                                 label: "UI",

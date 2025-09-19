@@ -97,7 +97,7 @@ func loadConf(getenv func(string) string) (*GlobalConfig, error) {
 		WebJwtSecret: envJwtSecret,
 		WebHashSalt:  envHashSalt,
 		WebPort:      envPort,
-		NtfyToken:    "",
+		NtfyToken:    getenv("NTFY_TOKEN"),
 
 		AppName:       appName,
 		Region:        region,

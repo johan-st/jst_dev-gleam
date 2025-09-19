@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"net/mail"
 	"strings"
 
 	"github.com/golang-jwt/jwt"
@@ -68,11 +69,38 @@ type UserCreateRequest struct {
 	Password string `json:"password"`
 }
 
+func (u UserCreateRequest) Validate() error {
+	if u.Username == "" {
+		return fmt.Errorf("username is required")
+	}
+	if u.Email == "" {
+		return fmt.Errorf("email is required")
+	}
+	if u.Password == "" {
+		return fmt.Errorf("password is required")
+	}
+
+	email := strings.TrimSpace(u.Email)
+	_, err := mail.ParseAddress(email)
+	if err != nil {
+		return fmt.Errorf("invalid email format: %v", err)
+	}
+	
+	return nil
+}
+
 type UserGetRequest struct {
 	ID       string `json:"id,omitempty"`
 	Revision uint64 `json:"revision,omitempty"`
 	Username string `json:"username,omitempty"`
 	Email    string `json:"email,omitempty"`
+}
+
+func (u UserGetRequest) Validate() error {
+	if u.ID == "" && u.Username == "" && u.Email == "" {
+		return fmt.Errorf("id, username or email is required")
+	}
+	return nil
 }
 
 type UserUpdateRequest struct {
@@ -83,6 +111,20 @@ type UserUpdateRequest struct {
 	Password    string `json:"password,omitempty"`
 	OldPassword string `json:"oldPassword,omitempty"`
 }
+
+func (u UserUpdateRequest) Validate() error {
+	if u.ID == "" {
+		return fmt.Errorf("id is required")
+	}
+	if u.Username == "" && u.Email == "" && u.Password == "" {
+		return fmt.Errorf("nothing to update")
+	}
+	if u.Password != "" && u.OldPassword == "" {
+		return fmt.Errorf("old password is required when password is provided")
+	}
+	return nil
+}
+
 type UserUpdateResponse struct {
 	ID              string `json:"id"`
 	Revision        uint64 `json:"revision"`
@@ -94,6 +136,14 @@ type UserUpdateResponse struct {
 type UserDeleteRequest struct {
 	ID string `json:"id"`
 }
+
+func (u UserDeleteRequest) Validate() error {
+	if u.ID == "" {
+		return fmt.Errorf("id is required")
+	}
+	return nil
+}
+
 type UserDeleteResponse struct {
 	IdDeleted string `json:"deleted_id"`
 }
@@ -142,6 +192,17 @@ type PermissionsGrantRequest struct {
 	ID          string      `json:"id"`
 	Permissions Permissions `json:"permissions"`
 }
+
+func (p PermissionsGrantRequest) Validate() error {
+	if p.ID == "" {
+		return fmt.Errorf("id is required")
+	}
+	if len(p.Permissions) == 0 {
+		return fmt.Errorf("permissions are required")
+	}
+	return nil
+}
+
 type PermissionsGrantResponse struct {
 	ID      string      `json:"id"`
 	Added   Permissions `json:"added"`
@@ -152,6 +213,17 @@ type PermissionsRevokeRequest struct {
 	ID          string      `json:"id"`
 	Permissions Permissions `json:"permissions"`
 }
+
+func (p PermissionsRevokeRequest) Validate() error {
+	if p.ID == "" {
+		return fmt.Errorf("id is required")
+	}
+	if len(p.Permissions) == 0 {
+		return fmt.Errorf("permissions are required")
+	}
+	return nil
+}
+
 type PermissionsRevokeResponse struct {
 	ID      string      `json:"id"`
 	Removed Permissions `json:"removed"`
@@ -162,6 +234,17 @@ type PermissionsCheckRequest struct {
 	ID          string      `json:"id"`
 	Permissions Permissions `json:"permissions"`
 }
+
+func (p PermissionsCheckRequest) Validate() error {
+	if p.ID == "" {
+		return fmt.Errorf("id is required")
+	}
+	if len(p.Permissions) == 0 {
+		return fmt.Errorf("permissions are required")
+	}
+	return nil
+}
+
 type PermissionsCheckResponse struct {
 	ID          string      `json:"id"`
 	Permissions Permissions `json:"permissions"`
@@ -177,6 +260,16 @@ type AuthRequest struct {
 	Password string `json:"password"`
 }
 
+func (a AuthRequest) Validate() error {
+	if a.Username == "" && a.Email == "" {
+		return fmt.Errorf("username or email is required")
+	}
+	if a.Password == "" {
+		return fmt.Errorf("password is required")
+	}
+	return nil
+}
+
 type AuthResponse struct {
 	Subject     string      `json:"subject"`
 	Token       string      `json:"token"`
@@ -187,6 +280,13 @@ type AuthResponse struct {
 // AuthRefreshRequest is used to request a refreshed JWT for a given subject (user id)
 type AuthRefreshRequest struct {
 	Subject string `json:"subject"`
+}
+
+func (a AuthRefreshRequest) Validate() error {
+	if a.Subject == "" {
+		return fmt.Errorf("subject is required")
+	}
+	return nil
 }
 
 // JwtClaims is the claims for the JWT token.

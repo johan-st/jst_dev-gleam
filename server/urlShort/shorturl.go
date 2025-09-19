@@ -13,25 +13,6 @@ import (
 	"jst_dev/server/urlShort/api"
 )
 
-// --- SHORT URL KEY ---
-
-type ShortUrlRepoKey struct {
-	ID string
-}
-
-func (k ShortUrlRepoKey) String() string {
-	return k.ID
-}
-
-func (k ShortUrlRepoKey) Bytes() []byte {
-	return []byte(k.ID)
-}
-
-func (k *ShortUrlRepoKey) FromBytes(value []byte) error {
-	k.ID = string(value)
-	return nil
-}
-
 // --- SHORT URL VALUE ---
 
 type ShortUrlRepoValue struct {
@@ -47,25 +28,25 @@ func (s ShortUrlRepoValue) Bytes() []byte {
 	return data
 }
 
-func (s ShortUrlRepoValue) FromBytes(value []byte) error {
-	return json.Unmarshal(value, &s)
+func (s ShortUrlRepoValue) FromBytes(value []byte) (ShortUrlRepoValue, error) {
+	err := json.Unmarshal(value, &s)
+	if err != nil {
+		return ShortUrlRepoValue{}, err
+	}
+	return s, nil
 }
 
 // --- REPO ---
 
 // NewShortUrlRepo initializes and returns a ShortUrlRepo backed by a JetStream key-value store.
 // Returns an error if the key-value store cannot be set up.
-func NewShortUrlRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (core.Repo[ShortUrlRepoKey, ShortUrlRepoValue], error) {
+func NewShortUrlRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (core.Repo[ShortUrlRepoValue], error) {
 	kv, err := setupShortUrlKV(ctx, nc)
 	if err != nil {
 		return nil, fmt.Errorf("repo setup: %w", err)
 	}
 
-	stringToKey := func(s string) ShortUrlRepoKey {
-		return ShortUrlRepoKey{ID: s}
-	}
-
-	repo, err := core.NewRepoKv[ShortUrlRepoKey, ShortUrlRepoValue](ctx, l, kv, stringToKey)
+	repo, err := core.NewRepoKv[ShortUrlRepoValue](ctx, l, kv)
 	if err != nil {
 		return nil, fmt.Errorf("create repo: %w", err)
 	}

@@ -12,28 +12,21 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// RepoKey is a key type that can be used to identify a repository entry.
-// It must be comparable and have a String() method.
-type RepoKey interface {
-	comparable
-	String() string
-}
-
 // RepoValue is a value type that can be used to identify a repository entry.
 // It must have a Bytes() method that returns a slice of bytes.
-type RepoValue interface {
+type RepoValue[V any] interface {
 	Bytes() []byte
-	FromBytes(value []byte) error
+	FromBytes(value []byte) (V, error)
 }
 
 // Repo common interface.
-type Repo[K RepoKey, V RepoValue] interface {
-	Keys() (<-chan K, error)
-	Get(key K) (V, error)
-	History(key K) ([]V, error)
-	Put(key K, value V) error
-	Delete(key K) error
-	Watch() (<-chan RepoUpdate[K, V], error)
+type Repo[V RepoValue[V]] interface {
+	Keys() (<-chan string, error)
+	Get(key string) (V, error)
+	History(key string) ([]V, error)
+	Put(key string, value V) error
+	Delete(key string) error
+	Watch() (<-chan RepoUpdate[V], error)
 	Close() error
 }
 
@@ -46,72 +39,71 @@ const (
 	OperationUnknown Operation = "unknown"
 )
 
-type RepoUpdate[K RepoKey, V RepoValue] struct {
+type RepoUpdate[V RepoValue[V]] struct {
 	operation Operation
-	key       K
+	key       string
 	value     V
 }
 
-func (u *RepoUpdate[K, V]) IsPut() bool {
+func (u *RepoUpdate[V]) IsPut() bool {
 	return u.operation == OperationAdd
 }
 
-func (u *RepoUpdate[K, V]) IsUpdate() bool {
+func (u *RepoUpdate[V]) IsUpdate() bool {
 	return u.operation == OperationUpdate
 }
 
-func (u *RepoUpdate[K, V]) IsDelete() bool {
+func (u *RepoUpdate[V]) IsDelete() bool {
 	return u.operation == OperationDelete
 }
 
-func (u *RepoUpdate[K, V]) Key() K {
+func (u *RepoUpdate[V]) Key() string {
 	return u.key
 }
 
-func (u *RepoUpdate[K, V]) Value() V {
+func (u *RepoUpdate[V]) Value() V {
 	return u.value
 }
 
 // --- STANDARD REPO ---
 
 // repoKv is a standard repository that uses a key-value store to store values.
-// It is used to store values in a key-value store and to watch for updates to the values.
-type repoKv[K RepoKey, V RepoValue] struct {
+// In memory cache is used to store values. It is updated when the key-value store is updated.
+// TODO: make the cache an LRU cache.
+// TODO: add a size limit to the cache.
+type repoKv[V RepoValue[V]] struct {
 	l            *jst_log.Logger
 	kv           jetstream.KeyValue
 	ctx          context.Context
-	cache        map[K]V
+	cache        map[string]V
 	cacheMu      sync.RWMutex
 	kvWatcher    jetstream.KeyWatcher
-	watchers     []chan RepoUpdate[K, V]
+	watchers     []chan RepoUpdate[V]
 	watchersMu   sync.RWMutex
 	closeOnce    sync.Once
 	closed       atomic.Bool
-	stringToKey  func(string) K
 	lastRevision uint64
 	inSyncWg     sync.WaitGroup
 }
 
 // NewRepoKv creates a new StandardRepo instance with the provided context and key-value store.
 // The repo is cleaned up when the context is cancelled.
-func NewRepoKv[K RepoKey, V RepoValue](
+func NewRepoKv[V RepoValue[V]](
 	ctx context.Context,
 	l *jst_log.Logger,
 	kv jetstream.KeyValue,
-	stringToKey func(string) K,
-) (Repo[K, V], error) {
-	r := &repoKv[K, V]{
+) (Repo[V], error) {
+	r := &repoKv[V]{
 		l:            l,
 		kv:           kv,
 		ctx:          ctx,
-		cache:        make(map[K]V),
+		cache:        make(map[string]V),
 		cacheMu:      sync.RWMutex{},
 		kvWatcher:    nil,
-		watchers:     make([]chan RepoUpdate[K, V], 0),
+		watchers:     make([]chan RepoUpdate[V], 0),
 		watchersMu:   sync.RWMutex{},
 		closeOnce:    sync.Once{},
 		closed:       atomic.Bool{},
-		stringToKey:  stringToKey,
 		lastRevision: 0,
 		inSyncWg:     sync.WaitGroup{},
 	}
@@ -123,27 +115,26 @@ func NewRepoKv[K RepoKey, V RepoValue](
 	}
 	r.kvWatcher = watcher
 	r.inSyncWg.Add(1)
-	go func(r *repoKv[K, V]) {
-		defer r.inSyncWg.Done()
+	go func(r *repoKv[V]) {
 		for {
 			select {
 			case <-r.ctx.Done():
 				r.Close()
 				return
 			case entry := <-watcher.Updates():
-				r.cacheMu.Lock()
-				defer r.cacheMu.Unlock()
 				if entry == nil {
-					r.l.Debug("inSyncWg.Done")
 					r.inSyncWg.Done()
-					continue
+					return
 				}
+				r.cacheMu.Lock()
 				r.lastRevision = entry.Revision()
 				r.handleUpdateNoLock(entry)
+				r.cacheMu.Unlock()
 			}
 		}
 	}(r)
-	go func(r *repoKv[K, V]) {
+	go func(r *repoKv[V]) {
+		l.Debug("waiting for in sync")
 		r.inSyncWg.Wait()
 		r.l.Debug("repo in sync, starting broadcast loop")
 		r.broadcastLoop()
@@ -151,50 +142,44 @@ func NewRepoKv[K RepoKey, V RepoValue](
 	return r, nil
 }
 
-func (r *repoKv[K, V]) Keys() (<-chan K, error) {
+func (r *repoKv[V]) Keys() (<-chan string, error) {
 	r.inSyncWg.Wait()
 	keys, err := r.kv.ListKeys(r.ctx)
 	if err != nil {
 		return nil, fmt.Errorf("keys: %w", err)
 	}
-	keysChan := make(chan K)
-	go func() {
-		for key := range keys.Keys() {
-			keysChan <- r.stringToKey(key)
-		}
-		close(keysChan)
-	}()
-	return keysChan, nil
+	return keys.Keys(), nil
 }
 
-func (r *repoKv[K, V]) Get(key K) (V, error) {
+func (r *repoKv[V]) Get(key string) (V, error) {
 	r.inSyncWg.Wait()
 	var value V
-	entry, err := r.kv.Get(r.ctx, key.String())
+	entry, err := r.kv.Get(r.ctx, key)
 	if err != nil {
 		return value, fmt.Errorf("get: %w", err)
 	}
-	err = value.FromBytes(entry.Value())
+	bytes := entry.Value()
+	value, err = value.FromBytes(bytes)
 	if err != nil {
 		return value, fmt.Errorf("value from bytes: %w", err)
 	}
 	return value, nil
 }
 
-func (r *repoKv[K, V]) History(key K) ([]V, error) {
+func (r *repoKv[V]) History(key string) ([]V, error) {
 	r.inSyncWg.Wait()
 	var (
 		entries []V
 	)
 
-	kvEntries, err := r.kv.History(r.ctx, key.String())
+	kvEntries, err := r.kv.History(r.ctx, key)
 	if err != nil {
 		return entries, fmt.Errorf("get: %w", err)
 	}
 
 	for _, entry := range kvEntries {
 		var value V
-		err = value.FromBytes(entry.Value())
+		value, err = value.FromBytes(entry.Value())
 		if err != nil {
 			return entries, fmt.Errorf("value from bytes: %w", err)
 		}
@@ -203,28 +188,28 @@ func (r *repoKv[K, V]) History(key K) ([]V, error) {
 	return entries, nil
 }
 
-func (r *repoKv[K, V]) Put(key K, value V) error {
+func (r *repoKv[V]) Put(key string, value V) error {
 	r.inSyncWg.Wait()
-	_, err := r.kv.Put(r.ctx, key.String(), value.Bytes())
+	_, err := r.kv.Put(r.ctx, key, value.Bytes())
 	if err != nil {
 		return fmt.Errorf("put: %w", err)
 	}
 	return nil
 }
 
-func (r *repoKv[K, V]) Delete(key K) error {
+func (r *repoKv[V]) Delete(key string) error {
 	r.inSyncWg.Wait()
-	err := r.kv.Delete(r.ctx, key.String())
+	err := r.kv.Delete(r.ctx, key)
 	if err != nil {
 		return fmt.Errorf("delete: %w", err)
 	}
 	return nil
 }
 
-func (r *repoKv[K, V]) Watch() (<-chan RepoUpdate[K, V], error) {
+func (r *repoKv[V]) Watch() (<-chan RepoUpdate[V], error) {
 	r.inSyncWg.Wait()
 	// Create a new channel for this watcher
-	watcherChan := make(chan RepoUpdate[K, V])
+	watcherChan := make(chan RepoUpdate[V])
 
 	// Register the watcher
 	r.watchersMu.Lock()
@@ -235,12 +220,11 @@ func (r *repoKv[K, V]) Watch() (<-chan RepoUpdate[K, V], error) {
 	return watcherChan, nil
 }
 
-func (r *repoKv[K, V]) Close() error {
+func (r *repoKv[V]) Close() error {
 	if !r.closed.CompareAndSwap(false, true) {
 		r.l.Debug("repo already closed")
 		return fmt.Errorf("repo already closed")
 	}
-	r.closed.Store(true)
 	// Stop the KV watcher
 	if r.kvWatcher != nil {
 		_ = r.kvWatcher.Stop()
@@ -251,7 +235,7 @@ func (r *repoKv[K, V]) Close() error {
 	for _, watcherChan := range r.watchers {
 		close(watcherChan)
 	}
-	r.watchers = make([]chan RepoUpdate[K, V], 0)
+	r.watchers = make([]chan RepoUpdate[V], 0)
 	r.watchersMu.Unlock()
 
 	// Close the main updates channel
@@ -263,8 +247,8 @@ func (r *repoKv[K, V]) Close() error {
 }
 
 // entryToUpdate converts a NATS KeyValue entry to a RepoUpdate
-func (r *repoKv[K, V]) entryToUpdate(entry jetstream.KeyValueEntry) RepoUpdate[K, V] {
-	key := r.stringToKey(entry.Key())
+func (r *repoKv[V]) entryToUpdate(entry jetstream.KeyValueEntry) RepoUpdate[V] {
+	key := entry.Key()
 
 	// Determine operation type
 	var operation Operation
@@ -282,7 +266,7 @@ func (r *repoKv[K, V]) entryToUpdate(entry jetstream.KeyValueEntry) RepoUpdate[K
 
 	// For delete operations, we don't need to deserialize the value
 	if operation == OperationDelete {
-		return RepoUpdate[K, V]{
+		return RepoUpdate[V]{
 			operation: operation,
 			key:       key,
 		}
@@ -290,17 +274,17 @@ func (r *repoKv[K, V]) entryToUpdate(entry jetstream.KeyValueEntry) RepoUpdate[K
 
 	// For put operations, deserialize the value
 	var value V
-	err := value.FromBytes(entry.Value())
+	value, err := value.FromBytes(entry.Value())
 	if err != nil {
 		// Log error but don't fail the update
 		r.l.Error("value from bytes: " + err.Error())
-		return RepoUpdate[K, V]{
+		return RepoUpdate[V]{
 			operation: operation,
 			key:       key,
 		}
 	}
 
-	return RepoUpdate[K, V]{
+	return RepoUpdate[V]{
 		operation: operation,
 		key:       key,
 		value:     value,
@@ -308,7 +292,7 @@ func (r *repoKv[K, V]) entryToUpdate(entry jetstream.KeyValueEntry) RepoUpdate[K
 }
 
 // broadcastUpdate sends an update to all registered watchers
-func (r *repoKv[K, V]) broadcastUpdate(update RepoUpdate[K, V]) {
+func (r *repoKv[V]) broadcastUpdate(update RepoUpdate[V]) {
 	r.watchersMu.RLock()
 	watchers := r.watchers[:]
 	r.watchersMu.RUnlock()
@@ -324,7 +308,8 @@ func (r *repoKv[K, V]) broadcastUpdate(update RepoUpdate[K, V]) {
 	}
 }
 
-func (r *repoKv[K, V]) broadcastLoop() {
+func (r *repoKv[V]) broadcastLoop() {
+
 	watcher, err := r.kv.WatchAll(r.ctx)
 	if err != nil {
 		r.l.Error("failed to create watcher: " + err.Error())
@@ -337,7 +322,8 @@ func (r *repoKv[K, V]) broadcastLoop() {
 			return
 		case entry := <-watcher.Updates():
 			if entry == nil {
-				panic("broadcastLoop ran before we where in sync")
+				r.l.Debug("broadcastLoop received nil entry, continuing")
+				continue
 			}
 			r.handleUpdate(entry)
 			r.broadcastUpdate(r.entryToUpdate(entry))
@@ -345,13 +331,13 @@ func (r *repoKv[K, V]) broadcastLoop() {
 	}
 }
 
-func (r *repoKv[K, V]) handleUpdate(entry jetstream.KeyValueEntry) {
+func (r *repoKv[V]) handleUpdate(entry jetstream.KeyValueEntry) {
 	r.cacheMu.Lock()
 	defer r.cacheMu.Unlock()
 	r.handleUpdateNoLock(entry)
 }
 
-func (r *repoKv[K, V]) handleUpdateNoLock(entry jetstream.KeyValueEntry) {
+func (r *repoKv[V]) handleUpdateNoLock(entry jetstream.KeyValueEntry) {
 	update := r.entryToUpdate(entry)
 	switch {
 	case update.IsPut():
@@ -365,28 +351,28 @@ func (r *repoKv[K, V]) handleUpdateNoLock(entry jetstream.KeyValueEntry) {
 
 // Simple Repo
 
-type simpleRepo[K RepoKey, V RepoValue] struct {
-	data       map[K]V
+type simpleRepo[V RepoValue[V]] struct {
+	data       map[string]V
 	dataMu     sync.RWMutex
-	watchers   []chan RepoUpdate[K, V]
+	watchers   []chan RepoUpdate[V]
 	watchersMu sync.RWMutex
 }
 
-func NewRepoSimple[K RepoKey, V RepoValue]() Repo[K, V] {
-	return &simpleRepo[K, V]{
-		data:       make(map[K]V),
+func NewRepoSimple[V RepoValue[V]]() Repo[V] {
+	return &simpleRepo[V]{
+		data:       make(map[string]V),
 		dataMu:     sync.RWMutex{},
-		watchers:   make([]chan RepoUpdate[K, V], 0),
+		watchers:   make([]chan RepoUpdate[V], 0),
 		watchersMu: sync.RWMutex{},
 	}
 }
 
 // Keys() (<-chan K, error)
 
-func (r *simpleRepo[K, V]) Keys() (<-chan K, error) {
+func (r *simpleRepo[V]) Keys() (<-chan string, error) {
 	r.dataMu.RLock()
 	defer r.dataMu.RUnlock()
-	keysChan := make(chan K)
+	keysChan := make(chan string)
 	go func() {
 		for key := range r.data {
 			keysChan <- key
@@ -397,7 +383,7 @@ func (r *simpleRepo[K, V]) Keys() (<-chan K, error) {
 }
 
 // Get(key K) (V, error)
-func (r *simpleRepo[K, V]) Get(key K) (V, error) {
+func (r *simpleRepo[V]) Get(key string) (V, error) {
 	r.dataMu.RLock()
 	defer r.dataMu.RUnlock()
 	var value V
@@ -409,12 +395,12 @@ func (r *simpleRepo[K, V]) Get(key K) (V, error) {
 }
 
 // History(key K) ([]V, error)
-func (r *simpleRepo[K, V]) History(key K) ([]V, error) {
+func (r *simpleRepo[V]) History(key string) ([]V, error) {
 	return []V{}, fmt.Errorf("not available on SimpleRepo")
 }
 
 // Put(key K, value V) error
-func (r *simpleRepo[K, V]) Put(key K, value V) error {
+func (r *simpleRepo[V]) Put(key string, value V) error {
 	r.dataMu.Lock()
 	_, existed := r.data[key]
 	r.data[key] = value
@@ -425,7 +411,7 @@ func (r *simpleRepo[K, V]) Put(key K, value V) error {
 		op = OperationUpdate
 	}
 
-	r.broadcastUpdate(RepoUpdate[K, V]{
+	r.broadcastUpdate(RepoUpdate[V]{
 		operation: op,
 		key:       key,
 		value:     value,
@@ -434,12 +420,12 @@ func (r *simpleRepo[K, V]) Put(key K, value V) error {
 }
 
 // Delete(key K) error
-func (r *simpleRepo[K, V]) Delete(key K) error {
+func (r *simpleRepo[V]) Delete(key string) error {
 	r.dataMu.Lock()
 	delete(r.data, key)
 	r.dataMu.Unlock()
 
-	r.broadcastUpdate(RepoUpdate[K, V]{
+	r.broadcastUpdate(RepoUpdate[V]{
 		operation: OperationDelete,
 		key:       key,
 	})
@@ -447,20 +433,20 @@ func (r *simpleRepo[K, V]) Delete(key K) error {
 }
 
 // Watch() (<-chan RepoUpdate[K, V], error)
-func (r *simpleRepo[K, V]) Watch() (<-chan RepoUpdate[K, V], error) {
+func (r *simpleRepo[V]) Watch() (<-chan RepoUpdate[V], error) {
 	r.watchersMu.Lock()
 	defer r.watchersMu.Unlock()
-	watcherChan := make(chan RepoUpdate[K, V])
+	watcherChan := make(chan RepoUpdate[V])
 	r.watchers = append(r.watchers, watcherChan)
 	return watcherChan, nil
 }
 
 // Close() error
-func (r *simpleRepo[K, V]) Close() error {
+func (r *simpleRepo[V]) Close() error {
 	return nil
 }
 
-func (r *simpleRepo[K, V]) broadcastUpdate(update RepoUpdate[K, V]) {
+func (r *simpleRepo[V]) broadcastUpdate(update RepoUpdate[V]) {
 	r.watchersMu.RLock()
 	defer r.watchersMu.RUnlock()
 	for _, watcher := range r.watchers {

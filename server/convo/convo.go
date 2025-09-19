@@ -21,7 +21,7 @@ import (
 )
 
 type Convo struct {
-	roomRepo core.Repo[RoomRepoKey, RoomRepoValue]
+	roomRepo core.Repo[RoomRepoValue]
 	ctx      context.Context
 	nc       *nats.Conn
 	l        *jst_log.Logger
@@ -276,8 +276,7 @@ func (c *Convo) roomCreate(usersIds []string) (*api.Room, error) {
 	wg.Wait()
 	// Convert to repo value and store
 	roomRepoValue := roomToRepoValue(*room)
-	key := RoomRepoKey{ID: room.Id}
-	err := c.roomRepo.Put(key, roomRepoValue)
+	err := c.roomRepo.Put(room.Id, roomRepoValue)
 	if err != nil {
 		return nil, fmt.Errorf("failed to put room in repo: %w", err)
 	}

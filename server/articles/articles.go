@@ -28,9 +28,6 @@ type Article struct {
 	Tags          []string  `json:"tags"`
 	Content       string    `json:"content,omitempty"`
 }
-type Key struct {
-	Id uuid.UUID
-}
 
 func (A Article) Bytes() []byte {
 	data, err := json.Marshal(A)
@@ -40,37 +37,25 @@ func (A Article) Bytes() []byte {
 	return data
 }
 
-func (A Article) FromBytes(value []byte) error {
-	return json.Unmarshal(value, &A)
-}
-func (k Key) String() string {
-	return k.Id.String()
-}
-
-func (k Key) Bytes() []byte {
-	return []byte(k.Id.String())
-}
-
-func (k Key) FromBytes(value []byte) error {
-	return k.Id.UnmarshalText(value)
+func (A Article) FromBytes(value []byte) (Article, error) {
+	err := json.Unmarshal(value, &A)
+	if err != nil {
+		return Article{}, err
+	}
+	return A, nil
 }
 
 // --- REPO ---
 
 // Repo initializes and returns an ArticleRepo backed by a JetStream key-value store.
 // Returns an error if the key-value store cannot be set up.
-func NewRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (core.Repo[Key, Article], error) {
+func NewRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (core.Repo[Article], error) {
 	kv, err := setup(ctx, nc)
 	if err != nil {
 		return nil, fmt.Errorf("repo setup: %w", err)
 	}
 
-	stringToKey := func(s string) Key {
-		id, _ := uuid.Parse(s)
-		return Key{Id: id}
-	}
-
-	repo, err := core.NewRepoKv[Key, Article](ctx, l, kv, stringToKey)
+	repo, err := core.NewRepoKv[Article](ctx, l, kv)
 	if err != nil {
 		return nil, fmt.Errorf("create repo: %w", err)
 	}

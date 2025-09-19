@@ -33,7 +33,7 @@ const (
 func routes(
 	mux *http.ServeMux,
 	l *jst_log.Logger,
-	repo core.Repo[articles.Key, articles.Article],
+	repo core.Repo[articles.Article],
 	nc *nats.Conn,
 	embeddedFS fs.FS,
 	jwtSecret string,
@@ -100,7 +100,7 @@ func routes(
 
 func logger(l *jst_log.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		user, ok := r.Context().Value(who.ContextKey).(whoApi.User)
 		if ok {
 			l.Debug("%s %s (%s)", r.Method, r.URL.Path, user.ID)
 		} else {
@@ -160,7 +160,7 @@ func authJwt(jwtSecret string, next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		ctx := context.WithValue(r.Context(), who.UserKey, whoApi.User{
+		ctx := context.WithValue(r.Context(), who.ContextKey, whoApi.User{
 			ID:          subject,
 			Permissions: permissions,
 		})
@@ -246,6 +246,7 @@ func handleAuth(l *jst_log.Logger, nc *nats.Conn, jwtSecret string) http.Handler
 			Email:    req.Email,
 			Password: req.Password,
 		}
+		l.Debug("!------------------whoReq: %+v", whoReq)
 		whoBytes, err = json.Marshal(whoReq)
 		if err != nil {
 			l.Debug("error marshalling request: %s\n", err)
@@ -256,6 +257,7 @@ func handleAuth(l *jst_log.Logger, nc *nats.Conn, jwtSecret string) http.Handler
 		l.Debug("request: %s\n", string(whoBytes))
 		l.Debug("subject: %s\n", subject)
 
+		l.Debug("!------------------whoBytes: %s", string(whoBytes))
 		whoMsg, err = nc.Request(fmt.Sprintf("%s.%s", whoApi.Subj.AuthGroup, whoApi.Subj.AuthLogin), whoBytes, 4*time.Second)
 		if err != nil {
 			if err == nats.ErrTimeout {
@@ -267,10 +269,11 @@ func handleAuth(l *jst_log.Logger, nc *nats.Conn, jwtSecret string) http.Handler
 			http.Error(w, "error requesting auth", http.StatusInternalServerError)
 			return
 		}
-		l.Debug("msg.Data: %s\n", string(whoMsg.Data))
+		l.Debug("!------------------msg.Data: %s\n", string(whoMsg.Data))
 		err = json.Unmarshal(whoMsg.Data, &whoResp)
 		if err != nil {
 			l.Error("error unmarshalling auth response (subject: %s): %s\n", subject, err)
+			l.Error("!------------------whoResp: %+v\n", whoResp)
 			http.Error(w, "error unmarshalling auth response", http.StatusInternalServerError)
 			return
 		}
@@ -419,7 +422,7 @@ func handleAuthCheck(l *jst_log.Logger, _ *nats.Conn, _ string) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		user, ok := r.Context().Value(who.ContextKey).(whoApi.User)
 		if !ok {
 			respJson(w, Resp{
 				Subject:     "",
@@ -454,7 +457,7 @@ func handleUserGetByID(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 			whoRes Resp
 		)
 
-		authUser, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		authUser, ok := r.Context().Value(who.ContextKey).(whoApi.User)
 		if !ok || authUser.ID == "" {
 			l.Info("user not found in context\n")
 			http.Error(w, "not authorized", http.StatusUnauthorized)
@@ -522,7 +525,7 @@ func handleUserUpdateByID(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 			whoRes Resp
 		)
 
-		authUser, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		authUser, ok := r.Context().Value(who.ContextKey).(whoApi.User)
 		if !ok || authUser.ID == "" {
 			http.Error(w, "not authorized", http.StatusUnauthorized)
 			return
@@ -581,7 +584,7 @@ func handleUserUpdateByID(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 // - articles
 
 // handleArticleList creates a handler for listing all articles
-func handleArticleList(l *jst_log.Logger, repo core.Repo[articles.Key, articles.Article]) http.Handler {
+func handleArticleList(l *jst_log.Logger, repo core.Repo[articles.Article]) http.Handler {
 	type Resp struct {
 		Articles []articles.Article `json:"articles"`
 	}
@@ -612,7 +615,7 @@ func handleArticleList(l *jst_log.Logger, repo core.Repo[articles.Key, articles.
 }
 
 // handleArticle creates a handler for getting a single article by slug
-func handleArticle(l *jst_log.Logger, repo core.Repo[articles.Key, articles.Article]) http.Handler {
+func handleArticle(l *jst_log.Logger, repo core.Repo[articles.Article]) http.Handler {
 	logger := l.WithBreadcrumb("article").WithBreadcrumb("get")
 	logger.Debug("ready")
 
@@ -627,7 +630,7 @@ func handleArticle(l *jst_log.Logger, repo core.Repo[articles.Key, articles.Arti
 			return
 		}
 		logger.Debug("idUuid: %s", idUuid)
-		art, err = repo.Get(articles.Key{Id: idUuid})
+		art, err = repo.Get(idUuid.String())
 		if err != nil {
 			logger.Error("failed to get article: %s", err.Error())
 			http.Error(w, "failed to get article", http.StatusInternalServerError)
@@ -646,7 +649,7 @@ func handleArticle(l *jst_log.Logger, repo core.Repo[articles.Key, articles.Arti
 // handleArticleNew creates a handler for creating a new article
 // We do not use any information from the Post request body when
 // creating the new article.
-func handleArticleNew(l *jst_log.Logger, repo core.Repo[articles.Key, articles.Article], nc *nats.Conn) http.Handler {
+func handleArticleNew(l *jst_log.Logger, repo core.Repo[articles.Article], nc *nats.Conn) http.Handler {
 	logger := l.WithBreadcrumb("article").WithBreadcrumb("new")
 	logger.Debug("ready")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -657,7 +660,7 @@ func handleArticleNew(l *jst_log.Logger, repo core.Repo[articles.Key, articles.A
 		logger.Debug("called")
 
 		// get and check user permissions
-		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		user, ok := r.Context().Value(who.ContextKey).(whoApi.User)
 		if !ok {
 			logger.Warn("user not found in context")
 			http.Error(w, "not allowed", http.StatusForbidden)
@@ -709,7 +712,7 @@ func handleArticleNew(l *jst_log.Logger, repo core.Repo[articles.Key, articles.A
 		art.Title = "new article"
 		art.Subtitle = ""
 		art.Leading = "One paragraph summary/ eyecatching synopsis."
-		err = repo.Put(articles.Key{Id: art.Id}, art)
+		err = repo.Put(art.Id.String(), art)
 		if err != nil {
 			logger.Error("failed to Create new article in repo: %v", err)
 			http.Error(w, "failed to Create new article in repo", http.StatusInternalServerError)
@@ -728,7 +731,7 @@ func handleArticleNew(l *jst_log.Logger, repo core.Repo[articles.Key, articles.A
 }
 
 // handleArticleUpdate creates a handler for updating an existing article
-func handleArticleUpdate(l *jst_log.Logger, repo core.Repo[articles.Key, articles.Article]) http.Handler {
+func handleArticleUpdate(l *jst_log.Logger, repo core.Repo[articles.Article]) http.Handler {
 	logger := l.WithBreadcrumb("article").WithBreadcrumb("save")
 	logger.Debug("ready")
 
@@ -744,7 +747,7 @@ func handleArticleUpdate(l *jst_log.Logger, repo core.Repo[articles.Key, article
 		}
 		logger.Debug("idUuid: %s", idUuid)
 		// Check user permissions
-		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		user, ok := r.Context().Value(who.ContextKey).(whoApi.User)
 		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
@@ -758,7 +761,7 @@ func handleArticleUpdate(l *jst_log.Logger, repo core.Repo[articles.Key, article
 		logger.Debug("permissions ok")
 		// Get current article to verify it exists.
 		// TODO: not necessary as we can check the update error
-		art, err = repo.Get(articles.Key{Id: idUuid})
+		art, err = repo.Get(idUuid.String())
 		if err != nil {
 			logger.Error("failed to get current article: %s", err.Error())
 			http.Error(w, "failed to get current article", http.StatusInternalServerError)
@@ -778,7 +781,7 @@ func handleArticleUpdate(l *jst_log.Logger, repo core.Repo[articles.Key, article
 		}
 
 		// Update article using client's revision - preserve all fields
-		err = repo.Put(articles.Key{Id: idUuid}, articles.Article{
+		err = repo.Put(idUuid.String(), articles.Article{
 			Id:            idUuid,
 			StructVersion: 1,
 			Rev:           uint64(art.Rev), // Use client's revision, NATS will handle CAS (Compare and Swap)
@@ -804,7 +807,7 @@ func handleArticleUpdate(l *jst_log.Logger, repo core.Repo[articles.Key, article
 }
 
 // handleArticleDelete creates a handler for deleting an article
-func handleArticleDelete(l *jst_log.Logger, repo core.Repo[articles.Key, articles.Article]) http.Handler {
+func handleArticleDelete(l *jst_log.Logger, repo core.Repo[articles.Article]) http.Handler {
 	logger := l.WithBreadcrumb("article").WithBreadcrumb("delete")
 	logger.Debug("ready")
 
@@ -819,7 +822,7 @@ func handleArticleDelete(l *jst_log.Logger, repo core.Repo[articles.Key, article
 		}
 		logger.Debug("idUuid: %s", idUuid)
 		// Check user permissions
-		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		user, ok := r.Context().Value(who.ContextKey).(whoApi.User)
 		if !ok {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
@@ -830,7 +833,7 @@ func handleArticleDelete(l *jst_log.Logger, repo core.Repo[articles.Key, article
 			return
 		}
 		logger.Debug("permissions ok")
-		err = repo.Delete(articles.Key{Id: idUuid})
+		err = repo.Delete(idUuid.String())
 		if err != nil {
 			logger.Error("failed to delete article: %s", err.Error())
 			http.Error(w, "failed to delete article", http.StatusInternalServerError)
@@ -843,7 +846,7 @@ func handleArticleDelete(l *jst_log.Logger, repo core.Repo[articles.Key, article
 }
 
 // handleArticleRevisions creates a handler for getting all revisions of an article
-func handleArticleRevisions(l *jst_log.Logger, repo core.Repo[articles.Key, articles.Article]) http.Handler {
+func handleArticleRevisions(l *jst_log.Logger, repo core.Repo[articles.Article]) http.Handler {
 	logger := l.WithBreadcrumb("article_revisions").WithBreadcrumb("list")
 	logger.Debug("ready")
 
@@ -857,7 +860,7 @@ func handleArticleRevisions(l *jst_log.Logger, repo core.Repo[articles.Key, arti
 			return
 		}
 		logger.Debug("idUuid: %s", idUuid)
-		revisions, err := repo.History(articles.Key{Id: idUuid})
+		revisions, err := repo.History(idUuid.String())
 		if err != nil {
 			logger.Error("failed to get article revisions: %s", err.Error())
 			http.Error(w, "failed to get article revisions", http.StatusInternalServerError)
@@ -870,7 +873,7 @@ func handleArticleRevisions(l *jst_log.Logger, repo core.Repo[articles.Key, arti
 }
 
 // handleArticleRevision creates a handler for getting a specific revision of an article
-func handleArticleRevision(l *jst_log.Logger, repo core.Repo[articles.Key, articles.Article]) http.Handler {
+func handleArticleRevision(l *jst_log.Logger, repo core.Repo[articles.Article]) http.Handler {
 	logger := l.WithBreadcrumb("article_revisions").WithBreadcrumb("get")
 	logger.Debug("ready")
 
@@ -896,7 +899,7 @@ func handleArticleRevision(l *jst_log.Logger, repo core.Repo[articles.Key, artic
 			return
 		}
 
-		art, err = repo.Get(articles.Key{Id: idUuid})
+		art, err = repo.Get(idUuid.String())
 		if err != nil {
 			logger.Error("failed to get article revision: %s", err.Error())
 			http.Error(w, "failed to get article revision", http.StatusInternalServerError)
@@ -1060,7 +1063,7 @@ func handleShortUrlCreate(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		}
 
 		// Get user from context and set created by
-		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		user, ok := r.Context().Value(who.ContextKey).(whoApi.User)
 		if ok && user.ID != "" {
 			req.CreatedBy = user.ID
 			logger.Debug("using authenticated user: %s", user.ID)
@@ -1204,7 +1207,7 @@ func handleShortUrlUpdate(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		logger.Debug("called")
 
 		// Get user from context
-		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		user, ok := r.Context().Value(who.ContextKey).(whoApi.User)
 		if !ok || user.ID == "" {
 			logger.Warn("user not found in context")
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -1292,7 +1295,7 @@ func handleShortUrlDelete(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		logger.Debug("called")
 
 		// Get user from context
-		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		user, ok := r.Context().Value(who.ContextKey).(whoApi.User)
 		if !ok || user.ID == "" {
 			logger.Warn("user not found in context")
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -1484,7 +1487,7 @@ func handleNotificationSend(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		logger := l.WithBreadcrumb("handleNotificationSend")
 
 		// Get user from context
-		user, ok := r.Context().Value(who.UserKey).(whoApi.User)
+		user, ok := r.Context().Value(who.ContextKey).(whoApi.User)
 		if !ok {
 			user = whoApi.User{
 				ID:       "-",
@@ -1775,22 +1778,21 @@ func handleChatRequest(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		notificationBytes, err := json.Marshal(notification)
 		if err != nil {
 			logger.Error("failed to marshal notification: %v", err)
-			// Don't fail the request if notification fails
-		} else {
-			_, err = nc.Request(ntfy.SubjectNotification, notificationBytes, 4*time.Second)
-			if err != nil {
-				if err == nats.ErrTimeout {
-					logger.Error("failed to send notification: timeout")
-					http.Error(w, "gateway timeout while sending notification", http.StatusGatewayTimeout)
-					return
-				}
-				logger.Error("failed to send notification: %v", err)
-				// Don't fail the request if notification fails
-			} else {
-				logger.Debug("notification sent successfully")
-			}
+			http.Error(w, "failed to marshal notification", http.StatusInternalServerError)
+			return
 		}
-
+		_, err = nc.Request(ntfy.SubjectNotification, notificationBytes, 4*time.Second)
+		if err != nil {
+			if err == nats.ErrTimeout {
+				logger.Error("failed to send notification: timeout")
+				http.Error(w, "gateway timeout while sending notification", http.StatusGatewayTimeout)
+				return
+			}
+			logger.Error("failed to send notification: %v", err)
+			http.Error(w, "failed to send notification", http.StatusInternalServerError)
+			return
+		}
+		logger.Debug("notification sent successfully")
 		// 5. Return response
 		logger.Debug("chat request created successfully: %s", roomID)
 		respJson(w, Resp{RoomID: roomID}, http.StatusOK)

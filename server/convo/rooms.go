@@ -13,25 +13,6 @@ import (
 	"jst_dev/server/jst_log"
 )
 
-// --- ROOM KEY ---
-
-type RoomRepoKey struct {
-	ID string
-}
-
-func (k RoomRepoKey) String() string {
-	return k.ID
-}
-
-func (k RoomRepoKey) Bytes() []byte {
-	return []byte(k.ID)
-}
-
-func (k *RoomRepoKey) FromBytes(value []byte) error {
-	k.ID = string(value)
-	return nil
-}
-
 // --- ROOM VALUE ---
 
 type RoomRepoValue struct {
@@ -47,25 +28,26 @@ func (r RoomRepoValue) Bytes() []byte {
 	return data
 }
 
-func (r RoomRepoValue) FromBytes(value []byte) error {
-	return json.Unmarshal(value, &r)
+func (r RoomRepoValue) FromBytes(value []byte) (RoomRepoValue, error) {
+	var result RoomRepoValue
+	err := json.Unmarshal(value, &result)
+	if err != nil {
+		return RoomRepoValue{}, err
+	}
+	return result, nil
 }
 
 // --- REPO ---
 
 // newRoomRepo initializes and returns a RoomRepo backed by a JetStream key-value store.
 // Returns an error if the key-value store cannot be set up.
-func newRoomRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (core.Repo[RoomRepoKey, RoomRepoValue], error) {
+func newRoomRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (core.Repo[RoomRepoValue], error) {
 	kv, err := setupRoomKV(ctx, nc)
 	if err != nil {
 		return nil, fmt.Errorf("repo setup: %w", err)
 	}
 
-	stringToKey := func(s string) RoomRepoKey {
-		return RoomRepoKey{ID: s}
-	}
-
-	repo, err := core.NewRepoKv[RoomRepoKey, RoomRepoValue](ctx, l, kv, stringToKey)
+	repo, err := core.NewRepoKv[RoomRepoValue](ctx, l, kv)
 	if err != nil {
 		return nil, fmt.Errorf("create repo: %w", err)
 	}

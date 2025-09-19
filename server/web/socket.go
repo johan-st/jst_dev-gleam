@@ -152,7 +152,7 @@ func HandleRealtimeWebSocket(l *jst_log.Logger, nc *nats.Conn, slow time.Duratio
 }
 
 func userIDFromRequest(r *http.Request) string {
-	if u, ok := r.Context().Value(who.UserKey).(whoApi.User); ok {
+	if u, ok := r.Context().Value(who.ContextKey).(whoApi.User); ok {
 		if u.ID != "" {
 			return u.ID
 		}
