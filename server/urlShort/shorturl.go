@@ -40,7 +40,7 @@ func (s ShortUrlRepoValue) FromBytes(value []byte) (ShortUrlRepoValue, error) {
 
 // NewShortUrlRepo initializes and returns a ShortUrlRepo backed by a JetStream key-value store.
 // Returns an error if the key-value store cannot be set up.
-func NewShortUrlRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (core.Repo[ShortUrlRepoValue], error) {
+func NewShortUrlRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (core.RepoKv[ShortUrlRepoValue], error) {
 	kv, err := setupShortUrlKV(ctx, nc)
 	if err != nil {
 		return nil, fmt.Errorf("repo setup: %w", err)

@@ -19,8 +19,8 @@ type RepoValue[V any] interface {
 	FromBytes(value []byte) (V, error)
 }
 
-// Repo common interface.
-type Repo[V RepoValue[V]] interface {
+// RepoKv common interface.
+type RepoKv[V RepoValue[V]] interface {
 	Keys() (<-chan string, error)
 	Get(key string) (V, error)
 	History(key string) ([]V, error)
@@ -92,7 +92,7 @@ func NewRepoKv[V RepoValue[V]](
 	ctx context.Context,
 	l *jst_log.Logger,
 	kv jetstream.KeyValue,
-) (Repo[V], error) {
+) (RepoKv[V], error) {
 	r := &repoKv[V]{
 		l:            l,
 		kv:           kv,
@@ -358,7 +358,7 @@ type simpleRepo[V RepoValue[V]] struct {
 	watchersMu sync.RWMutex
 }
 
-func NewRepoSimple[V RepoValue[V]]() Repo[V] {
+func NewRepoSimple[V RepoValue[V]]() RepoKv[V] {
 	return &simpleRepo[V]{
 		data:       make(map[string]V),
 		dataMu:     sync.RWMutex{},
@@ -366,8 +366,6 @@ func NewRepoSimple[V RepoValue[V]]() Repo[V] {
 		watchersMu: sync.RWMutex{},
 	}
 }
-
-// Keys() (<-chan K, error)
 
 func (r *simpleRepo[V]) Keys() (<-chan string, error) {
 	r.dataMu.RLock()
@@ -382,7 +380,6 @@ func (r *simpleRepo[V]) Keys() (<-chan string, error) {
 	return keysChan, nil
 }
 
-// Get(key K) (V, error)
 func (r *simpleRepo[V]) Get(key string) (V, error) {
 	r.dataMu.RLock()
 	defer r.dataMu.RUnlock()
@@ -394,12 +391,10 @@ func (r *simpleRepo[V]) Get(key string) (V, error) {
 	return value, nil
 }
 
-// History(key K) ([]V, error)
 func (r *simpleRepo[V]) History(key string) ([]V, error) {
 	return []V{}, fmt.Errorf("not available on SimpleRepo")
 }
 
-// Put(key K, value V) error
 func (r *simpleRepo[V]) Put(key string, value V) error {
 	r.dataMu.Lock()
 	_, existed := r.data[key]
@@ -419,7 +414,6 @@ func (r *simpleRepo[V]) Put(key string, value V) error {
 	return nil
 }
 
-// Delete(key K) error
 func (r *simpleRepo[V]) Delete(key string) error {
 	r.dataMu.Lock()
 	delete(r.data, key)
@@ -432,7 +426,6 @@ func (r *simpleRepo[V]) Delete(key string) error {
 	return nil
 }
 
-// Watch() (<-chan RepoUpdate[K, V], error)
 func (r *simpleRepo[V]) Watch() (<-chan RepoUpdate[V], error) {
 	r.watchersMu.Lock()
 	defer r.watchersMu.Unlock()
@@ -441,7 +434,6 @@ func (r *simpleRepo[V]) Watch() (<-chan RepoUpdate[V], error) {
 	return watcherChan, nil
 }
 
-// Close() error
 func (r *simpleRepo[V]) Close() error {
 	return nil
 }

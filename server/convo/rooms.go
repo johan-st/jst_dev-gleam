@@ -41,7 +41,7 @@ func (r RoomRepoValue) FromBytes(value []byte) (RoomRepoValue, error) {
 
 // newRoomRepo initializes and returns a RoomRepo backed by a JetStream key-value store.
 // Returns an error if the key-value store cannot be set up.
-func newRoomRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (core.Repo[RoomRepoValue], error) {
+func newRoomRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (core.RepoKv[RoomRepoValue], error) {
 	kv, err := setupRoomKV(ctx, nc)
 	if err != nil {
 		return nil, fmt.Errorf("repo setup: %w", err)

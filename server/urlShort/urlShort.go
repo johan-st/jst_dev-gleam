@@ -20,7 +20,7 @@ import (
 const ShortUrlKey = "shorturl_url"
 
 type ShortUrlService struct {
-	shortUrlRepo core.Repo[ShortUrlRepoValue]
+	shortUrlRepo core.RepoKv[ShortUrlRepoValue]
 	l            *jst_log.Logger
 	nc           *nats.Conn
 	ctx          context.Context

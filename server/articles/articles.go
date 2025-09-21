@@ -49,7 +49,7 @@ func (A Article) FromBytes(value []byte) (Article, error) {
 
 // Repo initializes and returns an ArticleRepo backed by a JetStream key-value store.
 // Returns an error if the key-value store cannot be set up.
-func NewRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (core.Repo[Article], error) {
+func NewRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (core.RepoKv[Article], error) {
 	kv, err := setup(ctx, nc)
 	if err != nil {
 		return nil, fmt.Errorf("repo setup: %w", err)

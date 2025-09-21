@@ -20,7 +20,7 @@ type httpServer struct {
 	nc          *nats.Conn
 	l           *jst_log.Logger
 	ctx         context.Context
-	articleRepo core.Repo[articles.Article]
+	articleRepo core.RepoKv[articles.Article]
 	mux         *http.ServeMux // For defining routes
 	handler     http.Handler   // Final wrapped handler for serving requests
 	embedFs     fs.FS
@@ -32,7 +32,7 @@ var embedded embed.FS
 
 // New initializes and returns a new httpServer instance with embedded static files and an article repository.
 // Returns nil if the static files or article repository cannot be initialized.
-func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger, articleRepo core.Repo[articles.Article], dev bool, slow time.Duration) *httpServer {
+func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger, articleRepo core.RepoKv[articles.Article], dev bool, slow time.Duration) *httpServer {
 	fs, err := fs.Sub(embedded, "static")
 	if err != nil {
 		l.Error("Failed to load static folder")

@@ -21,7 +21,7 @@ import (
 )
 
 type Convo struct {
-	roomRepo core.Repo[RoomRepoValue]
+	roomRepo core.RepoKv[RoomRepoValue]
 	ctx      context.Context
 	nc       *nats.Conn
 	l        *jst_log.Logger
