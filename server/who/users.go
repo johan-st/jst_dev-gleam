@@ -40,7 +40,7 @@ func (u UserRepoValue) FromBytes(value []byte) (UserRepoValue, error) {
 
 // --- REPO ---
 type userRepo struct {
-	core.RepoKv[UserRepoValue]
+	core.Repo[UserRepoValue]
 	emailToKey    map[string]string
 	usernameToKey map[string]string
 	mu            sync.RWMutex
@@ -66,7 +66,7 @@ func NewUserRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (*userRe
 	}
 	l.Debug("creating user repo")
 	ur := &userRepo{
-		RepoKv:        repo,
+		Repo:          repo,
 		emailToKey:    make(map[string]string),
 		usernameToKey: make(map[string]string),
 		done:          make(chan struct{}),
@@ -82,18 +82,18 @@ func NewUserRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (*userRe
 }
 
 func (ur *userRepo) Keys() (<-chan string, error) {
-	return ur.RepoKv.Keys()
+	return ur.Repo.Keys()
 }
 
 func (ur *userRepo) Get(key string) (UserRepoValue, error) {
-	return ur.RepoKv.Get(key)
+	return ur.Repo.Get(key)
 }
 
 func (ur *userRepo) History(key string) ([]UserRepoValue, error) {
-	return ur.RepoKv.History(key)
+	return ur.Repo.History(key)
 }
 func (ur *userRepo) Put(key string, value UserRepoValue) error {
-	if err := ur.RepoKv.Put(key, value); err != nil {
+	if err := ur.Repo.Put(key, value); err != nil {
 		return err
 	}
 	ur.mu.Lock()
@@ -107,9 +107,9 @@ func (ur *userRepo) Delete(key string) error {
 	// Get the value first to update caches
 	value, err := ur.Get(key)
 	if err != nil {
-		return ur.RepoKv.Delete(key) // Still try to delete even if Get fails
+		return ur.Repo.Delete(key) // Still try to delete even if Get fails
 	}
-	if err := ur.RepoKv.Delete(key); err != nil {
+	if err := ur.Repo.Delete(key); err != nil {
 		return err
 	}
 	ur.mu.Lock()
@@ -120,7 +120,7 @@ func (ur *userRepo) Delete(key string) error {
 }
 
 func (ur *userRepo) Watch() (<-chan core.RepoUpdate[UserRepoValue], error) {
-	return ur.RepoKv.Watch()
+	return ur.Repo.Watch()
 }
 
 func (ur *userRepo) Close() error {
@@ -128,7 +128,7 @@ func (ur *userRepo) Close() error {
 		close(ur.done)
 	})
 	ur.wg.Wait()
-	return ur.RepoKv.Close()
+	return ur.Repo.Close()
 }
 
 func (ur *userRepo) GetByEmail(email string) (UserRepoValue, error) {
@@ -179,7 +179,7 @@ func setupUserKV(ctx context.Context, nc *nats.Conn) (jetstream.KeyValue, error)
 // --- WATCHER ---
 func (ur *userRepo) runWatcher() error {
 	ur.logger.Debug("running watcher")
-	updates, err := ur.RepoKv.Watch()
+	updates, err := ur.Repo.Watch()
 	if err != nil {
 		return fmt.Errorf("failed to watch: %w", err)
 	}
@@ -208,7 +208,7 @@ func (ur *userRepo) runWatcher() error {
 				} else if update.IsUpdate() {
 					// For updates, we need to remove old mappings first
 					// Get the old value from the repo to find the old email/username
-					oldValue, err := ur.RepoKv.Get(update.Key())
+					oldValue, err := ur.Repo.Get(update.Key())
 					if err == nil {
 						// Remove old mappings
 						delete(ur.emailToKey, oldValue.Email)

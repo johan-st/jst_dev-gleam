@@ -33,7 +33,7 @@ const (
 func routes(
 	mux *http.ServeMux,
 	l *jst_log.Logger,
-	repo core.RepoKv[articles.Article],
+	repo core.Repo[articles.Article],
 	nc *nats.Conn,
 	embeddedFS fs.FS,
 	jwtSecret string,
@@ -584,7 +584,7 @@ func handleUserUpdateByID(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 // - articles
 
 // handleArticleList creates a handler for listing all articles
-func handleArticleList(l *jst_log.Logger, repo core.RepoKv[articles.Article]) http.Handler {
+func handleArticleList(l *jst_log.Logger, repo core.Repo[articles.Article]) http.Handler {
 	type Resp struct {
 		Articles []articles.Article `json:"articles"`
 	}
@@ -615,7 +615,7 @@ func handleArticleList(l *jst_log.Logger, repo core.RepoKv[articles.Article]) ht
 }
 
 // handleArticle creates a handler for getting a single article by slug
-func handleArticle(l *jst_log.Logger, repo core.RepoKv[articles.Article]) http.Handler {
+func handleArticle(l *jst_log.Logger, repo core.Repo[articles.Article]) http.Handler {
 	logger := l.WithBreadcrumb("article").WithBreadcrumb("get")
 	logger.Debug("ready")
 
@@ -649,7 +649,7 @@ func handleArticle(l *jst_log.Logger, repo core.RepoKv[articles.Article]) http.H
 // handleArticleNew creates a handler for creating a new article
 // We do not use any information from the Post request body when
 // creating the new article.
-func handleArticleNew(l *jst_log.Logger, repo core.RepoKv[articles.Article], nc *nats.Conn) http.Handler {
+func handleArticleNew(l *jst_log.Logger, repo core.Repo[articles.Article], nc *nats.Conn) http.Handler {
 	logger := l.WithBreadcrumb("article").WithBreadcrumb("new")
 	logger.Debug("ready")
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -731,7 +731,7 @@ func handleArticleNew(l *jst_log.Logger, repo core.RepoKv[articles.Article], nc 
 }
 
 // handleArticleUpdate creates a handler for updating an existing article
-func handleArticleUpdate(l *jst_log.Logger, repo core.RepoKv[articles.Article]) http.Handler {
+func handleArticleUpdate(l *jst_log.Logger, repo core.Repo[articles.Article]) http.Handler {
 	logger := l.WithBreadcrumb("article").WithBreadcrumb("save")
 	logger.Debug("ready")
 
@@ -807,7 +807,7 @@ func handleArticleUpdate(l *jst_log.Logger, repo core.RepoKv[articles.Article]) 
 }
 
 // handleArticleDelete creates a handler for deleting an article
-func handleArticleDelete(l *jst_log.Logger, repo core.RepoKv[articles.Article]) http.Handler {
+func handleArticleDelete(l *jst_log.Logger, repo core.Repo[articles.Article]) http.Handler {
 	logger := l.WithBreadcrumb("article").WithBreadcrumb("delete")
 	logger.Debug("ready")
 
@@ -846,7 +846,7 @@ func handleArticleDelete(l *jst_log.Logger, repo core.RepoKv[articles.Article]) 
 }
 
 // handleArticleRevisions creates a handler for getting all revisions of an article
-func handleArticleRevisions(l *jst_log.Logger, repo core.RepoKv[articles.Article]) http.Handler {
+func handleArticleRevisions(l *jst_log.Logger, repo core.Repo[articles.Article]) http.Handler {
 	logger := l.WithBreadcrumb("article_revisions").WithBreadcrumb("list")
 	logger.Debug("ready")
 
@@ -873,7 +873,7 @@ func handleArticleRevisions(l *jst_log.Logger, repo core.RepoKv[articles.Article
 }
 
 // handleArticleRevision creates a handler for getting a specific revision of an article
-func handleArticleRevision(l *jst_log.Logger, repo core.RepoKv[articles.Article]) http.Handler {
+func handleArticleRevision(l *jst_log.Logger, repo core.Repo[articles.Article]) http.Handler {
 	logger := l.WithBreadcrumb("article_revisions").WithBreadcrumb("get")
 	logger.Debug("ready")
 

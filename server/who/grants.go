@@ -14,7 +14,7 @@ import (
 
 type GrantsEngine struct {
 	l      *jst_log.Logger
-	grants core.RepoKv[Grant]
+	grants core.Repo[Grant]
 	// grantsMu    sync.RWMutex
 	// grantsSlice []Grant
 }

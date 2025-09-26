@@ -27,8 +27,11 @@ import (
 //	    return nil
 //	}
 type Service interface {
-	Run(ctx context.Context) error
 	Name() string
+	Run(ctx context.Context) error
+	// Start(ctx context.Context) error
+	// Stop(ctx context.Context) error
+
 }
 
 // Run starts a service in a goroutine and manages its lifecycle.

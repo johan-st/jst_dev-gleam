@@ -249,10 +249,20 @@ func run(
 				case <-ctx.Done():
 					return
 				case <-ticker.C:
+					type Msg struct {
+						time    time.Time
+						region  string
+						appName string
+					}
+					msg := Msg{
+						time:    time.Now(),
+						region:  conf.Region,
+						appName: conf.AppName,
+					}
 					// convo_message.0442bf5b-10c8-482f-9d0b-769c3f2e3f3a
 					if err := convoApi.MessagePub(nc, convoApi.Message{
 						User:        "test",
-						Content:     "now: " + time.Now().Format("2006-01-02 15:04:05"),
+						Content:     "now: " + msg.time.Format("2006-01-02 15:04:05") + "\nin " + msg.region + "\nby " + msg.appName,
 						Room:        "0442bf5b-10c8-482f-9d0b-769c3f2e3f3a",
 						TimestampMs: (int)(time.Now().UnixMilli()),
 					}); err != nil {

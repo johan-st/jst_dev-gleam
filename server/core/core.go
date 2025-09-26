@@ -7,13 +7,13 @@ import (
 	"regexp"
 )
 
-type DummyValue struct {
+type Example struct {
 	Id      string `json:"id"`
 	Rev     uint64 `json:"revision"`
 	Content string `json:"content"`
 }
 
-func (d DummyValue) Bytes() []byte {
+func (d Example) Bytes() []byte {
 	bytes, err := json.Marshal(d)
 	if err != nil {
 		return []byte{}
@@ -21,7 +21,7 @@ func (d DummyValue) Bytes() []byte {
 	return bytes
 }
 
-func (d DummyValue) FromBytes(bytes []byte) (DummyValue, error) {
+func (d Example) FromBytes(bytes []byte) (Example, error) {
 	err := json.Unmarshal(bytes, &d)
 	if err != nil {
 		return d, fmt.Errorf("from bytes: %w", err)
