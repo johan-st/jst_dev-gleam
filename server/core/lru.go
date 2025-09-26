@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 )
@@ -13,10 +14,10 @@ type CacheValue[K comparable, V any] interface {
 
 // CacheStat represents cache statistics
 type CacheStat struct {
-	Size      int
-	Capacity  int
-	Bytes     int
-	MaxBytes  int
+	Size      int32
+	Capacity  int32
+	Bytes     int64
+	MaxBytes  int64
 	Hit       uint32
 	Miss      uint32
 	Evictions uint32
@@ -25,10 +26,10 @@ type CacheStat struct {
 // LRU is a generic Least Recently Used cache. It can store any comparable key type
 // with any value type. LRU is thread safe.
 type LRU[C CacheValue[K, V], K comparable, V any] struct {
-	cap           uint
+	cap           int32
 	len           atomic.Int32
 	bytes         atomic.Int64
-	maxBytes      uint
+	maxBytes      int64
 	evictions     atomic.Uint32
 	hits          atomic.Uint32
 	misses        atomic.Uint32
@@ -43,19 +44,25 @@ type LRU[C CacheValue[K, V], K comparable, V any] struct {
 // NewLRU creates a new LRU cache with the given capacity.
 // The capacity is the maximum number of items that can be stored in the cache.
 // The maxBytes is the maximum number of bytes that can be stored in the cache. 0 means no limit.
-func NewLRU[C CacheValue[K, V], K comparable, V any](cap int, maxBytes int) *LRU[C, K, V] {
-	if cap < 0 {
-		cap = 0
+func NewLRU[C CacheValue[K, V], K comparable, V any](cap int32, maxBytes int64) (*LRU[C, K, V], error) {
+	if cap == 0 && maxBytes == 0 {
+		return nil, fmt.Errorf("capacity and maxBytes can not be 0")
 	}
-	if maxBytes < 0 {
-		maxBytes = 0
+	var (
+		lookup        map[K]*node[C, K, V]
+		reverseLookup map[*node[C, K, V]]K
+	)
+
+	if cap != 0 {
+		lookup = make(map[K]*node[C, K, V], cap)
+		reverseLookup = make(map[*node[C, K, V]]K, cap)
 	}
 	return &LRU[C, K, V]{
-		cap:           uint(cap),
-		maxBytes:      uint(maxBytes),
-		lookup:        make(map[K]*node[C, K, V]),
-		reverseLookup: make(map[*node[C, K, V]]K),
-	}
+		cap:           cap,
+		maxBytes:      maxBytes,
+		lookup:        lookup,
+		reverseLookup: reverseLookup,
+	}, nil
 }
 
 type node[C CacheValue[K, V], K comparable, V any] struct {
@@ -116,10 +123,10 @@ func (l *LRU[C, K, V]) Delete(key K) bool {
 
 func (l *LRU[C, K, V]) Stat() CacheStat {
 	return CacheStat{
-		Size:      int(l.len.Load()),
-		Capacity:  int(l.cap),
-		Bytes:     int(l.bytes.Load()),
-		MaxBytes:  int(l.maxBytes),
+		Size:      l.len.Load(),
+		Capacity:  l.cap,
+		Bytes:     l.bytes.Load(),
+		MaxBytes:  l.maxBytes,
 		Hit:       l.hits.Load(),
 		Miss:      l.misses.Load(),
 		Evictions: l.evictions.Load(),
@@ -138,7 +145,7 @@ func (l *LRU[C, K, V]) Get(key K) (V, bool) {
 }
 
 func (l *LRU[C, K, V]) trim() {
-	for l.len.Load() > int32(l.cap) || l.bytes.Load() > int64(l.maxBytes) {
+	for l.len.Load() > l.cap || l.bytes.Load() > l.maxBytes {
 		node := l.tail
 		key, _ := l.lookupKey(node)
 

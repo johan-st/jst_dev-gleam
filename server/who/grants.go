@@ -4,19 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"jst_dev/server/core"
-	"jst_dev/server/jst_log"
-	"sync"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+
+	"jst_dev/server/core"
+	"jst_dev/server/jst_log"
 )
 
 type GrantsEngine struct {
-	l           *jst_log.Logger
-	grants      core.RepoKv[Grant]
-	grantsMu    sync.RWMutex
-	grantsSlice []Grant
+	l      *jst_log.Logger
+	grants core.RepoKv[Grant]
+	// grantsMu    sync.RWMutex
+	// grantsSlice []Grant
 }
 
 type Grant struct {

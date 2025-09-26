@@ -25,7 +25,10 @@ func (t testValue[K, V]) Size() int {
 func TestLruAdd(t *testing.T) {
 	t.Parallel()
 
-	lru := NewLRU[testValue[string, int], string, int](3, 0)
+	lru, err := NewLRU[testValue[string, int], string, int](3, 0)
+	if err != nil {
+		t.Fatalf("NewLRU: %v", err)
+	}
 
 	lt := lruT[int]{
 		t:   t,
@@ -58,7 +61,10 @@ func TestLruAdd(t *testing.T) {
 func TestLruTrim(t *testing.T) {
 	t.Parallel()
 
-	lru := NewLRU[testValue[string, int], string, int](3, 0)
+	lru, err := NewLRU[testValue[string, int], string, int](3, 0)
+	if err != nil {
+		t.Fatalf("NewLRU: %v", err)
+	}
 
 	lt := lruT[int]{
 		t:   t,
@@ -75,7 +81,10 @@ func TestLruTrim(t *testing.T) {
 func TestLruRemove(t *testing.T) {
 	t.Parallel()
 
-	lru := NewLRU[testValue[string, int], string, int](3, 0)
+	lru, err := NewLRU[testValue[string, int], string, int](3, 0)
+	if err != nil {
+		t.Fatalf("NewLRU: %v", err)
+	}
 
 	lt := lruT[int]{
 		t:   t,
@@ -102,7 +111,10 @@ func TestLruRemove(t *testing.T) {
 func TestLru(t *testing.T) {
 	t.Parallel()
 
-	lru := NewLRU[testValue[string, int], string, int](3, 0)
+	lru, err := NewLRU[testValue[string, int], string, int](3, 0)
+	if err != nil {
+		t.Fatalf("NewLRU: %v", err)
+	}
 
 	lt := lruT[int]{
 		t:   t,
@@ -162,7 +174,10 @@ func object(key string, size int) testValue[string, any] {
 func TestLruMaxBytes(t *testing.T) {
 	t.Parallel()
 
-	lru := NewLRU[testValue[string, any]](3, 100)
+	lru, err := NewLRU[testValue[string, any], string, any](3, 100)
+	if err != nil {
+		t.Fatalf("NewLRU: %v", err)
+	}
 
 	lt := lruT[any]{
 		t:   t,

@@ -41,13 +41,13 @@ func (u UserRepoValue) FromBytes(value []byte) (UserRepoValue, error) {
 // --- REPO ---
 type userRepo struct {
 	core.RepoKv[UserRepoValue]
-	emailToKey      map[string]string
-	usernameToKey   map[string]string
-	mu              sync.RWMutex
-	done            chan struct{}
-	wg              sync.WaitGroup
-	closeOnce       sync.Once
-	logger          *jst_log.Logger
+	emailToKey    map[string]string
+	usernameToKey map[string]string
+	mu            sync.RWMutex
+	done          chan struct{}
+	wg            sync.WaitGroup
+	closeOnce     sync.Once
+	logger        *jst_log.Logger
 }
 
 // NewUserRepo initializes and returns a UserRepo backed by a JetStream key-value store.
@@ -66,7 +66,7 @@ func NewUserRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (*userRe
 	}
 	l.Debug("creating user repo")
 	ur := &userRepo{
-		RepoKv:          repo,
+		RepoKv:        repo,
 		emailToKey:    make(map[string]string),
 		usernameToKey: make(map[string]string),
 		done:          make(chan struct{}),
@@ -118,7 +118,6 @@ func (ur *userRepo) Delete(key string) error {
 	ur.mu.Unlock()
 	return nil
 }
-
 
 func (ur *userRepo) Watch() (<-chan core.RepoUpdate[UserRepoValue], error) {
 	return ur.RepoKv.Watch()
@@ -185,7 +184,7 @@ func (ur *userRepo) runWatcher() error {
 		return fmt.Errorf("failed to watch: %w", err)
 	}
 	ur.logger.Debug("watcher created")
-	
+
 	ur.wg.Add(1)
 	go func(ur *userRepo) {
 		defer ur.wg.Done()
@@ -198,7 +197,7 @@ func (ur *userRepo) runWatcher() error {
 					return
 				}
 				ur.logger.Debug("received update", "update", update)
-				
+
 				ur.mu.Lock()
 				if update.IsPut() {
 					ur.emailToKey[update.Value().Email] = update.Key()

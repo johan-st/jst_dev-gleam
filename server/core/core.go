@@ -22,7 +22,7 @@ func (d DummyValue) Bytes() []byte {
 }
 
 func (d DummyValue) FromBytes(bytes []byte) (DummyValue, error) {
-	err := json.Unmarshal(bytes, d)
+	err := json.Unmarshal(bytes, &d)
 	if err != nil {
 		return d, fmt.Errorf("from bytes: %w", err)
 	}

@@ -85,7 +85,7 @@ func (u UserCreateRequest) Validate() error {
 	if err != nil {
 		return fmt.Errorf("invalid email format: %v", err)
 	}
-	
+
 	return nil
 }
 

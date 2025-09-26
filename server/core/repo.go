@@ -333,7 +333,6 @@ func (r *repoKv[V]) broadcastUpdate(update RepoUpdate[V]) {
 }
 
 func (r *repoKv[V]) broadcastLoop() {
-
 	watcher, err := r.kv.WatchAll(r.ctx)
 	if err != nil {
 		r.l.Error("failed to create watcher: " + err.Error())
