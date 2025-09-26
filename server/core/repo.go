@@ -9,6 +9,7 @@ import (
 
 	"jst_dev/server/jst_log"
 
+	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -30,6 +31,35 @@ type RepoKv[V RepoValue[V]] interface {
 	Close() error
 }
 
+// RepoAppendOnly common interface.
+type RepoAppendOnly[V RepoValue[V]] interface {
+	Append(subject string, value V) error
+	Watch(subject string) (<-chan RepoMsg[V], error)
+	Close() error
+}
+
+// RepoMsg is a message from a repository.
+type RepoMsg[V RepoValue[V]] struct {
+	Headers nats.Header
+	Data    V
+	Err     error
+}
+
+func (m *RepoMsg[V]) IsError() bool {
+	return m.Err != nil
+}
+
+func (m *RepoMsg[V]) Error() error {
+	return m.Err
+}
+
+// RepoUpdate is an update from a repository.
+type RepoUpdate[V RepoValue[V]] struct {
+	operation Operation
+	key       string
+	value     V
+}
+
 type Operation string
 
 const (
@@ -38,12 +68,6 @@ const (
 	OperationDelete  Operation = "delete"
 	OperationUnknown Operation = "unknown"
 )
-
-type RepoUpdate[V RepoValue[V]] struct {
-	operation Operation
-	key       string
-	value     V
-}
 
 func (u *RepoUpdate[V]) IsPut() bool {
 	return u.operation == OperationAdd
@@ -65,7 +89,7 @@ func (u *RepoUpdate[V]) Value() V {
 	return u.value
 }
 
-// --- STANDARD REPO ---
+// --- REPO KV ---
 
 // repoKv is a standard repository that uses a key-value store to store values.
 // In memory cache is used to store values. It is updated when the key-value store is updated.
@@ -86,7 +110,7 @@ type repoKv[V RepoValue[V]] struct {
 	inSyncWg     sync.WaitGroup
 }
 
-// NewRepoKv creates a new StandardRepo instance with the provided context and key-value store.
+// NewRepoKv creates a new RepoKv instance with the provided context and key-value store.
 // The repo is cleaned up when the context is cancelled.
 func NewRepoKv[V RepoValue[V]](
 	ctx context.Context,
@@ -349,17 +373,17 @@ func (r *repoKv[V]) handleUpdateNoLock(entry jetstream.KeyValueEntry) {
 	}
 }
 
-// Simple Repo
+// --- REPO IN MEM ---
 
-type simpleRepo[V RepoValue[V]] struct {
+type repoInMem[V RepoValue[V]] struct {
 	data       map[string]V
 	dataMu     sync.RWMutex
 	watchers   []chan RepoUpdate[V]
 	watchersMu sync.RWMutex
 }
 
-func NewRepoSimple[V RepoValue[V]]() RepoKv[V] {
-	return &simpleRepo[V]{
+func NewRepoInMem[V RepoValue[V]]() RepoKv[V] {
+	return &repoInMem[V]{
 		data:       make(map[string]V),
 		dataMu:     sync.RWMutex{},
 		watchers:   make([]chan RepoUpdate[V], 0),
@@ -367,7 +391,7 @@ func NewRepoSimple[V RepoValue[V]]() RepoKv[V] {
 	}
 }
 
-func (r *simpleRepo[V]) Keys() (<-chan string, error) {
+func (r *repoInMem[V]) Keys() (<-chan string, error) {
 	r.dataMu.RLock()
 	defer r.dataMu.RUnlock()
 	keysChan := make(chan string)
@@ -380,7 +404,7 @@ func (r *simpleRepo[V]) Keys() (<-chan string, error) {
 	return keysChan, nil
 }
 
-func (r *simpleRepo[V]) Get(key string) (V, error) {
+func (r *repoInMem[V]) Get(key string) (V, error) {
 	r.dataMu.RLock()
 	defer r.dataMu.RUnlock()
 	var value V
@@ -391,11 +415,11 @@ func (r *simpleRepo[V]) Get(key string) (V, error) {
 	return value, nil
 }
 
-func (r *simpleRepo[V]) History(key string) ([]V, error) {
-	return []V{}, fmt.Errorf("not available on SimpleRepo")
+func (r *repoInMem[V]) History(key string) ([]V, error) {
+	return []V{}, fmt.Errorf("not available on RepoInMem")
 }
 
-func (r *simpleRepo[V]) Put(key string, value V) error {
+func (r *repoInMem[V]) Put(key string, value V) error {
 	r.dataMu.Lock()
 	_, existed := r.data[key]
 	r.data[key] = value
@@ -414,7 +438,7 @@ func (r *simpleRepo[V]) Put(key string, value V) error {
 	return nil
 }
 
-func (r *simpleRepo[V]) Delete(key string) error {
+func (r *repoInMem[V]) Delete(key string) error {
 	r.dataMu.Lock()
 	delete(r.data, key)
 	r.dataMu.Unlock()
@@ -426,7 +450,7 @@ func (r *simpleRepo[V]) Delete(key string) error {
 	return nil
 }
 
-func (r *simpleRepo[V]) Watch() (<-chan RepoUpdate[V], error) {
+func (r *repoInMem[V]) Watch() (<-chan RepoUpdate[V], error) {
 	r.watchersMu.Lock()
 	defer r.watchersMu.Unlock()
 	watcherChan := make(chan RepoUpdate[V])
@@ -434,14 +458,92 @@ func (r *simpleRepo[V]) Watch() (<-chan RepoUpdate[V], error) {
 	return watcherChan, nil
 }
 
-func (r *simpleRepo[V]) Close() error {
+func (r *repoInMem[V]) Close() error {
 	return nil
 }
 
-func (r *simpleRepo[V]) broadcastUpdate(update RepoUpdate[V]) {
+func (r *repoInMem[V]) broadcastUpdate(update RepoUpdate[V]) {
 	r.watchersMu.RLock()
 	defer r.watchersMu.RUnlock()
 	for _, watcher := range r.watchers {
 		watcher <- update
 	}
+}
+
+// --- REPO APPEND ONLY ---
+
+type repoAppendOnly[V RepoValue[V]] struct {
+	l   *jst_log.Logger
+	js  jetstream.JetStream
+	ctx context.Context
+}
+
+// NewRepoAppendOnly creates a new repository that appends and listens to a JetStream stream.
+func NewRepoAppendOnly[V RepoValue[V]](ctx context.Context, l *jst_log.Logger, js jetstream.JetStream) RepoAppendOnly[V] {
+	l.Debug("creating repo append only")
+	return &repoAppendOnly[V]{
+		l:   l,
+		js:  js,
+		ctx: ctx,
+	}
+}
+
+func (r *repoAppendOnly[V]) Append(sub string, value V) error {
+	r.l.Debug("appending to subject: " + sub)
+	if err := SubjectValid(sub); err != nil {
+		return fmt.Errorf("append: %w", err)
+	}
+
+	_, err := r.js.Publish(r.ctx, sub, value.Bytes())
+	if err != nil {
+		r.l.Error("publish: " + err.Error())
+		return fmt.Errorf("append: %w", err)
+	}
+
+	return nil
+}
+
+func (r *repoAppendOnly[V]) Watch(subject string) (<-chan RepoMsg[V], error) {
+	var (
+		watcherChan = make(chan RepoMsg[V], 64)
+		errChan     = make(chan error, 1)
+	)
+
+	go func() {
+		defer close(watcherChan)
+		_, err := r.js.Conn().Subscribe(subject, func(msg *nats.Msg) {
+			var value V
+			value, err := value.FromBytes(msg.Data)
+			if err != nil {
+				watcherChan <- RepoMsg[V]{
+					Headers: msg.Header,
+					Data:    value,
+					Err:     fmt.Errorf("value from bytes: %w", err),
+				}
+				return
+			}
+			watcherChan <- RepoMsg[V]{
+				Headers: msg.Header,
+				Data:    value,
+				Err:     nil,
+			}
+		})
+		if err != nil {
+			errChan <- fmt.Errorf("subscribe: %w", err)
+			close(errChan)
+			return
+		}
+		defer close(errChan)
+	}()
+
+	err := <-errChan
+	if err != nil {
+		close(watcherChan)
+		return nil, err
+	}
+	return watcherChan, nil
+}
+
+func (r *repoAppendOnly[V]) Close() error {
+	panic("not implemented")
 }

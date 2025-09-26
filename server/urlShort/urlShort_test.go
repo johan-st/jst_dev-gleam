@@ -223,7 +223,7 @@ func TestShortUrlAPIStructs(t *testing.T) {
 
 func TestShortCodeGeneration(t *testing.T) {
 	// Create a minimal service for testing generation functions
-	repo := core.NewRepoSimple[ShortUrlRepoValue]()
+	repo := core.NewRepoInMem[ShortUrlRepoValue]()
 	service := &ShortUrlService{
 		shortUrlRepo: repo,
 	}
@@ -285,7 +285,7 @@ func TestShortCodeGeneration(t *testing.T) {
 
 func TestShortCodeLengthProgression(t *testing.T) {
 	// Create a service with many existing codes to force length progression
-	repo := core.NewRepoSimple[ShortUrlRepoValue]()
+	repo := core.NewRepoInMem[ShortUrlRepoValue]()
 	service := &ShortUrlService{
 		shortUrlRepo: repo,
 	}
@@ -335,7 +335,7 @@ func TestShortCodeLengthProgression(t *testing.T) {
 func TestShortUrlAuthentication(t *testing.T) {
 	// Create a minimal service for testing
 	service := &ShortUrlService{
-		shortUrlRepo: core.NewRepoSimple[ShortUrlRepoValue](),
+		shortUrlRepo: core.NewRepoInMem[ShortUrlRepoValue](),
 	}
 
 	// Test creating short URL with createdBy (mock the KV store call)

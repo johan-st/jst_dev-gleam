@@ -3,13 +3,10 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
-
-	"jst_dev/server/jst_log"
 )
 
 const (
@@ -21,6 +18,9 @@ const (
 	SubjRoomByUser    = "room.by_user"
 	SubjRequestCreate = "request.create"
 	SubjRequestReply  = "request.reply"
+
+	// message
+	messageJetStreamSubject = "convo_message"
 )
 
 type Room struct {
@@ -47,10 +47,6 @@ type Message struct {
 	TimestampMs int    `json:"timestamp_ms"`
 }
 
-const (
-	messageJetStreamSubject = "convo_message"
-)
-
 func MessagePub(nc *nats.Conn, message Message) error {
 	if message.Room == "" {
 		return fmt.Errorf("room is required")
@@ -65,56 +61,13 @@ func MessagePub(nc *nats.Conn, message Message) error {
 	if err != nil {
 		return fmt.Errorf("failed to generate uuid: %w", err)
 	}
-	message.TimestampMs = (int)(time.Now().UnixMilli())
-	timestampStr := strconv.Itoa(message.TimestampMs)
-	headers := make(nats.Header)
-	headers.Set("sender", message.User)
-	headers.Set("room", message.Room)
-	headers.Set("timestamp", timestampStr)
-	headers.Set("id", uuid.String())
-
 	message.Id = uuid.String()
-	messageJson, err := json.Marshal(message)
+	message.TimestampMs = (int)(time.Now().UnixMilli())
+	messageBytes, err := json.Marshal(message)
 	if err != nil {
-		return fmt.Errorf("failed to marshal message: %w", err)
+		return err
 	}
-
-	return nc.PublishMsg(&nats.Msg{
-		Subject: messageJetStreamSubject + "." + message.Room,
-		Data:    messageJson,
-		Header:  headers,
-	})
-}
-
-func MessageSub(nc *nats.Conn, l *jst_log.Logger, room string) (<-chan Message, func(), error) {
-	var (
-		msgChan = make(chan Message)
-		err     error
-		sub     *nats.Subscription
-	)
-	l.Debug("subscribing to messages from room: %s\n", room)
-	sub, err = nc.Subscribe(messageJetStreamSubject+"."+room, func(m *nats.Msg) {
-		var message Message
-		l.Debug("got message: %+v\n", m)
-		message.Content = string(m.Data)
-		message.Room = room
-		message.User = m.Header.Get("user_id")
-		ts, err := strconv.Atoi(m.Header.Get("timestamp_ms"))
-		if err != nil {
-			l.Error("failed to convert timestamp to int: %v", err)
-			ts = 0
-		}
-		message.TimestampMs = ts
-
-		l.Debug("sending message: %v\n", message)
-		msgChan <- message
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to subscribe to messages from room: %w", err)
-	}
-	return msgChan, func() {
-		_ = sub.Unsubscribe()
-	}, nil
+	return nc.Publish(messageJetStreamSubject+"."+message.Room, messageBytes)
 }
 
 // ROOM

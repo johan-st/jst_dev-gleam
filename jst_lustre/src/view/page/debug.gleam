@@ -193,11 +193,22 @@ pub fn view(
         ]),
         html.p([], [
           html.text(
-            "latest: "
+            "latest id: "
             <> {
               sub_chat_message.data
               |> list.first
               |> result.map(fn(t) { t.id })
+              |> result.unwrap("-")
+            },
+          ),
+        ]),
+        html.p([], [
+          html.text(
+            "latest content: "
+            <> {
+              sub_chat_message.data
+              |> list.first
+              |> result.map(fn(t) { t.content })
               |> result.unwrap("-")
             },
           ),

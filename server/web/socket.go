@@ -42,47 +42,6 @@ type serverKvMsg struct {
 	Value string `json:"value"`
 }
 
-// Article
-// type articleCreateRequest struct {
-// 	Title       string   `json:"title"`
-// 	Subtitle    string   `json:"subtitle"`
-// 	Leading     string   `json:"leading"`
-// 	Content     string   `json:"content"`
-// 	Tags        []string `json:"tags"`
-// 	PublishedAt int      `json:"published_at"`
-// }
-
-// type articleUpdateRequest struct {
-// 	Title       string   `json:"title,omitempty"`
-// 	Subtitle    string   `json:"subtitle,omitempty"`
-// 	Leading     string   `json:"leading,omitempty"`
-// 	Content     string   `json:"content,omitempty"`
-// 	Tags        []string `json:"tags,omitempty"`
-// 	PublishedAt int      `json:"published_at,omitempty"`
-// }
-
-// type articleResponse struct {
-// 	ID            string   `json:"id"`
-// 	Slug          string   `json:"slug"`
-// 	Title         string   `json:"title"`
-// 	Subtitle      string   `json:"subtitle"`
-// 	Leading       string   `json:"leading"`
-// 	Author        string   `json:"author"`
-// 	PublishedAt   int      `json:"published_at"`
-// 	Tags          []string `json:"tags"`
-// 	Content       string   `json:"content,omitempty"`
-// 	Revision      uint64   `json:"revision"`
-// 	StructVersion int      `json:"struct_version"`
-// }
-
-// type articleListResponse struct {
-// 	Articles []articleResponse `json:"articles"`
-// }
-
-// type articleHistoryResponse struct {
-// 	Revisions []articleResponse `json:"revisions"`
-// }
-
 // Capabilities (authorization)
 type capabilities struct {
 	Subjects []string            `json:"subjects"`
@@ -362,12 +321,15 @@ func (c *rtClient) isAllowedStream(stream, filter string) bool {
 // ---- Handlers
 func (c *rtClient) handleSub(subject string) {
 	if !c.isAllowedSubject(subject) {
+		c.log.Warn("requesting subject not allowed: %s", subject)
 		return
 	}
+	c.log.Debug("subscribing to subject: %s", subject)
 	sub, err := c.srv.nc.Subscribe(subject, func(m *nats.Msg) {
 		c.send(serverMsg{Op: "sub_msg", Target: subject, Data: m.Data})
 	})
 	if err != nil {
+		c.log.Error("failed to subscribe to subject: %s", subject)
 		return
 	}
 	c.mu.Lock()
@@ -379,10 +341,12 @@ func (c *rtClient) handleUnsub(subject string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if s, ok := c.subs[subject]; ok {
+		c.log.Debug("unsubscribing from subject: %s", subject)
 		_ = s.Unsubscribe()
 		delete(c.subs, subject)
 	}
 	if w, ok := c.kvWatchers[subject]; ok {
+		c.log.Debug("stopping kv watcher for subject: %s", subject)
 		_ = w.Stop()
 		delete(c.kvWatchers, subject)
 	}

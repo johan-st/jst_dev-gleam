@@ -215,6 +215,7 @@ func run(
 	core.Run(ctx, cleanShutdown, httpServer)
 
 	// - time ticker publisher (NATS core)
+	l.Debug("running in region: " + conf.Region)
 	if conf.Region != "local" {
 		go func() {
 			ticker := time.NewTicker(5 * time.Second)
