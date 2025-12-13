@@ -27,3 +27,4 @@ server/data
 # build, test, run etc..
 server/tmp
 fly.toml
+.worktree/

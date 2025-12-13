@@ -14,6 +14,7 @@ import view/ui
 // removed unused import: import gleam/result
 
 // removed unused order import (sorting moved to page modules)
+import gleam/result
 import gleam/set.{type Set}
 import gleam/string
 import gleam/uri.{type Uri}
@@ -26,11 +27,15 @@ import lustre/effect.{type Effect}
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
-import lustre_websocket as ws
 import modem
+import omnimessage/lustre as omni
+import omnimessage/lustre/transports
 import plinth/browser/event as p_event
 import routes.{type Route}
 import session.{type Session}
+import shared/article as shared_article
+import shared/omni as shared_omni
+import shared/short_url as shared_short_url
 import utils/dom_utils
 import utils/error_string
 import utils/http.{type HttpError}
@@ -102,7 +107,6 @@ type Model {
     debug_ws_status: String,
     debug_ws_msg_count: Int,
     // Sync
-    ws: Option(ws.WebSocket),
     article_kv: sync.KV(String, article.Article),
     short_url_kv: sync.KV(String, short_url.ShortUrl),
     chat_room_kv: sync.KV(String, chat.ChatRoom),
@@ -212,7 +216,6 @@ pub type Msg {
 
   // Debug realtime
   DebugWsIncoming(String)
-  DebugWsOpen(ws.WebSocket)
   DebugToggleExpanded(String)
   DebugWsClosed
   DebugWsReconnect
@@ -224,8 +227,10 @@ pub type Msg {
   ChatRequestResponse(Result(String, HttpError))
   ChatUserNameSet(String)
 
-  // Sync
-  WebSocketMsg(ws.WebSocketEvent)
+  // Omnimessage transport
+  TransportState(transports.TransportState(shared_omni.DecodeError))
+  ServerMessage(shared_omni.ServerMessage)
+  ClientMessage(shared_omni.ClientMessage)
 }
 
 fn update_with_localstorage(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
@@ -903,24 +908,35 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     // SHORT URLS
     ShortUrlCreateClicked(short_code, target_url) -> {
       let #(is_valid, _) = url_utils.validate_target_url(target_url)
-      case is_valid, model.session {
-        True, session.Authenticated(_session_data) -> {
-          let req =
-            short_url.ShortUrlCreateRequest(
+      case is_valid {
+        False -> #(model, effect.none())
+        True -> {
+          let created_by = case session.subject(model.session) {
+            Some(s) -> s
+            None -> ""
+          }
+
+          let msg =
+            shared_omni.ShortUrlUpsert(shared_short_url.ShortUrl(
+              id: "",
               short_code: short_code,
               target_url: target_url,
-            )
+              created_by: created_by,
+              created_at: 0,
+              updated_at: 0,
+              access_count: 0,
+              is_active: True,
+            ))
+
           #(
-            model,
-            short_url.create_short_url(
-              ShortUrlCreateResponse,
-              model.base_uri,
-              req,
+            Model(
+              ..model,
+              short_url_form_short_code: "",
+              short_url_form_target_url: "",
             ),
+            effect.from(fn(dispatch) { dispatch(ClientMessage(msg)) }),
           )
         }
-        False, _ -> #(model, effect.none())
-        _, _ -> #(model, effect.none())
       }
     }
     ShortUrlCreateResponse(result) -> {
@@ -958,11 +974,9 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     ShortUrlDeleteConfirmClicked(id) -> {
       #(
         Model(..model, delete_confirmation: None),
-        short_url.delete_short_url(
-          fn(result) { ShortUrlDeleteResponse(id, result) },
-          model.base_uri,
-          id,
-        ),
+        effect.from(fn(dispatch) {
+          dispatch(ClientMessage(shared_omni.ShortUrlDelete(id)))
+        }),
       )
     }
     ShortUrlDeleteCancelClicked -> {
@@ -1013,16 +1027,24 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
       #(Model(..model, copy_feedback: None), effect.none())
     }
     ShortUrlToggleActiveClicked(id, is_active) -> {
-      let update_req =
-        short_url.ShortUrlUpdateRequest(id: id, is_active: Some(!is_active))
-      #(
-        model,
-        short_url.update_short_url(
-          fn(result) { ShortUrlToggleActiveResponse(id, result) },
-          model.base_uri,
-          update_req,
-        ),
-      )
+      case dict.get(model.short_url_kv.data, id) {
+        Ok(url) -> {
+          let msg =
+            shared_omni.ShortUrlUpsert(shared_short_url.ShortUrl(
+              id: url.id,
+              short_code: url.short_code,
+              target_url: url.target_url,
+              created_by: url.created_by,
+              created_at: url.created_at,
+              updated_at: url.updated_at,
+              access_count: url.access_count,
+              is_active: !is_active,
+            ))
+
+          #(model, effect.from(fn(dispatch) { dispatch(ClientMessage(msg)) }))
+        }
+        Error(Nil) -> #(model, effect.none())
+      }
     }
     ShortUrlToggleActiveResponse(id, result) -> {
       case result {
@@ -1266,9 +1288,6 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     }
     NoOp -> #(model, effect.none())
     // Debug realtime messages
-    DebugWsOpen(_sock) -> {
-      #(model, effect.none())
-    }
     DebugWsClosed -> #(
       Model(..model, debug_connected: False, debug_ws_status: "Disconnected"),
       effect.from(fn(dispatch) { dispatch(DebugWsReconnect) }),
@@ -1300,15 +1319,7 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
     DebugStatus(s) -> #(Model(..model, debug_ws_status: s), effect.none())
     DebugWsDoConnect -> #(
       Model(..model, debug_ws_status: "Connecting..."),
-      ws.init("/ws", fn(ev) {
-        case ev {
-          ws.InvalidUrl -> DebugStatus("Invalid WS URL")
-          ws.OnOpen(sock) -> DebugWsOpen(sock)
-          ws.OnTextMessage(text) -> DebugWsIncoming(text)
-          ws.OnBinaryMessage(_) -> NoOp
-          ws.OnClose(_) -> DebugWsClosed
-        }
-      }),
+      effect.none(),
     )
     DebugToggleExpanded(tgt) -> {
       let expanded = case set.contains(model.debug_expanded, tgt) {
@@ -1353,175 +1364,239 @@ fn update(model: Model, msg: Msg) -> #(Model, Effect(Msg)) {
         Error(_) -> #(model, effect.none())
       }
     }
-    // Sync ----------------------------------------------------------------------
-    WebSocketMsg(msg) -> {
-      case msg {
-        ws.OnTextMessage(text) -> {
-          case json.parse(from: text, using: sync.decoder_envelope()) {
-            Ok(sync.Envelope("sub_msg", "time.seconds", body:)) -> {
-              let sub = model.sub_time |> sync.sub_ws_text_message(body)
-              #(Model(..model, sub_time: sub), effect.none())
-            }
-            Ok(sync.Envelope("sub_msg", "convo_message.*", body:)) -> {
-              let sub =
-                model.chat_message_subscription
-                |> sync.sub_ws_text_message(body)
-              #(Model(..model, chat_message_subscription: sub), effect.none())
-            }
-            Ok(sync.Envelope("kv_msg", "article", body:)) -> {
-              let #(kv, effect) =
-                model.article_kv |> sync.kv_ws_text_message(body)
-              #(Model(..model, article_kv: kv), effect)
-            }
-            Ok(sync.Envelope("kv_msg", "url_short", body:)) -> {
-              let #(kv, effect) =
-                model.short_url_kv |> sync.kv_ws_text_message(body)
-              #(Model(..model, short_url_kv: kv), effect)
-            }
-            Ok(sync.Envelope("kv_msg", "convo_room", body:)) -> {
-              let #(kv, effect) =
-                model.chat_room_kv |> sync.kv_ws_text_message(body)
-              #(Model(..model, chat_room_kv: kv), effect)
-            }
-            Error(errors) -> {
-              echo "Error parsing envelope"
-              echo errors
-              #(model, effect.none())
-            }
-            Ok(sync.Envelope(op, target, body: body)) -> {
-              echo "Unknown envelope"
-              echo "op: " <> op <> ", target: " <> target
-              echo body
-              #(model, effect.none())
-            }
-          }
-        }
-        ws.InvalidUrl -> {
-          let kv_article =
-            sync.KV(..model.article_kv, state: sync.KVError("Invalid URL"))
-          let kv_short_url =
-            sync.KV(..model.short_url_kv, state: sync.KVError("Invalid URL"))
-          let sub_time =
-            sync.Subscription(
-              ..model.sub_time,
-              state: sync.KVError("Invalid URL"),
-            )
-          let kv_chat_room =
-            sync.KV(..model.chat_room_kv, state: sync.KVError("Invalid URL"))
-          let sub_chat_message =
-            sync.Subscription(
-              ..model.chat_message_subscription,
-              state: sync.KVError("Invalid URL"),
-            )
-          #(
-            Model(
-              ..model,
-              article_kv: kv_article,
-              short_url_kv: kv_short_url,
-              chat_room_kv: kv_chat_room,
-              chat_message_subscription: sub_chat_message,
-              sub_time: sub_time,
-            ),
-            effect.none(),
-          )
-        }
-        ws.OnBinaryMessage(_) -> {
-          let kv_article =
-            sync.KV(
-              ..model.article_kv,
-              state: sync.KVError("Binary message not supported"),
-            )
-          let kv_short_url =
-            sync.KV(
-              ..model.short_url_kv,
-              state: sync.KVError("Binary message not supported"),
-            )
-          let sub_time =
-            sync.Subscription(
-              ..model.sub_time,
-              state: sync.KVError("Binary message not supported"),
-            )
-          let kv_chat_room =
-            sync.KV(
-              ..model.chat_room_kv,
-              state: sync.KVError("Binary message not supported"),
-            )
-          let sub_chat_message =
-            sync.Subscription(
-              ..model.chat_message_subscription,
-              state: sync.KVError("Binary message not supported"),
-            )
-          #(
-            Model(
-              ..model,
-              article_kv: kv_article,
-              short_url_kv: kv_short_url,
-              chat_room_kv: kv_chat_room,
-              chat_message_subscription: sub_chat_message,
-              sub_time: sub_time,
-            ),
-            effect.none(),
-          )
-        }
-        ws.OnClose(reason) -> {
-          let #(kv_article, effect) = sync.kv_ws_close(model.article_kv, reason)
-          let #(kv_short_url, effect_short_url) =
-            sync.kv_ws_close(model.short_url_kv, reason)
-          let #(sub_time, effect_sub_time) =
-            sync.sub_ws_close(model.sub_time, reason)
-          let #(kv_chat_room, effect_chat_room) =
-            sync.kv_ws_close(model.chat_room_kv, reason)
-          let #(sub_chat_message, effect_chat_message) =
-            sync.sub_ws_close(model.chat_message_subscription, reason)
-          let model =
-            Model(
-              ..model,
-              article_kv: kv_article,
-              short_url_kv: kv_short_url,
-              chat_room_kv: kv_chat_room,
-              chat_message_subscription: sub_chat_message,
-              sub_time: sub_time,
-            )
-          let effect =
-            effect.batch([
-              effect,
-              effect_short_url,
-              effect_sub_time,
-              effect_chat_room,
-              effect_chat_message,
-            ])
-          #(model, effect)
-        }
-        ws.OnOpen(w) -> {
-          let #(kv_article, effect) = sync.kv_ws_open(model.article_kv, w)
-          let #(kv_short_url, effect_short_url) =
-            sync.kv_ws_open(model.short_url_kv, w)
-          let #(sub_time, effect_sub_time) = sync.sub_ws_open(model.sub_time, w)
-          let #(kv_chat_room, effect_chat_room) =
-            sync.kv_ws_open(model.chat_room_kv, w)
-          let #(sub_chat_message, effect_chat_message) =
-            sync.sub_ws_open(model.chat_message_subscription, w)
-          let model =
-            Model(
-              ..model,
-              article_kv: kv_article,
-              short_url_kv: kv_short_url,
-              sub_time: sub_time,
-              chat_room_kv: kv_chat_room,
-              chat_message_subscription: sub_chat_message,
-            )
-          let effect =
-            effect.batch([
-              effect,
-              effect_short_url,
-              effect_sub_time,
-              effect_chat_room,
-              effect_chat_message,
-            ])
-          #(model, effect)
-        }
+    // Omnimessage transport ----------------------------------------------------
+    TransportState(state) -> {
+      case state {
+        transports.TransportUp -> #(
+          Model(..model, debug_connected: True, debug_ws_status: "Connected"),
+          effect.from(fn(dispatch) {
+            dispatch(ClientMessage(shared_omni.SubscribeShortUrls))
+            dispatch(ClientMessage(shared_omni.SubscribeArticles))
+          }),
+        )
+        transports.TransportDown(code, message) -> #(
+          Model(
+            ..model,
+            debug_connected: False,
+            debug_ws_status: "Disconnected ("
+              <> int.to_string(code)
+              <> "): "
+              <> message,
+          ),
+          effect.none(),
+        )
+        transports.TransportError(_err) -> #(
+          Model(
+            ..model,
+            debug_connected: False,
+            debug_ws_status: "Transport error",
+          ),
+          effect.none(),
+        )
       }
     }
+
+    ServerMessage(server_msg) -> {
+      case server_msg {
+        shared_omni.ShortUrlsSnapshot(urls) -> {
+          let updated =
+            urls
+            |> list.map(fn(u) {
+              let shared_short_url.ShortUrl(
+                id:,
+                short_code:,
+                target_url:,
+                created_by:,
+                created_at:,
+                updated_at:,
+                access_count:,
+                is_active:,
+              ) = u
+
+              #(
+                id,
+                short_url.ShortUrl(
+                  id: id,
+                  short_code: short_code,
+                  target_url: target_url,
+                  created_by: created_by,
+                  created_at: created_at,
+                  updated_at: updated_at,
+                  access_count: access_count,
+                  is_active: is_active,
+                ),
+              )
+            })
+            |> dict.from_list
+
+          #(
+            Model(
+              ..model,
+              short_url_kv: sync.KV(
+                ..model.short_url_kv,
+                data: updated,
+                state: sync.InSync,
+              ),
+            ),
+            effect.none(),
+          )
+        }
+
+        shared_omni.ArticlesSnapshot(articles) -> {
+          let updated =
+            articles
+            |> list.map(fn(a) {
+              let shared_article.Article(
+                id:,
+                slug:,
+                revision:,
+                author:,
+                tags:,
+                published_at_ms:,
+                title:,
+                subtitle:,
+                leading:,
+                content:,
+              ) = a
+
+              let published_at =
+                published_at_ms
+                |> option.map(fn(ms) { birl.from_unix_milli(ms) })
+
+              #(
+                id,
+                article.ArticleV1(
+                  id: id,
+                  slug: slug,
+                  revision: revision,
+                  author: author,
+                  tags: tags,
+                  published_at: published_at,
+                  title: title,
+                  subtitle: subtitle,
+                  leading: leading,
+                  content: content,
+                  draft: None,
+                ),
+              )
+            })
+            |> dict.from_list
+
+          #(
+            Model(
+              ..model,
+              article_kv: sync.KV(
+                ..model.article_kv,
+                data: updated,
+                state: sync.InSync,
+              ),
+            ),
+            effect.none(),
+          )
+        }
+
+        shared_omni.ShortUrlUpserted(u) -> {
+          let shared_short_url.ShortUrl(
+            id:,
+            short_code:,
+            target_url:,
+            created_by:,
+            created_at:,
+            updated_at:,
+            access_count:,
+            is_active:,
+          ) = u
+
+          let local =
+            short_url.ShortUrl(
+              id: id,
+              short_code: short_code,
+              target_url: target_url,
+              created_by: created_by,
+              created_at: created_at,
+              updated_at: updated_at,
+              access_count: access_count,
+              is_active: is_active,
+            )
+
+          let updated = dict.insert(model.short_url_kv.data, id, local)
+          #(
+            Model(
+              ..model,
+              short_url_kv: sync.KV(..model.short_url_kv, data: updated),
+            ),
+            effect.none(),
+          )
+        }
+
+        shared_omni.ShortUrlDeleted(id) -> {
+          let updated = dict.delete(model.short_url_kv.data, id)
+          #(
+            Model(
+              ..model,
+              short_url_kv: sync.KV(..model.short_url_kv, data: updated),
+            ),
+            effect.none(),
+          )
+        }
+
+        shared_omni.ArticleUpserted(a) -> {
+          let shared_article.Article(
+            id:,
+            slug:,
+            revision:,
+            author:,
+            tags:,
+            published_at_ms:,
+            title:,
+            subtitle:,
+            leading:,
+            content:,
+          ) = a
+
+          let published_at =
+            published_at_ms |> option.map(fn(ms) { birl.from_unix_milli(ms) })
+
+          let local =
+            article.ArticleV1(
+              id: id,
+              slug: slug,
+              revision: revision,
+              author: author,
+              tags: tags,
+              published_at: published_at,
+              title: title,
+              subtitle: subtitle,
+              leading: leading,
+              content: content,
+              draft: None,
+            )
+
+          let updated = dict.insert(model.article_kv.data, id, local)
+          #(
+            Model(
+              ..model,
+              article_kv: sync.KV(..model.article_kv, data: updated),
+            ),
+            effect.none(),
+          )
+        }
+
+        shared_omni.ArticleDeleted(id) -> {
+          let updated = dict.delete(model.article_kv.data, id)
+          #(
+            Model(
+              ..model,
+              article_kv: sync.KV(..model.article_kv, data: updated),
+            ),
+            effect.none(),
+          )
+        }
+
+        _ -> #(model, effect.none())
+      }
+    }
+    ClientMessage(_client_msg) -> #(model, effect.none())
   }
 }
 
@@ -4037,10 +4112,32 @@ fn view_notification_form(model: Model) -> Element(Msg) {
 // MAIN ------------------------------------------------------------------------
 
 pub fn main() {
-  // let app = lustre.application(init, update, view)
-  let app = lustre.application(init, update_with_localstorage, view)
-  let assert Ok(_) = lustre.start(app, "#app", Nil)
+  let encoder_decoder =
+    omni.EncoderDecoder(
+      fn(msg) {
+        case msg {
+          ClientMessage(client_msg) ->
+            Ok(shared_omni.encode_client_message(client_msg))
+          _ -> Error(Nil)
+        }
+      },
+      fn(encoded) {
+        shared_omni.decode_server_message(encoded)
+        |> result.map(ServerMessage)
+      },
+    )
 
+  let app =
+    omni.application(
+      init,
+      update_with_localstorage,
+      view,
+      encoder_decoder,
+      transports.websocket("/omni-ws"),
+      TransportState,
+    )
+
+  let assert Ok(_) = lustre.start(app, "#app", Nil)
   Nil
 }
 
@@ -4105,7 +4202,6 @@ fn init(_) -> #(Model, Effect(Msg)) {
       // Article cache from WebSocket KV stream
       // article_cache: dict.new(),
       // Sync
-      ws: None,
       article_kv: sync.kv_new(
         id: "article_kv",
         bucket: "article",
@@ -4182,7 +4278,6 @@ fn init(_) -> #(Model, Effect(Msg)) {
     model,
     effect.batch([
       effect_modem,
-      ws.init("/ws", WebSocketMsg),
       // local_storage_effect,
       // effect_nav,
       session.auth_check(AuthCheckResponse, model.base_uri),

@@ -1,8 +1,6 @@
-import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/int
 import gleam/json
-import gleam/list
 import gleam/string
 import utils/http
 
@@ -38,28 +36,11 @@ pub fn http_error(error: http.HttpError) -> String {
 
 pub fn json_error(error: json.DecodeError) -> String {
   case error {
-    json.UnexpectedEndOfInput -> {
-      "unexpected end of input"
-    }
-    json.UnexpectedByte(byte) -> {
-      "unexpected byte: " <> byte
-    }
-    json.UnexpectedSequence(expected) -> {
-      "unexpected sequence: " <> expected
-    }
-    json.UnexpectedFormat(errors) -> {
-      "unexpected format\n"
-      <> list.map(errors, fn(error) {
-        case error {
-          dynamic.DecodeError(expected, found, path) ->
-            decode.DecodeError(expected: expected, found: found, path: path)
-        }
-      })
-      |> decode_error_list
-    }
-    json.UnableToDecode(errors) -> {
+    json.UnexpectedEndOfInput -> "unexpected end of input"
+    json.UnexpectedByte(byte) -> "unexpected byte: " <> byte
+    json.UnexpectedSequence(expected) -> "unexpected sequence: " <> expected
+    json.UnableToDecode(errors) ->
       "unable to decode\n" <> decode_error_list(errors)
-    }
   }
 }
 

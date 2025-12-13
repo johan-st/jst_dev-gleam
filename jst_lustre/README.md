@@ -3,11 +3,12 @@
 ## Development
 
 ```sh
-gleam run -m lustre/dev start  --tailwind-entry=./src/styles.css
-gleam run -m lustre/dev build --minify  --tailwind-entry=./src/styles.css --outdir=../server/web/static
-gleam test 
-
+gleam run -m lustre/dev start
+gleam run -m lustre/dev build --minify --outdir=../build
+gleam test
 ```
+
+Note: Tailwind CSS auto-detects via `src/jst_lustre.css` (must match project name, use Tailwind v4 format).
 
 ## Development Priorities
 

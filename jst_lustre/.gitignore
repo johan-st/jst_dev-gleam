@@ -7,3 +7,7 @@ erl_crash.dump
 /priv/static/jst_lustre.min.mjs
 /priv/static/jst_lustre.css
 /priv/static/jst_lustre.min.css
+
+#Added automatically by Lustre Dev Tools
+/.lustre
+/dist

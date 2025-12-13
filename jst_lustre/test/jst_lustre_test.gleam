@@ -2,7 +2,6 @@
 import article.{ArticleV1}
 
 import birl
-import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/option.{None}
 import gleeunit
@@ -83,15 +82,9 @@ pub fn model_encoder_and_decoder_test() {
   let encoded_v1 = persist.encode(model_v1)
 
   let decoded_v0 =
-    decode.run(
-      dynamic.from(persist.string_to_dynamic(encoded_v0)),
-      persist.decoder(),
-    )
+    decode.run(persist.string_to_dynamic(encoded_v0), persist.decoder())
   let decoded_v1 =
-    decode.run(
-      dynamic.from(persist.string_to_dynamic(encoded_v1)),
-      persist.decoder(),
-    )
+    decode.run(persist.string_to_dynamic(encoded_v1), persist.decoder())
 
   let dec_v0 = should.be_ok(decoded_v0)
   let dec_v1 = should.be_ok(decoded_v1)

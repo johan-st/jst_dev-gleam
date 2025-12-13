@@ -1,0 +1,24 @@
+name = "jst_server"
+version = "0.1.0"
+
+description = "BEAM server for jst_dev"
+
+target = "erlang"
+
+[dependencies]
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+gleam_json = ">= 3.0.1 and < 4.0.0"
+gleam_http = ">= 4.0.0 and < 5.0.0"
+gleam_crypto = ">= 1.3.0 and < 2.0.0"
+gleam_otp = ">= 1.0.0 and < 2.0.0"
+gleam_erlang = ">= 1.0.0 and < 2.0.0"
+mist = ">= 5.0.0 and < 6.0.0"
+
+# SQLite persistence
+sqlight = ">= 1.0.0 and < 2.0.0"
+
+# local shared types
+jst_shared = { path = "../shared" }
+
+[dev-dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"

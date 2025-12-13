@@ -1,18 +1,12 @@
-# fly.preview.toml - Preview deployment configuration
-#
-# Use this config for preview deployments with: fly deploy --config fly.preview.toml
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
+# Fly.io configuration for jst_dev preview
+# Gleam/BEAM server with SQLite + LiteFS
 
 app = 'jst-dev-preview'
 primary_region = 'arn'
 
-[build]
-  [build.args]
-    GO_VERSION = '1.23.3'
-
 [env]
   PORT = '8080'
+  DB_PATH = '/litefs/db.sqlite'
   ENVIRONMENT = 'preview'
 
 [http_service]
@@ -23,7 +17,11 @@ primary_region = 'arn'
   min_machines_running = 0
   processes = ['app']
 
+[mounts]
+  source = 'litefs_preview'
+  destination = '/data'
+
 [[vm]]
   memory = '256mb'
   cpu_kind = 'shared'
-  cpus = 1 
+  cpus = 1
