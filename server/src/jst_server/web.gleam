@@ -48,7 +48,9 @@ pub fn start(conn: Connection, pubsub: PubSub, conf: Config) {
     |> mist.start
 }
 
-fn serve_static(path_parts: List(String)) -> response.Response(mist.ResponseData) {
+fn serve_static(
+  path_parts: List(String),
+) -> response.Response(mist.ResponseData) {
   let filename = string.join(path_parts, "/")
   serve_file(filename)
 }

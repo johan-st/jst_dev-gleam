@@ -37,9 +37,9 @@ fly deploy --config fly.preview.toml
 ## Project Structure
 
 ```
-shared/       # Shared types (Gleam, cross-target)
-server_beam/  # Backend (Gleam/BEAM + SQLite + static file server)
-jst_lustre/   # Frontend (Gleam/Lustre)
+shared/  # Shared types (Gleam, cross-target)
+server/  # Backend (Gleam/BEAM + SQLite + static file server)
+client/  # Frontend (Gleam/Lustre)
 ```
 
 The server serves the frontend from `priv/static/`. Run `make build-frontend` to rebuild the frontend assets.

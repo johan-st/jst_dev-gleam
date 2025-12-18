@@ -4,9 +4,9 @@ FROM ghcr.io/gleam-lang/gleam:v1.11.0-erlang-alpine AS builder_frontend
 
 WORKDIR /usr/src/app
 COPY shared ./shared
-COPY jst_lustre ./jst_lustre
+COPY client ./client
 
-WORKDIR /usr/src/app/jst_lustre
+WORKDIR /usr/src/app/client
 RUN apk add --no-cache nodejs npm
 RUN gleam deps download
 RUN gleam test
@@ -18,9 +18,9 @@ FROM ghcr.io/gleam-lang/gleam:v1.11.0-erlang-alpine AS builder_backend
 
 WORKDIR /usr/src/app
 COPY shared ./shared
-COPY server_beam ./server_beam
+COPY server ./server
 
-WORKDIR /usr/src/app/server_beam
+WORKDIR /usr/src/app/server
 RUN gleam deps download
 RUN gleam build
 
@@ -45,11 +45,11 @@ COPY --from=flyio/litefs:0.5 /usr/local/bin/litefs /usr/local/bin/litefs
 WORKDIR /app
 
 # Copy backend release
-COPY --from=builder_backend /usr/src/app/server_beam/build/erlang-shipment ./
+COPY --from=builder_backend /usr/src/app/server/build/erlang-shipment ./
 
 # Copy frontend assets (index.html + built JS/CSS)
 COPY --from=builder_frontend /usr/src/app/build ./priv/static
-COPY --from=builder_frontend /usr/src/app/jst_lustre/index.html ./priv/static/
+COPY --from=builder_frontend /usr/src/app/client/index.html ./priv/static/
 
 # Copy LiteFS configuration
 COPY litefs.yml /etc/litefs.yml

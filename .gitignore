@@ -5,5 +5,5 @@ node_modules
 
 *.exe
 build
-server_beam/priv/static
+server/priv/static
 server/server
