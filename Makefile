@@ -1,4 +1,4 @@
-.PHONY: help dev dev-server test fmt check build deploy preview preview-stop clean
+.PHONY: help dev dev-server test fmt check build deploy preview preview-stop clean seed
 
 help: ## Show this help message
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-12s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -37,6 +37,9 @@ preview: ## Deploy to preview
 
 preview-stop: ## Stop preview
 	fly -a jst-dev-preview scale count 0 -y
+
+seed: ## Seed local database with sample data
+	@./scripts/seed.sh
 
 clean: ## Clean build artifacts
 	rm -rf build data/local.db */build server/priv/static
