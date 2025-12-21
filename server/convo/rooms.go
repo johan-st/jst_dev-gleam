@@ -13,6 +13,8 @@ import (
 	"jst_dev/server/jst_log"
 )
 
+const roomKVBucket = "convo_room"
+
 // --- ROOM VALUE ---
 
 type RoomRepoValue struct {
@@ -59,23 +61,23 @@ func newRoomRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (core.Re
 
 // setupRoomKV initializes and returns a JetStream key-value store bucket named "convo_room" for storing rooms in JSON format.
 // The bucket is configured with a 16KB maximum value size, 32 history entries, and file storage.
+// Uses retry logic to handle JetStream cluster startup delays (meta leader election).
 // Returns the created key-value store or an error if initialization fails.
 func setupRoomKV(ctx context.Context, nc *nats.Conn) (jetstream.KeyValue, error) {
-	js, err := jetstream.New(nc)
-	if err != nil {
-		return nil, fmt.Errorf("jetstream new: %w", err)
-	}
-	kv, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{
-		Bucket:       "convo_room",
+	cfg := jetstream.KeyValueConfig{
+		Bucket:       roomKVBucket,
 		Description:  "conversation rooms by id",
 		MaxValueSize: 1024 * 16,        // 16 KB per value
 		MaxBytes:     1024 * 1024 * 50, // 50 MB total
 		History:      32,
 		Storage:      jetstream.FileStorage,
 		Compression:  true,
-	})
+	}
+
+	maxRetries, retryDelay := core.DefaultKVRetryConfig()
+	kv, err := core.CreateKeyValueWithRetry(ctx, nc, cfg, maxRetries, retryDelay)
 	if err != nil {
-		return nil, fmt.Errorf("kv create: %w", err)
+		return nil, fmt.Errorf("kv create with retry: %w", err)
 	}
 	return kv, nil
 }

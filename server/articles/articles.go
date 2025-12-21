@@ -13,6 +13,8 @@ import (
 	"jst_dev/server/jst_log"
 )
 
+const articleKVBucket = "article"
+
 // --- ARTICLE ---
 
 type Article struct {
@@ -67,29 +69,23 @@ func NewRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (core.Repo[A
 
 // setup initializes and returns a JetStream key-value store bucket named "article" for storing articles in JSON format.
 // The bucket is configured with a 5MB maximum value size, 64 history entries, and file storage.
+// Uses retry logic to handle JetStream cluster startup delays (meta leader election).
 // Returns the created key-value store or an error if initialization fails.
 func setup(ctx context.Context, nc *nats.Conn) (jetstream.KeyValue, error) {
-	js, err := jetstream.New(nc)
-	if err != nil {
-		return nil, fmt.Errorf("jetstream new: %w", err)
-	}
-	kv, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{
-		Bucket:       "article",
+	cfg := jetstream.KeyValueConfig{
+		Bucket:       articleKVBucket,
 		Description:  "articles in json format",
 		MaxValueSize: 1024 * 1024 * 5,  // 5 MB
 		MaxBytes:     1024 * 1024 * 50, // 50 MB,
 		History:      64,
-		// TTL: 24 * time.Hour,
-		Storage: jetstream.FileStorage,
-		// Replicas: 1,
-		// Placement: &jetstream.Placement{},
-		// RePublish: &jetstream.RePublish{},
-		// Mirror: &jetstream.StreamSource{},
-		// Sources: []*jetstream.StreamSource{},
-		Compression: true,
-	})
+		Storage:      jetstream.FileStorage,
+		Compression:  true,
+	}
+
+	maxRetries, retryDelay := core.DefaultKVRetryConfig()
+	kv, err := core.CreateKeyValueWithRetry(ctx, nc, cfg, maxRetries, retryDelay)
 	if err != nil {
-		return nil, fmt.Errorf("kv create: %w", err)
+		return nil, fmt.Errorf("kv create with retry: %w", err)
 	}
 	return kv, nil
 }

@@ -1,368 +1,318 @@
-# Chat Request Feature - Implementation Plan
+# Chat Request Feature - Fat Nodes Implementation
+
+> See [REFACTOR.md](./REFACTOR.md) for the complete fat nodes architecture.
 
 ## Overview
 
-This document outlines the implementation plan for a chat request feature that allows users to request chat sessions and get notified via ntfy.sh when someone wants to chat.
+This document outlines the chat request feature implementation within the fat nodes architecture. The feature allows users to request chat sessions and receive notifications via ntfy.sh.
 
 ## Architecture
 
-### Current State Analysis
+### Fat Node Context
 
-**Backend (Go + NATS JetStream + KV):**
-- ✅ WebSocket realtime bridge (`/ws`) with NATS integration
-- ✅ NATS JetStream with `convo_message` stream for room messages
-- ✅ NATS KV store `convo_room` for room metadata
-- ✅ Basic conversation service with room creation
-- ✅ ntfy.sh integration for notifications
-- ✅ Authorization system with JWT cookies
+In the fat nodes architecture:
+- Chat rooms are stored in JetStream KV (`convo_room`)
+- Messages are stored in JetStream streams (`convo_message.*`)
+- Data replicates across all nodes in the cluster
+- Any node can create rooms or send messages
+- WebSocket subscriptions work on any node
 
-**Frontend (Lustre/Gleam):**
-- ✅ Chat room listing page (`chat_index.gleam`)
-- ✅ Individual chat room page (`chat_room.gleam`)
-- ✅ WebSocket integration via sync module
-- ✅ Real-time message updates
-
-**Missing Components:**
-- ❌ Chat request creation endpoint
-- ❌ Chat request notification flow
-- ❌ Frontend "Request Chat" button
-- ❌ Room ID-based routing
-- ❌ User name collection for anonymous users
-
-## Feature Flow
-
-### 1. User Initiates Chat Request
-
-**Frontend Action:**
-- User clicks "Request Chat" button
-- Frontend sends `POST /chat/request` to server
-- Server creates new room and sends ntfy notification
-- Frontend redirects to `/chat/{room_id}`
-
-**Backend Processing:**
-```go
-// New endpoint: POST /chat/request
-func handleChatRequest(l *jst_log.Logger, nc *nats.Conn) http.Handler {
-    // 1. Generate new room_id (UUID)
-    // 2. Store room metadata in convo_room KV
-    // 3. Send ntfy.sh notification
-    // 4. Return room_id to frontend
-}
+```
+User A (Node 1)                    User B (Node 2)
+      │                                  │
+      ▼                                  ▼
+┌─────────────┐                   ┌─────────────┐
+│ Fat Node 1  │◄────NATS Cluster──►│ Fat Node 2  │
+│             │                   │             │
+│ KV: convo_room (replicated)     │ KV: convo_room │
+│ Stream: convo_message (replicated) │ Stream: convo_message │
+└─────────────┘                   └─────────────┘
 ```
 
-### 2. Notification System
+### Data Flow
 
-**ntfy.sh Integration:**
-- Topic: `jst`
-- Title: `"New Chat Request"`
-- Message: `"New chat request: https://jst.dev/chat/{room_id}"`
-- Priority: High
-- Category: `jst.dev`
-- Sent via existing ntfy service (not direct HTTP)
+```
+1. User clicks "Request Chat"
+   └→ POST /api/chat/request (any node)
+      └→ Create room in KV convo_room
+         └→ JetStream replicates to all nodes
+      └→ Send ntfy notification
+      └→ Return room_id
 
-### 3. Chat Room Access
+2. User navigates to /chat/{room_id}
+   └→ WebSocket subscribes to convo_message.{room_id}
+      └→ JetStream stream subscription
+   └→ WebSocket subscribes to KV convo_room (room metadata)
 
-**URL Structure:**
-- Chat request page: Frontend handles routing to `/chat/{room_id}`
-- WebSocket connection: `ws://server/ws` (existing)
+3. Users send messages
+   └→ POST /api/chat/room/{room_id}/message (any node)
+      └→ Publish to convo_message.{room_id}
+         └→ JetStream replicates to all nodes
+         └→ All WebSocket subscribers receive message
+```
 
-**User Experience:**
-- Any user with the link can join the chat
-- Anonymous users prompted for name (stored in localStorage/cookie)
-- Real-time messaging via existing WebSocket bridge
+## Implementation
 
-## Implementation Plan
+### Backend (Go)
 
-### Phase 1: Backend API Endpoints
+#### Chat Request Endpoint
 
-#### 1.1 Chat Request Endpoint
 **File:** `server/web/routes.go`
 
 ```go
-// Add to routes function
-mux.Handle("POST /chat/request", handleChatRequest(l, nc))
-```
-
-**Implementation:**
-```go
+// POST /api/chat/request
 func handleChatRequest(l *jst_log.Logger, nc *nats.Conn) http.Handler {
-    type Resp struct {
+    type Response struct {
         RoomID string `json:"room_id"`
+        URL    string `json:"url"`
     }
-    
+
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        // 1. Generate room_id
+        // 1. Generate room ID
         roomID := uuid.New().String()
-        
-        // 2. Create room metadata
-        room := api.Room{
-            Id:     roomID,
-            Name:   "Chat Request",
-            Public: true,
-            Users:  []string{},
-        }
-        
-        // 3. Store in KV
-        roomBytes, _ := json.Marshal(room)
+
+        // 2. Create room in KV (replicates across cluster)
         js, _ := nc.JetStream()
         kv, _ := js.KeyValue("convo_room")
-        kv.Put(roomID, roomBytes)
         
-        // 4. Send ntfy notification via ntfy service
-        notification := ntfy.Notification{
-            ID:        uuid.New().String(),
-            UserID:    "", // Anonymous request
-            Title:     "New Chat Request",
-            Message:   fmt.Sprintf("New chat request: https://jst.dev/chat/%s", roomID),
-            Category:  "jst.dev",
-            Priority:  ntfy.PriorityHigh,
-            NtfyTopic: "jst",
-            Data:      map[string]interface{}{"room_id": roomID},
+        room := api.Room{
+            Id:        roomID,
+            Name:      "Chat Request",
+            Public:    true,
             CreatedAt: time.Now(),
         }
-        
-        notificationBytes, _ := json.Marshal(notification)
-        nc.Request(ntfy.SubjectNotification, notificationBytes, 10*time.Second)
-        
-        // 5. Return response
-        respJson(w, Resp{RoomID: roomID}, http.StatusOK)
+        roomBytes, _ := json.Marshal(room)
+        kv.Put(roomID, roomBytes)
+
+        // 3. Send ntfy notification via NATS service
+        notification := ntfy.Notification{
+            Title:     "New Chat Request",
+            Message:   fmt.Sprintf("https://jst.dev/chat/%s", roomID),
+            Priority:  ntfy.PriorityHigh,
+            NtfyTopic: "jst",
+        }
+        notifBytes, _ := json.Marshal(notification)
+        nc.Request(ntfy.SubjectNotification, notifBytes, 10*time.Second)
+
+        // 4. Return response
+        respJson(w, Response{
+            RoomID: roomID,
+            URL:    fmt.Sprintf("/chat/%s", roomID),
+        }, http.StatusOK)
     })
 }
 ```
 
+#### Route Registration
 
-### Phase 2: Frontend Implementation
-
-#### 2.1 Request Chat Button
-**File:** `jst_lustre/src/view/page/chat_index.gleam`
-
-```gleam
-// Add to chat_index.gleam
-pub fn view(
-  rooms kv_rooms: sync.KV(String, ChatRoom),
-  on_nav_to on_nav_to: fn(uri.Uri) -> msg,
-  on_request_chat on_request_chat: fn() -> msg,  // New parameter
-) -> List(Element(msg)) {
-  let header = ui.page_title("Chat Rooms", "chat-rooms-title")
-  
-  // Add request chat button to header
-  let request_button = html.button(
-    [attr.class("bg-pink-500 hover:bg-pink-600 text-white px-4 py-2 rounded")],
-    [html.text("Request Chat")]
-  )
-  
-  let header_with_button = ui.flex_between(header, request_button)
-  
-  // ... rest of existing code
-}
+```go
+// server/web/routes.go
+mux.Handle("POST /api/chat/request", handleChatRequest(l, nc))
 ```
 
-#### 2.2 Chat Request Logic
+### Frontend (Lustre/Gleam)
+
+#### Chat Request Effect
+
 **File:** `jst_lustre/src/chat.gleam`
 
 ```gleam
-// Add new message type
-pub type ChatRequestMsg {
-  RequestChat
-  ChatRequestCreated(room_id: String)
-  ChatRequestFailed(String)
+import gleam/http
+import gleam/json
+import lustre/effect.{type Effect}
+
+pub type ChatRequestResult {
+  ChatRequestSuccess(room_id: String)
+  ChatRequestError(String)
 }
 
-// Add HTTP request function
-pub fn request_chat() -> Effect(ChatRequestMsg) {
-  use result <- http.post("/chat/request", json.object([]))
-  case result {
-    Ok(response) -> {
-      case response.body |> json.decode(chat_request_response_decoder()) {
-        Ok(data) -> Effect.succeed(ChatRequestCreated(data.room_id))
-        Error(_) -> Effect.succeed(ChatRequestFailed("Failed to parse response"))
+pub fn request_chat() -> Effect(ChatRequestResult) {
+  http.post(
+    "/api/chat/request",
+    json.object([]),
+    fn(result) {
+      case result {
+        Ok(response) -> {
+          case json.decode(response.body, room_id_decoder()) {
+            Ok(room_id) -> ChatRequestSuccess(room_id)
+            Error(_) -> ChatRequestError("Invalid response")
+          }
+        }
+        Error(_) -> ChatRequestError("Request failed")
       }
     }
-    Error(_) -> Effect.succeed(ChatRequestFailed("Failed to create chat request"))
-  }
+  )
 }
 
-// Add decoder for response
-pub fn chat_request_response_decoder() -> Decoder(String) {
-  use room_id <- decode.field("room_id", decode.string)
-  decode.success(room_id)
+fn room_id_decoder() -> json.Decoder(String) {
+  json.field("room_id", json.string)
 }
 ```
 
-#### 2.3 Room-Specific Chat Page
-**File:** `jst_lustre/src/view/page/chat_room.gleam`
+#### Chat Index View
+
+**File:** `jst_lustre/src/view/page/chat_index.gleam`
 
 ```gleam
-// Update to handle room-specific logic
 pub fn view(
-  room_id room_id: String,
-  messages sub_messages: sync.Subscription(ChatMessage),
-  user_name user_name: Option(String),  // New parameter
-  on_set_name on_set_name: fn(String) -> msg,  // New parameter
+  rooms: sync.KV(String, ChatRoom),
+  on_request_chat: fn() -> msg,
 ) -> List(Element(msg)) {
-  let header = ui.page_title("Room: " <> room_id, "chat-room-title")
-  
-  // Show name prompt if no name set
-  let name_prompt = case user_name {
-    None -> [
-      html.div([attr.class("mb-4 p-4 bg-yellow-100 rounded")], [
-        html.p([attr.class("mb-2")], [html.text("Enter your name to join the chat:")]),
-        html.input([
-          attr.class("w-full p-2 border rounded"),
-          attr.placeholder("Your name"),
-          // Add input handling
-        ])
-      ])
-    ]
-    Some(_) -> []
-  }
-  
-  // ... rest of existing message display code
+  [
+    html.div([attr.class("flex justify-between items-center mb-4")], [
+      ui.page_title("Chat Rooms"),
+      html.button(
+        [
+          attr.class("bg-pink-500 hover:bg-pink-600 text-white px-4 py-2 rounded"),
+          event.on_click(on_request_chat),
+        ],
+        [html.text("Request Chat")],
+      ),
+    ]),
+    // Room list...
+  ]
 }
 ```
 
-### Phase 3: WebSocket Integration
+### WebSocket Subscriptions
 
-#### 3.1 Room-Specific Subscriptions
-The existing WebSocket bridge already supports:
-- `convo_message.*` subject pattern
-- JetStream subscriptions with filters
-- Real-time message forwarding
+The chat room page subscribes to:
 
-**Usage:**
-```javascript
-// Frontend WebSocket message
+1. **Room metadata (KV):** `kv_sub` to `convo_room` with key filter
+2. **Messages (JetStream):** `js_sub` to `convo_message` stream with filter
+
+```json
+// Subscribe to room metadata
+{
+  "op": "kv_sub",
+  "target": "convo_room",
+  "data": { "pattern": "room-id-here" }
+}
+
+// Subscribe to messages
 {
   "op": "js_sub",
   "target": "convo_message",
   "data": {
-    "filter": "convo_message.{room_id}",
+    "filter": "convo_message.room-id-here",
     "start_seq": 0,
     "batch": 50
   }
 }
 ```
 
-#### 3.2 Message Publishing
-```javascript
-// Publish message to room
+## Fat Node Considerations
+
+### Replication
+
+Chat data is replicated across the cluster:
+
+```go
+// KV bucket for rooms (R=3)
+kvConfig := &nats.KeyValueConfig{
+    Bucket:   "convo_room",
+    Replicas: 3,
+}
+
+// Stream for messages (R=3)
+streamConfig := &nats.StreamConfig{
+    Name:     "convo_message",
+    Subjects: []string{"convo_message.*"},
+    Replicas: 3,
+}
+```
+
+### Cross-Node Messaging
+
+When User A on Node 1 sends a message:
+
+```
+User A → POST /api/chat/room/{id}/message → Node 1
+                                              │
+         Publish to convo_message.{id}────────┘
+                                              │
+         JetStream replicates ────────────────┼──────────────┐
+                                              │              │
+         Node 1 WebSocket subscribers ◄───────┘              │
+         Node 2 WebSocket subscribers ◄──────────────────────┘
+                                              │
+                                        User B receives
+```
+
+### Offline Node Behavior
+
+If a node is partitioned:
+- Users on that node can still chat (local JetStream)
+- Messages queue locally
+- When partition heals, messages sync to cluster
+- All users eventually see all messages
+
+### ntfy Notification
+
+The ntfy notification is sent via NATS service:
+- Any node can send the notification
+- The ntfy service runs on each node
+- Only one node processes the request (NATS request/reply)
+
+## Capabilities
+
+Chat requires specific capabilities:
+
+```json
 {
-  "op": "pub",
-  "target": "convo_message.{room_id}",
-  "data": {
-    "user": "user_id",
-    "content": "Hello world",
-    "timestamp_ms": 1234567890
+  "buckets": {
+    "convo_room": [">"]
+  },
+  "streams": {
+    "convo_message": ["convo_message.*"]
   }
 }
 ```
 
-### Phase 4: User Experience Enhancements
+For private rooms, restrict to specific room IDs:
 
-#### 4.1 Name Management
-- Store user name in localStorage
-- Prompt for name on first visit
-- Allow name changes in settings
-
-#### 4.2 Room Status
-- Show "Waiting for response" when room is empty
-- Display participant count
-- Show last activity timestamp
-
-#### 4.3 Mobile Optimization
-- Responsive design for mobile devices
-- Touch-friendly message input
-- Optimized for small screens
-
-## Technical Considerations
-
-### Security
-- Room IDs are UUIDs (unguessable)
-- No authentication required for chat requests
-- Rate limiting on request creation
-- Input sanitization for messages
-
-### Performance
-- NATS JetStream handles message persistence
-- KV store for room metadata
-- WebSocket connection pooling
-- Message batching for large rooms
-
-### Scalability
-- Stateless server design
-- NATS clustering for high availability
-- JetStream replication
-- CDN for static assets
-
-## Testing Strategy
-
-### Backend Tests
-```go
-func TestHandleChatRequest(t *testing.T) {
-    // Test room creation
-    // Test ntfy notification
-    // Test KV storage
-    // Test error handling
+```json
+{
+  "buckets": {
+    "convo_room": ["room-123", "room-456"]
+  },
+  "streams": {
+    "convo_message": ["convo_message.room-123", "convo_message.room-456"]
+  }
 }
 ```
 
-### Frontend Tests
-```gleam
-// Test chat request flow
-// Test room navigation
-// Test message display
-// Test WebSocket integration
+## Testing
+
+### Local Development
+
+```bash
+# Start fat node in local mode
+go run . -local -proxy -log debug
+
+# Create chat request
+curl -X POST http://localhost:8080/api/chat/request
+
+# Watch messages (NATS CLI)
+nats sub "convo_message.>"
 ```
 
-### Integration Tests
-- End-to-end chat request flow
-- Cross-browser compatibility
-- Mobile device testing
-- Performance under load
+### Multi-Node Testing
 
-## Deployment Checklist
+```bash
+# Node 1 (Fly.io)
+go run . -fat-node
 
-### Backend
-- [ ] Add new routes to `routes.go`
-- [ ] Implement chat request handler
-- [ ] Test ntfy service integration
-- [ ] Update CORS settings if needed
+# Node 2 (local with Tailscale)
+CLUSTER_PEERS=100.64.0.1:6222 go run . -fat-node
 
-### Frontend
-- [ ] Add request chat button
-- [ ] Implement chat request logic
-- [ ] Update room page for name collection
-- [ ] Add room-specific routing
-- [ ] Test WebSocket integration
-
-### Infrastructure
-- [ ] Verify NATS JetStream configuration
-- [ ] Check ntfy service configuration
-- [ ] Monitor error rates and performance
+# Create room on Node 1, verify it appears on Node 2
+```
 
 ## Future Enhancements
 
-### Phase 2 Features
-- Chat request expiration (24 hours)
-- Request categories/topics
-- User profiles and avatars
-- Message reactions and threading
-- File sharing capabilities
-
-### Advanced Features
-- Video/audio chat integration
-- Screen sharing
-- Chat history search
-- Export chat logs
-- Admin moderation tools
-
-## Conclusion
-
-This implementation plan provides a solid foundation for the chat request feature while leveraging the existing infrastructure. The phased approach allows for incremental development and testing, ensuring a robust and user-friendly experience.
-
-The key advantages of this approach:
-- Minimal changes to existing codebase
-- Leverages proven NATS + WebSocket architecture
-- Simple user experience
-- Scalable and maintainable design
-- Easy to extend with additional features
+- **Room expiration:** Auto-delete rooms after 24 hours
+- **Typing indicators:** Ephemeral NATS subjects (no persistence)
+- **Read receipts:** Track per-user read position in stream
+- **File attachments:** Store in S3, reference in messages
+- **Audio/video:** WebRTC with NATS signaling

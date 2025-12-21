@@ -13,6 +13,8 @@ import (
 	"jst_dev/server/urlShort/api"
 )
 
+const shortUrlKVBucket = "url_short"
+
 // --- SHORT URL VALUE ---
 
 type ShortUrlRepoValue struct {
@@ -58,23 +60,23 @@ func NewShortUrlRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (cor
 
 // setupShortUrlKV initializes and returns a JetStream key-value store bucket named "url_short" for storing short URLs in JSON format.
 // The bucket is configured with a 1KB maximum value size, 1 history entry, and file storage.
+// Uses retry logic to handle JetStream cluster startup delays (meta leader election).
 // Returns the created key-value store or an error if initialization fails.
 func setupShortUrlKV(ctx context.Context, nc *nats.Conn) (jetstream.KeyValue, error) {
-	js, err := jetstream.New(nc)
-	if err != nil {
-		return nil, fmt.Errorf("jetstream new: %w", err)
-	}
-	kv, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{
-		Bucket:       "url_short",
+	cfg := jetstream.KeyValueConfig{
+		Bucket:       shortUrlKVBucket,
 		Description:  "short url mappings",
 		MaxValueSize: 1 * 1024,         // 1 KB
 		MaxBytes:     50 * 1024 * 1024, // 50 MB
 		History:      1,
 		Storage:      jetstream.FileStorage,
 		Compression:  false,
-	})
+	}
+
+	maxRetries, retryDelay := core.DefaultKVRetryConfig()
+	kv, err := core.CreateKeyValueWithRetry(ctx, nc, cfg, maxRetries, retryDelay)
 	if err != nil {
-		return nil, fmt.Errorf("kv create: %w", err)
+		return nil, fmt.Errorf("kv create with retry: %w", err)
 	}
 	return kv, nil
 }

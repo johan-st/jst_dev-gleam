@@ -40,6 +40,11 @@ func routes(
 	dev bool,
 	slow time.Duration,
 ) {
+	// Health check endpoints
+	mux.Handle("GET /health/live", handleHealthLive())
+	mux.Handle("GET /health/ready", handleHealthReady(nc))
+	mux.Handle("GET /health/cluster", handleHealthCluster(nc))
+
 	// Add routes with their respective handlers
 	mux.Handle("GET /api/article", handleArticleList(l, repo))
 	mux.Handle("POST /api/article", handleArticleNew(l, repo, nc))
@@ -1796,6 +1801,105 @@ func handleChatRequest(l *jst_log.Logger, nc *nats.Conn) http.Handler {
 		// 5. Return response
 		logger.Debug("chat request created successfully: %s", roomID)
 		respJson(w, Resp{RoomID: roomID}, http.StatusOK)
+	})
+}
+
+// --- HEALTH CHECKS ---
+
+// handleHealthLive returns 200 OK if the server is running
+// Used by load balancers to determine if the server is alive
+func handleHealthLive() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+}
+
+// handleHealthReady returns 200 OK if the server is ready to serve requests
+// Checks NATS connection status
+func handleHealthReady(nc *nats.Conn) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if nc == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"status":"error","reason":"nats_connection_nil"}`))
+			return
+		}
+
+		status := nc.Status()
+		if status != nats.CONNECTED {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			resp := fmt.Sprintf(`{"status":"error","reason":"nats_not_connected","nats_status":"%s"}`, status.String())
+			_, _ = w.Write([]byte(resp))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok","nats":"connected"}`))
+	})
+}
+
+// handleHealthCluster returns information about the NATS cluster
+// Useful for debugging fat node clustering
+func handleHealthCluster(nc *nats.Conn) http.Handler {
+	type ClusterInfo struct {
+		Status      string   `json:"status"`
+		ServerName  string   `json:"server_name,omitempty"`
+		ServerID    string   `json:"server_id,omitempty"`
+		ConnectedTo string   `json:"connected_to,omitempty"`
+		Cluster     string   `json:"cluster,omitempty"`
+		Servers     []string `json:"servers,omitempty"`
+		Stats       struct {
+			InMsgs     uint64 `json:"in_msgs"`
+			OutMsgs    uint64 `json:"out_msgs"`
+			InBytes    uint64 `json:"in_bytes"`
+			OutBytes   uint64 `json:"out_bytes"`
+			Reconnects uint64 `json:"reconnects"`
+		} `json:"stats,omitempty"`
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if nc == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"status":"error","reason":"nats_connection_nil"}`))
+			return
+		}
+
+		info := ClusterInfo{
+			Status:      nc.Status().String(),
+			ConnectedTo: nc.ConnectedUrl(),
+		}
+
+		// Get server info if available
+		if nc.Status() == nats.CONNECTED {
+			// Try to get discovered servers (other cluster members)
+			servers := nc.DiscoveredServers()
+			info.Servers = servers
+			info.ServerID = nc.ConnectedServerId()
+			info.ServerName = nc.ConnectedServerName()
+
+			// Get stats
+			stats := nc.Stats()
+			info.Stats.InMsgs = stats.InMsgs
+			info.Stats.OutMsgs = stats.OutMsgs
+			info.Stats.InBytes = stats.InBytes
+			info.Stats.OutBytes = stats.OutBytes
+			info.Stats.Reconnects = stats.Reconnects
+		}
+
+		respBytes, err := json.Marshal(info)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"status":"error","reason":"marshal_failed"}`))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(respBytes)
 	})
 }
 

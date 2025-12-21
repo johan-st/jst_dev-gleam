@@ -1,162 +1,337 @@
-# NATS Connection Handling
+# NATS Connection Handling - Fat Nodes
 
-This document describes how the server handles NATS connection failures and connection loss scenarios.
+This document describes how fat nodes handle NATS connections, clustering, and failure scenarios.
 
-## Initial Connection Behavior
+> See [REFACTOR.md](./REFACTOR.md) for the complete fat nodes architecture.
 
-### Panic on Initial Connection Failure
+## Fat Node NATS Architecture
 
-The server will **panic** if it cannot establish an initial connection to the NATS cluster. This is intentional because:
+Each fat node runs an **embedded NATS server** that:
+1. Serves local clients (the Go HTTP server)
+2. Clusters with other fat nodes over Tailscale
+3. Replicates JetStream data across the cluster
 
-1. **Core Dependency**: NATS is a core infrastructure component that the server cannot function without
-2. **Fail Fast**: Better to fail immediately than to start in a broken state
-3. **Operational Clarity**: Clear indication that the server environment is not properly configured
+```
+┌─────────────────────────────────────┐
+│           Fat Node                  │
+│  ┌─────────────────────────────┐   │
+│  │      Go HTTP Server         │   │
+│  │  (NATS Client Connection)   │   │
+│  └──────────────┬──────────────┘   │
+│                 │ localhost:4222   │
+│  ┌──────────────▼──────────────┐   │
+│  │    Embedded NATS Server     │   │
+│  │  ┌───────────────────────┐  │   │
+│  │  │     JetStream         │  │   │
+│  │  │   (Local Storage)     │  │   │
+│  │  └───────────────────────┘  │   │
+│  └──────────────┬──────────────┘   │
+│                 │ :6222 cluster    │
+└─────────────────┼──────────────────┘
+                  │ Tailscale VPN
+                  ▼
+         Other Fat Nodes
+```
+
+## Connection Modes
+
+### 1. Fat Node Mode (Production)
+
+```bash
+go run . -fat-node
+```
+
+- Starts embedded NATS server with clustering enabled
+- Connects to local NATS (localhost:4222)
+- Clusters with peers over Tailscale IPs
+- JetStream stores data locally
+
+### 2. Local Development Mode
+
+```bash
+go run . -local
+```
+
+- Starts embedded NATS server (single node, no clustering)
+- JetStream stores data in temp directory
+- For development and testing
+
+### 3. NGS Mode (Legacy)
+
+```bash
+go run .
+```
+
+- Connects to Synadia NGS (global NATS service)
+- Uses JWT/NKEY credentials
+- Not a fat node (thin client)
+
+## Startup Behavior
+
+### Fat Node Startup Sequence
 
 ```go
-if err != nil {
-    // Panic on initial connection failure - server cannot function without NATS
-    l.Fatal("Failed to connect to NATS cluster: %v", err)
-    panic(fmt.Sprintf("Failed to connect to NATS cluster: %v", err))
+1. Detect Tailscale IP (100.x.x.x)
+2. Load cluster peer configuration
+3. Start embedded NATS server with:
+   - Cluster routes to peers
+   - JetStream enabled with local storage
+4. Wait for NATS server to be ready
+5. Connect Go app as NATS client (localhost)
+6. Initialize JetStream context
+7. Create/verify KV buckets and streams
+8. Start HTTP server and services
+```
+
+### Cluster Join Behavior
+
+When a fat node starts and discovers peers:
+
+```
+Node A (existing):  Running, serving requests
+Node B (new):       Starting up...
+                    ↓
+                    Connect to cluster route (Node A:6222)
+                    ↓
+                    NATS cluster handshake
+                    ↓
+                    JetStream sync begins
+                    ↓
+                    Streams/KV replicate from Node A
+                    ↓
+                    Node B ready to serve
+```
+
+## Failure Handling
+
+### Network Partition
+
+When a fat node loses connectivity to peers:
+
+```
+Before:  Node A ←──cluster──→ Node B ←──cluster──→ Node C
+
+Partition: Node A ←──X──→ [Node B ←──cluster──→ Node C]
+
+Behavior:
+- Node A continues serving requests (local JetStream)
+- Node B + C continue serving (they still cluster)
+- Writes on Node A stay local until partition heals
+- JetStream handles eventual consistency on reconnect
+```
+
+### Single Node Operation
+
+A fat node can operate completely alone:
+
+- All requests served from local JetStream
+- No replication (R=1 effective)
+- When cluster reconnects, newer writes propagate
+
+### Embedded NATS Server Crash
+
+If the embedded NATS server crashes:
+
+```go
+// The Go server monitors NATS health
+// On embedded server failure, entire node restarts
+// This is intentional - NATS is critical infrastructure
+
+if embeddedServer.ReadyForConnections(10*time.Second) == false {
+    log.Fatal("Embedded NATS server failed to start")
+}
+```
+
+### Recovery Scenarios
+
+| Scenario | Behavior |
+|----------|----------|
+| Node restart | JetStream recovers from local files |
+| Network restored | NATS cluster syncs automatically |
+| New node joins | Gets replicated data from cluster |
+| All nodes restart | Each recovers local state, then syncs |
+
+## JetStream Replication
+
+### Replication Factor
+
+Configure per stream/KV bucket:
+
+```go
+// R=3: Replicate to 3 nodes (or all if fewer nodes)
+streamConfig := &nats.StreamConfig{
+    Name:     "ARTICLES",
+    Replicas: 3,
 }
 
-// Verify connection is established
-if nc.Status() != nats.CONNECTED {
-    l.Fatal("NATS connection not in CONNECTED state: %s", nc.Status())
-    panic(fmt.Sprintf("NATS connection not in CONNECTED state: %s", nc.Status()))
+// R=1: Local only (no replication)
+kvConfig := &nats.KeyValueConfig{
+    Bucket:   "cache",
+    Replicas: 1,
 }
 ```
 
-### Connection Verification
+### Conflict Resolution
 
-After connection establishment, the server verifies the connection is in the `CONNECTED` state before proceeding. This ensures the NATS client is fully ready for operations.
+JetStream uses **last-write-wins** for KV:
 
-## Connection Loss Handling
+```
+Node A: PUT key="foo" value="A" @ time T1
+Node B: PUT key="foo" value="B" @ time T2 (T2 > T1)
 
-### During Operation
+After sync: key="foo" has value="B" on all nodes
+```
 
-Once the server is running and the initial connection is established, the server handles connection loss gracefully:
+For streams, messages are ordered by sequence number and merged.
 
-1. **No Panic**: The server continues running even if the NATS connection is lost
-2. **Automatic Reconnection**: NATS client automatically attempts to reconnect
-3. **Status Monitoring**: Background goroutine monitors connection status every 5 seconds
-4. **Graceful Degradation**: Services become unavailable but the server remains operational
+## Configuration
 
-### Connection Event Handlers
+### Environment Variables
 
-The server registers several connection event handlers:
+```bash
+# Fat node identity
+NODE_NAME=jst-node-1
+TAILSCALE_IP=100.64.0.1      # Auto-detected if not set
+
+# Cluster configuration
+NATS_CLUSTER_NAME=jst-cluster
+NATS_CLIENT_PORT=4222
+NATS_CLUSTER_PORT=6222
+CLUSTER_PEERS=100.64.0.2:6222,100.64.0.3:6222
+
+# JetStream storage
+JETSTREAM_STORE=/data/jetstream
+JETSTREAM_MAX_MEM=1GB
+JETSTREAM_MAX_FILE=10GB
+```
+
+### NATS Server Options
 
 ```go
-nats.DisconnectHandler(func(nc *nats.Conn) {
-    l.Error("NATS connection disconnected")
-}),
-nats.ReconnectHandler(func(nc *nats.Conn) {
-    l.Info("NATS connection reconnected")
-}),
-nats.ClosedHandler(func(nc *nats.Conn) {
-    l.Error("NATS connection closed")
-}),
-nats.ErrorHandler(func(nc *nats.Conn, sub *nats.Subscription, err error) {
-    l.Error("NATS error: %v", err)
-}),
+opts := &server.Options{
+    ServerName: nodeName,
+    Host:       tailscaleIP,
+    Port:       4222,
+    
+    // Clustering
+    Cluster: server.ClusterOpts{
+        Name: "jst-cluster",
+        Host: tailscaleIP,
+        Port: 6222,
+    },
+    Routes: clusterRoutes,
+    
+    // JetStream
+    JetStream:    true,
+    StoreDir:     jetStreamStore,
+    JetStreamMaxMemory: maxMem,
+    JetStreamMaxStore:  maxFile,
+    
+    // Resilience
+    MaxReconnects: -1,  // Unlimited reconnection attempts
+    ReconnectWait: time.Second,
+}
 ```
 
-### Connection Resilience Options
+## Health Checks
 
-The server configures NATS with resilience options:
+### Liveness Check
 
 ```go
-nats.MaxReconnects(-1),                    // Unlimited reconnection attempts
-nats.ReconnectWait(1*time.Second),         // Wait 1 second between attempts
-nats.ReconnectJitter(100*time.Millisecond, 1*time.Second), // Add jitter
-nats.Timeout(10*time.Second),              // Connection timeout
-nats.PingInterval(30*time.Second),         // Send ping every 30 seconds
-nats.MaxPingsOutstanding(3),               // Allow 3 missed pings
+// /health/live - Is the node running?
+func liveHandler(w http.ResponseWriter, r *http.Request) {
+    w.WriteHeader(http.StatusOK)
+}
 ```
 
-### Built-in NATS Monitoring
+### Readiness Check
 
-NATS provides built-in connection monitoring and event handling. The server relies on these mechanisms:
-
-- **Automatic Status Tracking**: NATS client internally tracks connection status
-- **Event Handlers**: Connection events are automatically triggered and logged
-- **Reconnection Logic**: NATS handles reconnection attempts automatically
-- **Health Checks**: Built-in ping/pong mechanism detects connection issues
-
-No additional monitoring goroutine is needed as NATS handles all connection state management internally.
-
-## Service Behavior During Connection Loss
-
-### Microservices
-- **who**, **urlShort**, **ntfy** services check connection status on startup
-- If connection is lost, these services will log errors but continue running
-- NATS microservice endpoints become unavailable until reconnection
-
-### WebSocket Connections
-- Existing WebSocket connections remain open
-- New subscriptions and commands will fail until NATS reconnects
-- Clients receive error messages for failed operations
-
-### Logging
-- Logger continues to function (messages are queued when NATS is unavailable)
-- Queued messages are published once NATS reconnects
-
-## Recovery Scenarios
-
-### Automatic Recovery
-1. **Network Issues**: NATS client automatically reconnects when network is restored
-2. **Server Restart**: NATS client reconnects when NATS server comes back online
-3. **Temporary Outages**: Services resume normal operation after reconnection
-
-### Manual Recovery
-1. **Configuration Issues**: Fix NATS configuration and restart server
-2. **Authentication Issues**: Verify JWT and NKEY credentials
-3. **Network Configuration**: Check firewall and DNS settings
-
-## Operational Recommendations
-
-### Monitoring
-- Monitor NATS connection status in logs
-- Set up alerts for connection loss events
-- Track reconnection frequency and success rate
-
-### Deployment
-- Ensure NATS cluster is available before deploying the server
-- Use health checks to verify NATS connectivity
-- Consider using embedded NATS for development/testing
-
-### Troubleshooting
-- Check NATS server logs for connection issues
-- Verify network connectivity to NATS endpoints
-- Validate authentication credentials
-- Review NATS server configuration
-
-## Error Messages
-
-### Initial Connection Failures
-```
-FATAL Failed to connect to NATS cluster: dial tcp: lookup connect.ngs.global: i/o timeout
-panic: Failed to connect to NATS cluster: dial tcp: lookup connect.ngs.global: i/o timeout
+```go
+// /health/ready - Can the node serve requests?
+func readyHandler(nc *nats.Conn) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        if nc.Status() != nats.CONNECTED {
+            http.Error(w, "NATS not connected", http.StatusServiceUnavailable)
+            return
+        }
+        w.WriteHeader(http.StatusOK)
+    }
+}
 ```
 
-### Connection Status Changes
-```
-ERROR NATS connection disconnected
-ERROR NATS connection status changed to: DISCONNECTED
-ERROR NATS connection permanently closed - server will continue but messaging will be unavailable
+### Cluster Status
+
+```go
+// /health/cluster - Cluster membership info
+func clusterHandler(embeddedServer *server.Server) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        info := embeddedServer.ClusterInfo()
+        json.NewEncoder(w).Encode(info)
+    }
+}
 ```
 
-### Recovery Events
+## Monitoring
+
+### NATS CLI Commands
+
+```bash
+# Check cluster status
+nats server list --server=localhost:4222
+
+# Check JetStream
+nats stream list
+nats kv list
+
+# Monitor traffic
+nats sub ">" --server=localhost:4222
 ```
-INFO NATS connection reconnected
-INFO Successfully connected to NATS cluster
+
+### Metrics
+
+Fat nodes expose Prometheus metrics:
+
 ```
+# NATS connection status
+nats_connection_status{node="jst-node-1"} 1
+
+# Cluster members
+nats_cluster_size{cluster="jst-cluster"} 3
+
+# JetStream
+jetstream_streams_total 5
+jetstream_consumers_total 12
+jetstream_messages_total 45678
+```
+
+## Troubleshooting
+
+### Node Won't Join Cluster
+
+1. Check Tailscale connectivity: `tailscale ping other-node`
+2. Verify cluster port is reachable: `nc -zv 100.64.0.2 6222`
+3. Check NATS logs: Look for "route" connection messages
+4. Verify cluster name matches across nodes
+
+### JetStream Not Syncing
+
+1. Check replication factor: `nats stream info STREAM_NAME`
+2. Verify cluster has enough nodes for R=N
+3. Check storage limits: `nats server report jetstream`
+4. Look for stream errors in NATS logs
+
+### Split-Brain After Partition
+
+JetStream handles this automatically:
+1. Each partition operates independently
+2. On reconnect, NATS syncs based on sequence numbers
+3. KV uses last-write-wins
+4. Monitor for data conflicts in application logs
 
 ## Summary
 
-- **Initial Failure**: Server panics if it cannot connect to NATS (fail-fast behavior)
-- **Connection Loss**: Server continues running, NATS client attempts automatic reconnection
-- **Graceful Degradation**: Services become unavailable but server remains operational
-- **Automatic Recovery**: Full functionality restored when NATS reconnects
-- **Built-in Monitoring**: NATS handles all connection state management and event handling internally
-
-This approach ensures the server fails fast on configuration issues while providing resilience during operational network problems, leveraging NATS's robust built-in connection management capabilities.
+- **Fat nodes run embedded NATS servers** - Self-sufficient, can operate alone
+- **Clustering over Tailscale** - Nodes discover and connect via VPN
+- **JetStream replication** - Data syncs across cluster automatically
+- **Graceful degradation** - Partitioned nodes continue serving locally
+- **Automatic recovery** - NATS handles reconnection and sync

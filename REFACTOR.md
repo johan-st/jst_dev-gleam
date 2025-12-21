@@ -1,390 +1,516 @@
-# REFACTOR.md - Architecture and Refactoring Plan
+# REFACTOR.md - Fat Nodes Architecture
+
+> **This is the canonical architecture document for jst_dev.**
 
 ## Overview
 
-This document outlines the recommended architecture for building a full-stack Gleam application with SSR, real-time communication, and distributed node support across high-latency networks.
+jst_dev is a **personal/team infrastructure platform** built with a "fat nodes" architecture - each node is self-sufficient with embedded NATS, local caching, and the ability to operate independently during network partitions.
 
 ## Target Requirements
 
 - Multiple servers with high latency tolerance
-- Nodes that can fall off and reconnect
-- Nodes outside of Fly.io network (edge nodes, home servers, etc.)
+- Nodes that can fall off and reconnect gracefully
+- Nodes outside of Fly.io network (edge nodes, home servers, Raspberry Pis)
 - Support for: chat, collaborative editing, document sharing, URL shortener, push notifications (ntfy.sh), planning, scheduled tasks, IoT telemetry
 
 ---
 
-## Part 1: Single-Server Full-Stack Gleam
+## Architecture: Fat Nodes with NATS Backbone
 
-### The Core Stack (Basic)
+### What is a "Fat Node"?
 
-For a simple full-stack Gleam application:
+A fat node is a self-sufficient server instance that:
 
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| **Language** | Gleam | Type safety, runs on BEAM |
-| **Frontend & SSR** | Lustre | Standard Gleam frontend framework. Use `lustre_server` for SSR. Renders initial HTML on server, "hydrates" on client. |
-| **Web Server** | Wisp | Lightweight, composable web framework for Gleam. Handles routing and middleware. |
-| **Real-Time** | Mist | Erlang-based HTTP/WebSocket server for Gleam. Best choice for persistent WebSocket connections. |
-| **Database** | PostgreSQL | Use `pgo` or `gleam_pgo` library. Robust, integrates well with BEAM connection pooling. |
-| **Build Tool** | Gleam's built-in | Manages dependencies, compiles to both Erlang (server) and JavaScript (frontend). |
-
-### Basic Deployment Platforms
-
-- **Fly.io (Recommended):** Industry leaders for deploying BEAM languages. Native support for clustering nodes globally.
-- **Railway:** Excellent for quick deployments via Docker. Developer-friendly UI.
-- **Hetzner/DigitalOcean:** For self-managed VPS. Containerize with Docker.
-
-### Basic Architectural Strategy
-
-1. **Isomorphic Logic:** Write business logic and types once in Gleam, share between server and frontend.
-2. **Asset Pipeline:** Use `lustre dev` for local development. For production, bundle compiled JavaScript (via `esbuild` or `Vite`) and serve through Wisp.
-3. **State Management:** Use Lustre's Model-View-Update (MVU) pattern. For real-time updates, server pushes messages over WebSockets (Mist), which Lustre frontend receives as `Msg`s.
-
----
-
-## Part 2: Multi-Server Architecture (Distributed)
-
-When deploying to multiple servers, clients connected to Server A need to receive messages sent by clients on Server B.
-
-### Multi-Node Stack
-
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| **Networking** | Mist | Best choice for WebSockets |
-| **Clustering** | Fly.io | Easiest for BEAM distribution - provides private IPv6 networking for automatic node discovery |
-| **PubSub/Registry** | [Glyn](https://github.com/mbuhot/glyn) | Type-safe wrapper around `syn` (Erlang library). Handles global process registration and message broadcasting across cluster. |
-
-### Why Glyn is Critical
-
-Without Glyn (or similar), messages are "trapped" on a single server. Glyn ensures that when you publish a "chat_message," it is delivered to subscribers on **all nodes**.
-
-### Frontend & SSR Strategy (Multi-Node)
-
-1. **SSR:** Wisp renders initial HTML using `lustre.to_html`
-2. **Hydration:** Client-side Lustre app takes over for immediate UI responsiveness
-3. **Sync:** Lustre runtime handles WebSocket messages. When a message arrives from Glyn (via server), server pushes it to specific client's Lustre runtime to update UI.
-
-### Data Consistency
-
-- **Database:** PostgreSQL
-- **Connection Pooling:** `gleam_pgo`
-- **Primary/Replica:** For globally distributed servers, use Fly.io's "Regional Read Replicas" for low latency reads, always write to primary.
-
-### Deployment (Multi-Node)
-
-- **Infrastructure:** Fly.io is essential for "multi-server real-time Gleam"
-- **Sticky Sessions:** `fly-proxy` handles sticky sessions and WebSocket connections
-- **Clustering:** Internal DNS allows Gleam nodes to form cluster using `libcluster` (via Erlang interop)
-- **CI/CD:** Docker-based workflow. Gleam build tool generates Erlang release that fits in small Alpine Linux container.
-
----
-
-## Part 3: High-Latency Edge Networks
-
-Building a Gleam application that remains stable over **high-latency, intermittent networks with nodes outside a controlled data center** is a specialized challenge. Standard Distributed Erlang is notorious for being "chatty" and sensitive to latency.
-
-### The Problem with Standard Distributed Erlang (`disterl`)
-
-- Uses a "full mesh" topology (every node talks to every other node)
-- Heartbeats frequently
-- If a heartbeat is missed due to latency, the node is kicked
-- Not designed for WAN or residential internet "jitter"
-
-### Networking Foundation: Tailscale + Partisan
-
-Instead of standard Distributed Erlang, use **Partisan**:
-
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| **VPN Layer** | Tailscale | Creates "fake local network". Handles NAT traversal. Provides stable, encrypted IP (100.x.x.x range) for each node regardless of physical location. |
-| **Distribution Layer** | Partisan | Drop-in replacement for Erlang distribution layer. Designed specifically for high-latency and large-scale clusters. |
-
-#### Why Partisan?
-
-- Standard Erlang distribution uses full mesh + frequent heartbeats
-- **Partisan** allows different topologies (client-server, peer-to-peer)
-- Far more resilient to "jitter" of residential internet
-- **Gleam Note:** Requires Erlang interop wrapper to initialize Partisan (most Gleam-native clustering libraries like Barnacle default to standard `disterl`)
-
-### Service Discovery: Barnacle
-
-For handling nodes falling off and coming back:
-
-- **Barnacle:** Gleam-native library for self-healing clusters
-- Polls a source (DNS record, static list of Tailscale IPs, or specialized "discovery" node)
-- Automatically attempts reconnection when node becomes reachable again
-- **Strategy:** Configure Barnacle to use Tailscale IPs. Since Tailscale IPs are static for machine lifetime, Barnacle can keep retrying.
-
-### Real-Time State Sync: Versioned Update Pattern
-
-Over high latency, simple message passing isn't enough - messages might arrive out of order or be delayed by seconds.
-
-**Strategy:**
-- Every piece of state (counter, chat message list, etc.) has a **Version ID**
-- Lustre frontend maintains local "optimistic" state but checks Version ID of incoming messages
-- **Conflict Resolution:** If Node A is offline for 10 minutes, when it reconnects, it shouldn't blast its old state. Use a **Reconciliation Loop**: node asks for "Everything since Version X" when it recovers.
-
-### Edge-First Stack Summary
-
-| Component | Technology |
-|-----------|------------|
-| **Language** | Gleam |
-| **Web Server** | Wisp + Mist |
-| **Frontend/SSR** | Lustre |
-| **VPN Layer** | Tailscale |
-| **Distribution Layer** | **Partisan** (Erlang) |
-| **Clustering/Healing** | **Barnacle** (Gleam) |
-| **Database** | PostgreSQL (Centralized) |
-
-### Erlang Interop for Distribution
-
-Example snippet to enable distribution:
-
-```gleam
-// Example snippet to enable distribution
-pub fn start_distribution(name: String) {
-  // Use Erlang's net_kernel to allow this node to be discovered
-  // This is what allows Glyn/Syn to work across servers.
-}
-```
-
-**Critical Caveat:** Using Partisan in Gleam requires Erlang knowledge - you'll be calling `:partisan.start()` and configuring via Erlang terms.
-
----
-
-## Part 4: Gleam/BEAM vs Go + NATS Comparison
-
-### Head-to-Head Comparison
-
-| Dimension | Gleam/BEAM + Partisan | Go + Embedded NATS |
-|-----------|----------------------|-------------------|
-| **Latency Tolerance** | Partisan is designed for WAN, but niche. | NATS is purpose-built for WAN/edge. Industry-proven. |
-| **Node Churn (Join/Leave)** | Barnacle handles it, but needs tuning. | NATS clustering handles this out-of-the-box. |
-| **Fault Tolerance** | **BEAM wins.** Supervision trees are legendary. A single crash doesn't bring down the node. | You build this yourself. Goroutines can panic; recovery is manual. |
-| **Message Guarantees** | Actor mailboxes are "at-most-once" by default. You add persistence yourself. | **NATS JetStream wins.** At-least-once, exactly-once, persistent streams built-in. |
-| **Operational Maturity** | Partisan is niche. Limited tooling, docs, and community knowledge. | **NATS wins.** Excellent CLI, monitoring, Grafana dashboards, massive community. |
-| **Developer Availability** | Gleam is tiny. Erlang is small. Hard to hire. | **Go wins.** Massive talent pool. Easy to onboard. |
-| **Explicit vs. Implicit** | "Magic." Processes message each other transparently across nodes. Powerful but opaque. | Explicit pub/sub on named subjects. Easier to reason about and debug. |
-| **Ecosystem** | Small but growing. | Huge. NATS has clients in every language. |
-| **Debugging** | Harder. Distributed actor state is opaque. | Easier. You can inspect NATS subjects and streams directly. |
-
-### The Core Trade-off
-
-| Aspect | Gleam/BEAM | Go + NATS |
-|--------|------------|-----------|
-| **Philosophy** | "Let it crash." The runtime recovers. | "Don't crash." You handle errors explicitly. |
-| **Abstraction** | High. Processes and message passing are first-class. | Low. You manage goroutines, channels, and NATS subjects. |
-| **Debugging** | Harder. Distributed actor state is opaque. | Easier. You can inspect NATS subjects and streams directly. |
-
-### When to Choose Each
-
-**Choose Go + NATS if:**
-- You need proven, battle-tested WAN clustering *today*
-- Your team (or future hires) are more likely to know Go
-- You want persistence (JetStream) without building it yourself
-- Operational simplicity matters - NATS tooling is excellent
-
-**Choose Gleam/BEAM + Partisan if:**
-- Building something where **fine-grained fault tolerance** is critical (e.g., thousands of independent stateful "actors" that must not take each other down)
-- You value the elegance of the actor model and are willing to invest in the learning curve
-- You want to bet on Gleam's future and are comfortable being an early adopter
-- Hot code reloading (updating code without dropping connections) is a requirement
-
----
-
-## Part 5: Recommended Architecture - Hybrid Gleam + NATS
-
-For the target requirements (chat, document sharing, URL shortener, push notifications, planning, scheduled tasks, collaborative editing, IoT telemetry), you're building a **personal/team infrastructure platform**, not a single app.
+1. **Runs an embedded NATS server** - Can operate independently or cluster with other nodes
+2. **Has local state/caching** - JetStream KV and streams persist locally
+3. **Serves the full application** - HTTP API, WebSocket bridge, static assets
+4. **Handles offline operation** - Queues messages locally, syncs when reconnected
+5. **Auto-clusters via Tailscale** - Nodes discover and connect to each other over VPN
 
 ### Architecture Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        NATS (JetStream)                         │
-│                  The backbone. Connects everything.             │
-└───────────┬─────────────────┬─────────────────┬─────────────────┘
-            │                 │                 │
-     ┌──────▼──────┐   ┌──────▼──────┐   ┌──────▼──────┐
-     │ Gleam Node  │   │ Gleam Node  │   │  Edge Node  │
-     │ (Fly.io)    │   │ (Hetzner)   │   │ (Home RPi)  │
-     │             │   │             │   │             │
-     │ - Lustre UI │   │ - Workers   │   │ - Local     │
-     │ - SSR       │   │ - Scheduler │   │   cache     │
-     │ - WebSocket │   │ - ntfy.sh   │   │ - Offline   │
-     │   (Mist)    │   │   push      │   │   queue     │
-     └─────────────┘   └─────────────┘   └─────────────┘
-            │                 │                 │
-            └────────────┬────┴─────────────────┘
-                         │
-                  ┌──────▼──────┐
-                  │ PostgreSQL  │
-                  │ + S3 (files)│
-                  └─────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              Tailscale VPN Mesh                              │
+│                         (100.x.x.x private network)                          │
+└───────────┬─────────────────────┬─────────────────────┬─────────────────────┘
+            │                     │                     │
+     ┌──────▼──────┐       ┌──────▼──────┐       ┌──────▼──────┐
+     │  Fat Node   │       │  Fat Node   │       │  Fat Node   │
+     │  (Fly.io)   │◄─────►│  (Hetzner)  │◄─────►│ (Home RPi)  │
+     │             │ NATS  │             │ NATS  │             │
+     │ ┌─────────┐ │ Cluster│ ┌─────────┐ │ Cluster│ ┌─────────┐ │
+     │ │Embedded │ │       │ │Embedded │ │       │ │Embedded │ │
+     │ │  NATS   │ │       │ │  NATS   │ │       │ │  NATS   │ │
+     │ │Server   │ │       │ │Server   │ │       │ │Server   │ │
+     │ └─────────┘ │       │ └─────────┘ │       │ └─────────┘ │
+     │             │       │             │       │             │
+     │ ┌─────────┐ │       │ ┌─────────┐ │       │ ┌─────────┐ │
+     │ │ Go HTTP │ │       │ │ Go HTTP │ │       │ │ Go HTTP │ │
+     │ │ Server  │ │       │ │ Server  │ │       │ │ Server  │ │
+     │ │ + WS    │ │       │ │ + WS    │ │       │ │ + WS    │ │
+     │ └─────────┘ │       │ └─────────┘ │       │ └─────────┘ │
+     │             │       │             │       │             │
+     │ ┌─────────┐ │       │ ┌─────────┐ │       │ ┌─────────┐ │
+     │ │JetStream│ │       │ │JetStream│ │       │ │JetStream│ │
+     │ │ KV/     │ │       │ │ KV/     │ │       │ │ KV/     │ │
+     │ │ Streams │ │       │ │ Streams │ │       │ │ Streams │ │
+     │ └─────────┘ │       │ └─────────┘ │       │ └─────────┘ │
+     └─────────────┘       └─────────────┘       └─────────────┘
+            │                     │                     │
+            └──────────┬──────────┴──────────┬──────────┘
+                       │                     │
+                ┌──────▼──────┐       ┌──────▼──────┐
+                │ PostgreSQL  │       │ S3/MinIO    │
+                │ (Optional)  │       │ (Files)     │
+                └─────────────┘       └─────────────┘
 ```
 
-### The Full Stack
+### Key Properties
 
-| Layer | Technology |
-|-------|------------|
-| **Frontend** | Lustre (Gleam → JS) |
-| **Web Server** | Wisp + Mist (Gleam) |
-| **Messaging Backbone** | **NATS + JetStream** |
-| **NATS Client (Gleam)** | Erlang's `nats.erl` via FFI |
-| **Collaborative Editing** | **Yjs** (JS CRDT library, mature) – embed in Lustre |
-| **VPN Mesh** | Tailscale |
-| **Database** | PostgreSQL |
-| **File Storage** | S3-compatible (Tigris on Fly.io, or MinIO self-hosted) |
-| **Push Notifications** | ntfy.sh (just HTTP POSTs from a worker) |
-| **Deployment (Core)** | Fly.io |
-| **Deployment (Edge)** | Anything with Docker + Tailscale |
-
-### Why NATS Becomes Essential at This Scale
-
-| Feature | How NATS Helps |
-|---------|----------------|
-| **Scheduled Tasks** | JetStream + consumers with delayed delivery. No external cron needed. |
-| **Collaborative Editing** | Publish edits to a subject per document. All nodes see all edits. |
-| **Push Notifications** | Worker subscribes to `notifications.>`, calls ntfy.sh. |
-| **URL Shortener** | NATS KV store for fast lookups (or just PostgreSQL). |
-| **Document Sharing** | Metadata in NATS/Postgres, blobs in S3. |
-| **Offline Edge Nodes** | NATS client queues messages locally, syncs when reconnected. |
-| **Chat** | Classic pub/sub. Trivial with NATS. |
+| Property | Implementation |
+|----------|---------------|
+| **Self-sufficient** | Each node runs full stack: HTTP, WebSocket, NATS, JetStream |
+| **Offline-capable** | Local JetStream persistence, queues messages during partition |
+| **Auto-clustering** | NATS cluster routes over Tailscale IPs |
+| **Graceful degradation** | Node operates alone if cluster unreachable |
+| **Eventually consistent** | JetStream replication syncs when nodes reconnect |
 
 ---
 
-## Part 6: Key Architectural Patterns
+## Current Implementation Status
 
-### 1. Event Sourcing via JetStream
+### What Exists Today
 
-Every action (create doc, shorten URL, send message) becomes an event in a stream. Nodes subscribe and build local views.
+| Component | Location | Status |
+|-----------|----------|--------|
+| **Go HTTP Server** | `server/` | Production-ready |
+| **WebSocket Bridge** | `server/web/socket.go` | Production-ready |
+| **NATS Integration** | `server/main.go` | Supports embedded + NGS |
+| **JetStream KV** | `server/core/repoNatsKv.go` | Production-ready |
+| **Services** | `server/who/`, `server/urlShort/`, etc. | Production-ready |
+| **Lustre Frontend** | `jst_lustre/` | Production-ready |
+| **Gleam Server** | `jst_server/` | Experimental |
+
+### Current NATS Architecture
+
+The Go server already supports:
+- **Embedded NATS** (`-local` flag) for development/single-node
+- **NGS Connection** (production) via JWT/NKEY credentials
+- **JetStream KV** for articles, URL shortcuts, chat rooms, auth
+- **JetStream Streams** for chat messages
+- **NATS Microservices** for who, urlShort, ntfy, convo
+
+---
+
+## Technology Stack
+
+| Layer | Technology | Purpose |
+|-------|------------|---------|
+| **Frontend** | Lustre (Gleam → JS) | Type-safe SPA with MVU pattern |
+| **Web Server** | Go + chi router | HTTP API, static files, WebSocket |
+| **Real-time** | WebSocket + NATS bridge | Bidirectional sync with capabilities |
+| **Messaging** | NATS + JetStream | Pub/sub, KV, streams, clustering |
+| **Persistence** | JetStream KV/Streams | Replicated across cluster |
+| **VPN Mesh** | Tailscale | NAT traversal, stable IPs, encryption |
+| **File Storage** | S3-compatible | Tigris (Fly.io) or MinIO |
+| **Push Notifications** | ntfy.sh | HTTP POSTs from worker |
+
+---
+
+## Fat Node Configuration
+
+### NATS Cluster Configuration
+
+Each fat node runs an embedded NATS server configured for clustering:
+
+```go
+// server/conf.go - Fat node NATS configuration
+type FatNodeConfig struct {
+    NodeName       string   // Unique node identifier
+    TailscaleIP    string   // 100.x.x.x address
+    ClusterPort    int      // NATS cluster port (default: 6222)
+    ClientPort     int      // NATS client port (default: 4222)
+    ClusterPeers   []string // Other node Tailscale IPs
+    JetStreamStore string   // Local storage path for JetStream
+}
+```
+
+### NATS Server Options (Embedded)
+
+```go
+opts := &server.Options{
+    ServerName:   config.NodeName,
+    Host:         config.TailscaleIP,
+    Port:         config.ClientPort,
+    Cluster: server.ClusterOpts{
+        Name: "jst-cluster",
+        Host: config.TailscaleIP,
+        Port: config.ClusterPort,
+    },
+    Routes: parseRoutes(config.ClusterPeers),
+    JetStream:    true,
+    StoreDir:     config.JetStreamStore,
+}
+```
+
+### JetStream Replication
+
+Configure streams and KV buckets for multi-node replication:
+
+```go
+// R=3 means replicate across 3 nodes (or all if fewer)
+streamConfig := &nats.StreamConfig{
+    Name:     "ARTICLES",
+    Subjects: []string{"articles.>"},
+    Replicas: 3,
+    Storage:  nats.FileStorage,
+}
+
+kvConfig := &nats.KeyValueConfig{
+    Bucket:   "article",
+    Replicas: 3,
+    Storage:  nats.FileStorage,
+}
+```
+
+---
+
+## Service Architecture
+
+### Services Run as NATS Microservices
+
+Each service registers with NATS and handles requests via subjects:
+
+| Service | Subject Group | Storage |
+|---------|--------------|---------|
+| **who** | `svc.who.*` | KV `who_users`, KV `auth.users` |
+| **urlShort** | `svc.shorturl.*` | KV `url_short` |
+| **articles** | Direct KV | KV `article` |
+| **convo** | `svc.convo.*` | KV `convo_room`, Stream `convo_message` |
+| **ntfy** | `ntfy.notification` | None (stateless) |
+
+### Request Flow
 
 ```
-Streams:
-  - DOCUMENTS.created
-  - DOCUMENTS.edited
-  - URLS.shortened
-  - TASKS.scheduled
-  - CHAT.room.{id}
+Client → HTTP API → Go Handler → NATS Request → Service → NATS Reply → HTTP Response
+                                      ↓
+                              JetStream KV/Stream
+                                      ↓
+                              WebSocket broadcast to subscribers
 ```
 
-### 2. Offline-First Edge Nodes
+---
 
-Use the NATS client's built-in buffering. When a home RPi loses connection, messages queue locally. On reconnect, they flush to JetStream.
+## WebSocket Protocol
 
-### 3. Collaborative Editing with Yjs
+### Envelope Format
 
-Yjs is the industry standard. It runs in the browser (integrates with Lustre) and syncs via a provider. You can write a **NATS sync provider** so edits flow through your existing backbone instead of a separate WebSocket server.
+```json
+{
+  "op": "sub | unsub | kv_sub | js_sub | sub_msg | kv_msg | js_msg | cap_update | error",
+  "target": "subject-or-bucket-or-stream",
+  "inbox": "optional-correlation-id",
+  "data": { }
+}
+```
 
-### 4. Scheduled Tasks Pattern
+### Supported Operations
+
+| Operation | Direction | Purpose |
+|-----------|-----------|---------|
+| `sub` | Client → Server | Subscribe to NATS subject |
+| `unsub` | Client → Server | Unsubscribe |
+| `kv_sub` | Client → Server | Watch KV bucket (all or pattern) |
+| `js_sub` | Client → Server | Subscribe to JetStream with filter |
+| `sub_msg` | Server → Client | NATS subject message |
+| `kv_msg` | Server → Client | KV update (put/delete) |
+| `js_msg` | Server → Client | JetStream message |
+| `cap_update` | Server → Client | Capabilities changed |
+| `error` | Server → Client | Error message |
+
+### Capabilities System
+
+Per-user access control using NATS-style wildcards:
+
+```json
+{
+  "subjects": ["chat.room.*", "articles.>"],
+  "buckets": {
+    "article": [">"],
+    "todos": ["user.123.*"]
+  },
+  "streams": {
+    "convo_message": ["convo_message.room.*"]
+  }
+}
+```
+
+---
+
+## Data Flow Patterns
+
+### 1. HTTP API → WebSocket Sync
+
+All CRUD operations go through HTTP, updates flow through WebSocket:
 
 ```
-1. Publish to TASKS.schedule with a "run_at" header.
-2. A worker consumes from TASKS.schedule with delayed ack.
-3. At "run_at" time, worker executes and acks.
+User clicks "Save" → POST /api/article → Handler writes to KV
+                                              ↓
+                                         KV watcher detects change
+                                              ↓
+                                         WebSocket broadcasts kv_msg
+                                              ↓
+                                         All subscribed clients update
 ```
 
-JetStream handles retry, persistence, and exactly-once delivery.
+### 2. Offline Operation
+
+When a node loses cluster connectivity:
+
+```
+1. Node continues serving local requests
+2. Writes go to local JetStream
+3. Reads served from local replica
+4. On reconnect:
+   - NATS cluster syncs JetStream
+   - Newer writes win (last-write-wins for KV)
+   - Streams merge by sequence number
+```
+
+### 3. Cross-Node Communication
+
+```
+User A (Node 1) sends chat message
+         ↓
+    Publish to convo_message.room.123
+         ↓
+    JetStream replicates to Node 2, Node 3
+         ↓
+    WebSocket bridges on all nodes broadcast
+         ↓
+    User B (Node 2) receives message
+```
 
 ---
 
-## Part 7: Trade-offs Analysis
+## Networking: Tailscale
 
-### What You Lose by Not Going Pure BEAM
+### Why Tailscale?
 
-| Feature | Workaround |
-|---------|------------|
-| Hot code reloading | Rolling deploys via Fly.io (seconds of downtime). |
-| Supervision trees | Design Gleam services to be stateless; let NATS handle recovery. |
-| Actor model elegance | Explicit pub/sub subjects. More verbose, but clearer. |
+- **NAT Traversal:** Works behind any firewall/router
+- **Stable IPs:** 100.x.x.x addresses don't change
+- **Encryption:** WireGuard-based, always encrypted
+- **Zero Config:** No port forwarding, no firewall rules
 
-### What You Gain
+### Node Discovery
 
-- **Operational sanity.** NATS has a CLI (`nats` command), Grafana dashboards, and excellent docs.
-- **Polyglot future.** Need a Rust node for video transcoding? It just connects to NATS.
-- **Proven at scale.** Synadia (NATS creators) run global deployments.
-- **Simpler debugging.** `nats sub ">"` shows all traffic. No distributed actor tracing.
+Nodes discover each other via:
+1. **Static config:** List of known Tailscale IPs
+2. **Tailscale API:** Query for tagged machines (`tag:jst-node`)
+3. **DNS:** `*.jst.tail12345.ts.net` resolves to Tailscale IPs
 
----
+### Configuration
 
-## Part 8: The Hybrid Option
+```bash
+# Tag machines for discovery
+tailscale up --hostname=jst-fly-1 --advertise-tags=tag:jst-node
 
-You could use **Gleam/Lustre for the frontend and web layer** (where its type safety shines) and **Go + NATS as the "backbone"** for inter-node communication. The Gleam nodes would simply be NATS clients. This gives you:
-
-- NATS's proven WAN clustering
-- Gleam's type-safe, pleasant frontend DX
-- Flexibility to have non-Gleam nodes (Python, Rust, etc.) participate easily
-
-**Bottom Line:** For the specific requirements (high latency, nodes dropping, nodes outside Fly.io), Go + NATS is the more pragmatic and operationally mature choice. The BEAM is theoretically superior for fault tolerance, but realizing that advantage requires deep expertise.
+# Each node knows cluster peers
+CLUSTER_PEERS=100.64.0.1:6222,100.64.0.2:6222,100.64.0.3:6222
+```
 
 ---
 
-## Part 9: Implementation Next Steps
+## Implementation Roadmap
 
-1. **Prototype the NATS ↔ Gleam bridge.** Wrap `nats.erl` in a Gleam module.
-2. **Set up Tailscale + a 3-node NATS cluster** (2 on Fly, 1 on a home machine).
-3. **Build the simplest feature first** (URL shortener) to validate the full loop: Lustre → Wisp → NATS → Postgres → Response.
-4. **Add Yjs** for collaborative editing once the backbone is stable.
+### Phase 1: Embedded NATS Clustering (Current Focus)
+
+**Goal:** Enable fat node operation with NATS clustering over Tailscale
+
+| Task | Status | Notes |
+|------|--------|-------|
+| Embedded NATS server in Go | Done | `-local` and `-fat-node` flags |
+| JetStream persistence | Done | File-based storage |
+| Cluster configuration | Done | `CLUSTER_PEERS` env var |
+| Tailscale IP detection | Done | Auto-detect 100.x.x.x |
+| Health check endpoints | Done | `/health/live`, `/health/ready`, `/health/cluster` |
+| JetStream retry logic | Done | KV/Stream creation retries for cluster startup |
+| Peer discovery | TODO | Config or Tailscale API |
+| Graceful partition handling | Partial | Nodes operate independently |
+
+### Phase 2: Replication and Sync
+
+**Goal:** Data consistency across nodes
+
+| Task | Status | Notes |
+|------|--------|-------|
+| KV bucket replication (R=N) | TODO | Configure per-bucket |
+| Stream replication | TODO | Configure per-stream |
+| Conflict resolution | TODO | Last-write-wins for KV |
+| Sync status monitoring | TODO | Expose via /health |
+
+### Phase 3: Edge Node Support
+
+**Goal:** Raspberry Pi / home server deployment
+
+| Task | Status | Notes |
+|------|--------|-------|
+| ARM64 builds | TODO | Cross-compile Go |
+| Minimal resource mode | TODO | Reduce JetStream memory |
+| Offline queue | TODO | Buffer during partition |
+| Auto-reconnect | Done | NATS handles this |
+
+### Phase 4: Gleam Server Migration (Optional)
+
+**Goal:** Pure Gleam/BEAM fat nodes
+
+| Task | Status | Notes |
+|------|--------|-------|
+| NATS client FFI | Partial | `jst_server/nats/enats.gleam` |
+| HTTP server | Partial | `jst_server/http_server.gleam` |
+| WebSocket bridge | TODO | Port from Go |
+| Embedded NATS | Research | May need Go sidecar |
 
 ---
 
-## Part 10: Networking with Tailscale
+## Configuration Reference
 
-Use Tailscale to create a "fake local network":
+### Environment Variables
 
-- Handles NAT traversal
-- Provides stable, encrypted IPs (100.x.x.x range) for each node
-- Works regardless of physical location
-- Static IPs for the life of the machine (Barnacle/NATS can keep retrying)
+```bash
+# Node identity
+NODE_NAME=jst-fly-1           # Unique node name
+TAILSCALE_IP=100.64.0.1       # Auto-detected if not set
 
-### Deployment Strategy
+# NATS clustering
+NATS_CLUSTER_NAME=jst-cluster
+NATS_CLIENT_PORT=4222
+NATS_CLUSTER_PORT=6222
+CLUSTER_PEERS=100.64.0.2:6222,100.64.0.3:6222
 
-- **Central Hub:** Fly.io (for core database and stable nodes)
-- **Edge Nodes:** Any VPS (Hetzner, DigitalOcean) or Raspberry Pis running Tailscale
-- **Coordination:** Tailscale hosted admin or self-hosted coordination server
+# JetStream
+JETSTREAM_STORE=/data/jetstream
+JETSTREAM_MAX_MEM=1GB
+JETSTREAM_MAX_FILE=10GB
+
+# Existing config
+JWT_SECRET=...
+WEB_HASH_SALT=...
+NTFY_TOKEN=...
+PORT=8080
+```
+
+### Runtime Flags
+
+```bash
+# Development (single node, embedded NATS, localhost only)
+go run . -local -proxy -log debug
+
+# Standalone fat node (embedded NATS, network accessible)
+JWT_SECRET=secret WEB_HASH_SALT=salt go run . -fat-node -log info
+
+# Clustered fat nodes (requires CLUSTER_PEERS)
+NODE_NAME=node1 JETSTREAM_STORE=/tmp/node1 PORT=8081 NATS_CLIENT_PORT=4222 NATS_CLUSTER_PORT=6222 \
+CLUSTER_PEERS=100.64.0.2:6222 JWT_SECRET=secret WEB_HASH_SALT=salt \
+go run . -fat-node -log info
+
+# Connect to NGS (legacy, not fat node)
+go run . -log info
+```
+
+### JetStream Cluster Startup
+
+When running in cluster mode (`CLUSTER_PEERS` set), JetStream requires all nodes to establish routes before the meta leader can be elected. The server handles this by:
+
+1. **NATS server starts** and begins connecting to peers
+2. **Services wait with retry logic** - KV buckets and streams are created with up to 60s of retries (30 attempts × 2s delay)
+3. **Cluster forms** when majority of nodes are connected
+4. **JetStream ready** once meta leader is elected
+
+This allows nodes to start simultaneously without requiring a specific startup order.
 
 ---
 
-## Part 11: Project Structure Recommendation
+## Operational Considerations
 
-### Ideal Monorepo for Full-Stack Gleam
+### Monitoring
 
-Gleam works best with a three-project monorepo:
+```bash
+# NATS cluster status
+nats server list
+nats server info
 
-1. `shared/` - Data types, validation logic, JSON encoders/decoders
-2. `client/` - Lustre frontend (compiles to JS)
-3. `server/` - Wisp/Mist/Glyn server (compiles to Erlang)
+# JetStream status
+nats stream list
+nats kv list
 
-### Current Structure in This Repo
+# Watch all traffic (debugging)
+nats sub ">"
+```
 
-- `jst_lustre/` - Lustre frontend
-- `jst_server/` - Gleam server (currently minimal)
-- `server/` - Go server with NATS integration (existing backbone)
+### Backup Strategy
+
+JetStream data is stored locally. For backups:
+
+1. **Snapshot JetStream directory:** `$JETSTREAM_STORE`
+2. **Export KV buckets:** `nats kv dump bucket-name > backup.json`
+3. **Export streams:** `nats stream backup stream-name backup-dir/`
+
+### Failure Modes
+
+| Scenario | Behavior |
+|----------|----------|
+| Single node down | Other nodes continue, replication maintains data |
+| Network partition | Each partition operates independently |
+| Partition heals | NATS syncs JetStream, latest writes win |
+| All nodes down | Data persists in JetStream files |
+| Node rejoins | Catches up via NATS cluster sync |
+
+---
+
+## Project Structure
+
+```
+jst_dev/
+├── server/                    # Go fat node server
+│   ├── main.go               # Entry point, service orchestration
+│   ├── conf.go               # Configuration (add fat node config)
+│   ├── core/                 # Core utilities
+│   │   ├── repoNatsKv.go    # JetStream KV repository
+│   │   └── service.go       # Service interface
+│   ├── web/                  # HTTP + WebSocket
+│   │   ├── routes.go        # HTTP routing
+│   │   ├── socket.go        # WebSocket bridge
+│   │   └── static/          # Embedded frontend
+│   ├── articles/            # Article service
+│   ├── urlShort/            # URL shortener service
+│   ├── who/                 # Auth/user service
+│   ├── convo/               # Chat service
+│   └── ntfy/                # Push notification service
+├── jst_lustre/              # Gleam/Lustre frontend
+│   ├── src/
+│   │   ├── jst_lustre.gleam # Main app
+│   │   ├── sync.gleam       # WebSocket sync
+│   │   └── view/            # UI components
+│   └── index.html
+├── jst_server/              # Gleam server (experimental)
+└── REFACTOR.md              # This document
+```
 
 ---
 
 ## References
 
-### Core Technologies
-- [Gleam](https://gleam.run/)
-- [Lustre](https://hexdocs.pm/lustre/)
-- [Wisp](https://hexdocs.pm/wisp/)
-- [Mist](https://hexdocs.pm/mist/)
-
-### Distributed Systems
-- [NATS Documentation](https://docs.nats.io/)
+### NATS
+- [NATS Clustering](https://docs.nats.io/running-a-nats-service/configuration/clustering)
 - [JetStream](https://docs.nats.io/nats-concepts/jetstream)
-- [Glyn (Gleam clustering)](https://github.com/mbuhot/glyn)
-- [Barnacle (Gleam self-healing clusters)](https://hexdocs.pm/barnacle/)
-- [Partisan (WAN-tolerant Erlang distribution)](https://github.com/lasp-lang/partisan)
+- [Embedded NATS Server](https://github.com/nats-io/nats-server)
 
-### Collaborative Editing
-- [Yjs](https://yjs.dev/)
-- [Electric SQL](https://electric-sql.com/)
+### Tailscale
+- [Tailscale Documentation](https://tailscale.com/kb/)
+- [Tailscale API](https://tailscale.com/api/)
 
-### Infrastructure
-- [Tailscale](https://tailscale.com/)
-- [Fly.io](https://fly.io/)
-- [ntfy.sh](https://ntfy.sh/)
-
-### Database
-- [gleam_pgo](https://hexdocs.pm/gleam_pgo/)
+### Project
+- [Lustre](https://hexdocs.pm/lustre/)
+- [Gleam](https://gleam.run/)

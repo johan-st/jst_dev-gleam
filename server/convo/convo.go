@@ -79,13 +79,8 @@ func (c *Convo) Run(ctx context.Context) error {
 	}
 	c.roomRepo = roomRepo
 
-	// Initialize JetStream for message streams
-	js, err := jetstream.New(c.nc)
-	if err != nil {
-		return fmt.Errorf("failed to get JetStream context: %w", err)
-	}
-
 	// Create/Update stream for conversation messages per room: convo_message.<room>
+	// Uses retry logic to handle JetStream cluster startup delays
 	streamConf := jetstream.StreamConfig{
 		Name:        "convo_message",
 		Description: "conversation messages per room",
@@ -94,7 +89,8 @@ func (c *Convo) Run(ctx context.Context) error {
 		MaxAge:      7 * 24 * time.Hour,
 		MaxBytes:    1024 * 1024 * 50, // 50 MB
 	}
-	if _, err := js.CreateOrUpdateStream(ctx, streamConf); err != nil {
+	maxRetries, retryDelay := core.DefaultKVRetryConfig()
+	if _, err := core.CreateStreamWithRetry(ctx, c.nc, streamConf, maxRetries, retryDelay); err != nil {
 		return fmt.Errorf("create/update stream %s: %w", streamConf.Name, err)
 	}
 
