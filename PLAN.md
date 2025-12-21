@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-This document outlines the migration of `jst_dev` from a SQLite-based single-node architecture to a distributed, multi-node system using **NATS JetStream** as the sole persistence layer. All data (events, key-value stores, files) will be stored in NATS, with each node maintaining in-memory materialized views rebuilt from event streams. This architecture enables edge nodes with offline capabilities, real-time synchronization, and horizontal scaling without external databases.
+This document outlines the migration of `jst_dev` from a SQLite-based single-node architecture to a distributed, multi-node system using **embedded NATS JetStream** as the sole persistence layer. Each node is a "fat node" containing both the Gleam application and an embedded NATS server (Go). The Gleam app communicates with its local NATS server via Unix socket, and NATS servers form a mesh cluster via Tailscale MagicDNS. All data (events, key-value stores, files) is stored in NATS, with each node maintaining in-memory materialized views rebuilt from event streams. This architecture enables edge nodes with offline capabilities, real-time synchronization, and horizontal scaling without external databases.
 
 ## Table of Contents
 
@@ -25,40 +25,92 @@ This document outlines the migration of `jst_dev` from a SQLite-based single-nod
 
 ### High-Level Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    NATS JetStream Cluster                       │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │   Streams    │  │      KV     │  │   Object     │          │
-│  │  (Events)    │  │   (Config)  │  │   Store      │          │
-│  └──────────────┘  └──────────────┘  └──────────────┘          │
-└─────────────────────────────────────────────────────────────────┘
-                            ▲
-                            │ (via Tailscale MagicDNS)
-        ┌───────────────────┼───────────────────┐
-        │                   │                   │
-┌───────▼──────┐   ┌───────▼──────┐   ┌───────▼──────┐
-│  Node 1      │   │  Node 2      │   │  Edge Node   │
-│  (Fly.io)    │   │  (Fly.io)    │   │  (Home RPi)  │
-│              │   │              │   │              │
-│ ┌──────────┐ │   │ ┌──────────┐ │   │ ┌──────────┐ │
-│ │Materialized│ │   │ │Materialized│ │   │ │Materialized│ │
-│ │  Views    │ │   │ │  Views    │ │   │ │  Views    │ │
-│ └──────────┘ │   │ └──────────┘ │   │ └──────────┘ │
-│              │   │              │   │              │
-│ ┌──────────┐ │   │ ┌──────────┐ │   │ ┌──────────┐ │
-│ │  Mist    │ │   │ │ Workers  │ │   │ │  Queue   │ │
-│ │WebSocket │ │   │ │Scheduler │ │   │ │  (Offline)│ │
-│ └──────────┘ │   │ └──────────┘ │   │ └──────────┘ │
-└──────────────┘   └──────────────┘   └──────────────┘
+```mermaid
+graph TB
+    subgraph node1Group["Node 1 - Fly.io (Fat Node)"]
+        subgraph gleam1["Gleam Application"]
+            views1[Materialized Views]
+            mist1[Mist WebSocket]
+            workers1[Workers Scheduler]
+        end
+        natsServer1[NATS Server<br/>Go Embedded]
+        unixSocket1[Unix Socket]
+        gleam1 <-->|via| unixSocket1
+        unixSocket1 <--> natsServer1
+    end
+    
+    subgraph node2Group["Node 2 - Fly.io (Fat Node)"]
+        subgraph gleam2["Gleam Application"]
+            views2[Materialized Views]
+            mist2[Mist WebSocket]
+            workers2[Workers Scheduler]
+        end
+        natsServer2[NATS Server<br/>Go Embedded]
+        unixSocket2[Unix Socket]
+        gleam2 <-->|via| unixSocket2
+        unixSocket2 <--> natsServer2
+    end
+    
+    subgraph edgeNodeGroup["Edge Node - Home RPi (Fat Node)"]
+        subgraph gleam3["Gleam Application"]
+            views3[Materialized Views]
+            mist3[Mist WebSocket]
+            queue[Offline Queue]
+        end
+        natsServer3[NATS Server<br/>Go Embedded]
+        unixSocket3[Unix Socket]
+        gleam3 <-->|via| unixSocket3
+        unixSocket3 <--> natsServer3
+    end
+    
+    subgraph tailscale["Tailscale Network"]
+        magicDNS[MagicDNS]
+    end
+    
+    natsServer1 -.->|Mesh Cluster<br/>via Tailscale| tailscale
+    natsServer2 -.->|Mesh Cluster<br/>via Tailscale| tailscale
+    natsServer3 -.->|Mesh Cluster<br/>via Tailscale| tailscale
+    
+    tailscale -.->|MagicDNS| natsServer1
+    tailscale -.->|MagicDNS| natsServer2
+    tailscale -.->|MagicDNS| natsServer3
 ```
 
 ### Data Flow
 
-1. **Write Path**: Client → Gleam App → Publish Event to JetStream → Update Materialized View
-2. **Read Path**: Client → Gleam App → Query Materialized View (in-memory)
-3. **Replication**: All nodes subscribe to streams → Update local views
-4. **Offline**: Edge nodes queue events locally → Replay on reconnect
+```mermaid
+sequenceDiagram
+    participant Client
+    participant GleamApp as Gleam App
+    participant UnixSocket as Unix Socket
+    participant LocalNATS as Local NATS Server
+    participant RemoteNATS as Remote NATS Server
+    participant View as Materialized View
+    
+    Note over Client,View: Write Path
+    Client->>GleamApp: Create/Update Request
+    GleamApp->>UnixSocket: Publish Event
+    UnixSocket->>LocalNATS: Event via Unix Socket
+    LocalNATS->>View: Update View (local)
+    LocalNATS->>RemoteNATS: Replicate via Mesh
+    RemoteNATS->>RemoteNATS: Update View (remote)
+    LocalNATS->>UnixSocket: Confirmation
+    UnixSocket->>GleamApp: Confirmation
+    GleamApp->>Client: Response
+    
+    Note over Client,View: Read Path
+    Client->>GleamApp: Query Request
+    GleamApp->>View: Query View (in-memory)
+    View->>GleamApp: Return Data
+    GleamApp->>Client: Response
+    
+    Note over Client,View: Offline Edge Node
+    Client->>GleamApp: Request (offline)
+    GleamApp->>GleamApp: Queue Event Locally
+    GleamApp->>UnixSocket: Reconnect
+    UnixSocket->>LocalNATS: Replay Queued Events
+    LocalNATS->>View: Update View
+```
 
 ---
 
@@ -85,8 +137,16 @@ This document outlines the migration of `jst_dev` from a SQLite-based single-nod
 - Replay queued events on reconnection
 - Partial views: Only subscribe to needed streams
 
-### 5. Horizontal Scaling
-- Add nodes by connecting to NATS cluster
+### 5. Fat Node Architecture
+- Each node is self-contained with embedded NATS server
+- NATS servers form mesh cluster via Tailscale
+- Gleam app communicates with local NATS via Unix socket
+- Each node rebuilds views independently
+- No coordination needed for reads
+
+### 6. Horizontal Scaling
+- Add nodes by deploying new fat nodes
+- NATS servers automatically discover each other via Tailscale MagicDNS
 - Each node rebuilds views independently
 - No coordination needed for reads
 
@@ -99,9 +159,11 @@ This document outlines the migration of `jst_dev` from a SQLite-based single-nod
 | **Language** | Gleam | Type-safe functional language on BEAM |
 | **Frontend** | Lustre | Gleam frontend framework with SSR |
 | **Web Server** | Wisp + Mist | HTTP routing and WebSocket handling |
+| **NATS Server** | NATS (Go) | Embedded NATS server in each node |
+| **NATS Client** | `nats.erl` (Erlang) | NATS client library via FFI, connects via Unix socket |
+| **Communication** | Unix Socket | Local communication between Gleam and NATS |
 | **Messaging** | NATS + JetStream | Pub/sub, event sourcing, persistence |
-| **NATS Client** | `nats.erl` (Erlang) | NATS client library via FFI |
-| **VPN** | Tailscale | Network connectivity with MagicDNS |
+| **VPN** | Tailscale | Network connectivity with MagicDNS for NATS mesh |
 | **Collaborative Editing** | Yjs (JavaScript) | CRDT-based collaborative editing |
 | **Push Notifications** | ntfy.sh | HTTP-based push notifications |
 | **Deployment** | Fly.io, Docker | Containerized deployment |
@@ -252,15 +314,20 @@ type UsersView {
 
 ### Phase 1: NATS Foundation (Week 1-2)
 
-**Goal**: Establish NATS connectivity and basic infrastructure
+**Goal**: Establish embedded NATS server and Gleam connectivity
 
 **Tasks**:
-1. Add `nats.erl` dependency and create Gleam wrapper
-2. Set up NATS connection via Tailscale MagicDNS
-3. Create basic JetStream stream management
-4. Implement connection health checks
+1. Embed NATS server binary (Go) in Docker image
+2. Configure NATS server to listen on Unix socket
+3. Set up NATS mesh cluster via Tailscale MagicDNS
+4. Add `nats.erl` dependency and create Gleam wrapper
+5. Connect Gleam app to local NATS via Unix socket
+6. Create basic JetStream stream management
+7. Implement connection health checks
 
 **Deliverables**:
+- Embedded NATS server in Docker container
+- NATS server configuration for Unix socket and mesh cluster
 - `server/src/jst_server/nats.gleam` - NATS client wrapper
 - `server/src/jst_server/nats_ffi.erl` - Erlang FFI functions
 - `server/src/jst_server/config.gleam` - NATS configuration
@@ -427,9 +494,10 @@ pub type NatsError {
   JetStreamError(String)
 }
 
-// Connect to NATS server via Tailscale MagicDNS
-pub fn connect(url: String) -> Result(NatsConnection, NatsError) {
+// Connect to local NATS server via Unix socket
+pub fn connect(socket_path: String) -> Result(NatsConnection, NatsError) {
   // FFI to nats.erl
+  // Connection string: "unix:///tmp/nats.sock"
 }
 
 // Publish to subject
@@ -499,9 +567,12 @@ pub fn object_store_get(
 ```erlang
 -module(jst_server_nats_ffi).
 
--export([connect/1, publish/3, subscribe/3, jetstream_publish/4]).
+-export([connect_unix/1, publish/3, subscribe/3, jetstream_publish/4]).
 
-connect(Url) ->
+% Connect to local NATS server via Unix socket
+connect_unix(SocketPath) ->
+    % Format: "unix:///tmp/nats.sock"
+    Url = "unix://" ++ SocketPath,
     case nats:connect(Url) of
         {ok, Conn} -> {ok, Conn};
         {error, Reason} -> {error, Reason}
@@ -999,34 +1070,49 @@ pub fn migrate_articles(conn: nats.NatsConnection, db_conn: db.Connection) -> Ni
 
 ### NATS Cluster Setup
 
-**Option 1: Separate NATS Cluster**
-- Deploy NATS cluster on dedicated servers
-- Connect via Tailscale MagicDNS
-- Each Gleam node connects as client
+**Embedded NATS Architecture (Fat Nodes)**
+- Each node runs embedded NATS server (Go binary)
+- NATS servers form mesh cluster via Tailscale
+- Gleam application connects to local NATS via Unix socket
+- No separate NATS infrastructure needed
 
-**Option 2: Embedded NATS (Future)**
-- Each Gleam node runs embedded NATS server
-- NATS servers form mesh cluster
-- More complex but no separate infrastructure
+### NATS Server Integration
+
+- Embed NATS server binary in Docker image
+- Start NATS server as separate process in container
+- Configure NATS to listen on Unix socket for local connections
+- Configure NATS cluster routes via Tailscale MagicDNS
+- NATS server exposes Unix socket at `/tmp/nats.sock` or similar
+
+### Gleam-NATS Communication
+
+- Gleam app connects to NATS via Unix socket (not TCP)
+- Use `nats.erl` Erlang client library via FFI
+- Connection string: `unix:///tmp/nats.sock`
+- All JetStream operations (streams, KV, Object Store) via Unix socket
 
 ### Tailscale Configuration
 
 - Each node needs Tailscale auth key
 - Use MagicDNS for NATS server discovery
-- Configure NATS cluster routes via Tailscale IPs
+- Configure NATS cluster routes using Tailscale hostnames
+- Format: `nats://nats-node1.{tailnet}.ts.net:6222`
 - Health checks for cluster connectivity
 
 ### Startup Sequence
 
-1. Connect to Tailscale
-2. Connect to NATS cluster
-3. Initialize JetStream streams (if not exists)
-4. Initialize KV stores (if not exists)
-5. Initialize Object Store buckets (if not exists)
-6. Rebuild all materialized views from streams
-7. Subscribe to streams for real-time updates
-8. Start WebSocket server
-9. Ready to serve requests
+1. Start Tailscale daemon
+2. Start embedded NATS server (listens on Unix socket + cluster port)
+3. NATS server discovers other nodes via Tailscale MagicDNS
+4. NATS servers form mesh cluster
+5. Gleam app connects to local NATS via Unix socket
+6. Initialize JetStream streams (if not exists)
+7. Initialize KV stores (if not exists)
+8. Initialize Object Store buckets (if not exists)
+9. Rebuild all materialized views from streams
+10. Subscribe to streams for real-time updates
+11. Start WebSocket server (Mist)
+12. Ready to serve requests
 
 ### Edge Node Considerations
 
