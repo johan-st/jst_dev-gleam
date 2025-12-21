@@ -25,6 +25,7 @@ type httpServer struct {
 	handler     http.Handler   // Final wrapped handler for serving requests
 	embedFs     fs.FS
 	slow        time.Duration
+	port        string
 }
 
 //go:embed static
@@ -32,11 +33,16 @@ var embedded embed.FS
 
 // New initializes and returns a new httpServer instance with embedded static files and an article repository.
 // Returns nil if the static files or article repository cannot be initialized.
-func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger, articleRepo core.Repo[articles.Article], dev bool, slow time.Duration) *httpServer {
+func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger, articleRepo core.Repo[articles.Article], dev bool, slow time.Duration, port string) *httpServer {
 	fs, err := fs.Sub(embedded, "static")
 	if err != nil {
 		l.Error("Failed to load static folder")
 		return nil
+	}
+
+	// Default port if not specified
+	if port == "" {
+		port = "8080"
 	}
 
 	s := &httpServer{
@@ -47,6 +53,7 @@ func New(ctx context.Context, nc *nats.Conn, jwtSecret string, l *jst_log.Logger
 		articleRepo: articleRepo,
 		mux:         http.NewServeMux(),
 		slow:        slow,
+		port:        port,
 	}
 
 	// Set up routes on the mux
@@ -76,7 +83,7 @@ func (s *httpServer) Run(ctx context.Context) error {
 	var (
 		fatalChan  = make(chan error)
 		httpServer = &http.Server{
-			Addr:              net.JoinHostPort("0.0.0.0", "8080"),
+			Addr:              net.JoinHostPort("0.0.0.0", s.port),
 			Handler:           s.handler,
 			ReadHeaderTimeout: 20 * time.Second,
 		}
@@ -123,7 +130,7 @@ func (s *httpServer) RunWithWaitGroup(cleanShutdown *sync.WaitGroup, port string
 	cleanShutdown.Add(1)
 
 	httpServer := &http.Server{
-		Addr:              net.JoinHostPort("0.0.0.0", "8080"),
+		Addr:              net.JoinHostPort("0.0.0.0", s.port),
 		Handler:           s.handler, // Use the wrapped handler instead of s.mux
 		ReadHeaderTimeout: 20 * time.Second,
 	}

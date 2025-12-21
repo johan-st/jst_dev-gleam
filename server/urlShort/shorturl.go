@@ -61,8 +61,12 @@ func NewShortUrlRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (cor
 // setupShortUrlKV initializes and returns a JetStream key-value store bucket named "url_short" for storing short URLs in JSON format.
 // The bucket is configured with a 1KB maximum value size, 1 history entry, and file storage.
 // Uses retry logic to handle JetStream cluster startup delays (meta leader election).
+// Replicas are automatically determined based on cluster size for fault tolerance.
 // Returns the created key-value store or an error if initialization fails.
 func setupShortUrlKV(ctx context.Context, nc *nats.Conn) (jetstream.KeyValue, error) {
+	// Get cluster-aware replica count
+	replicas := core.GetReplicasForCluster(nc)
+
 	cfg := jetstream.KeyValueConfig{
 		Bucket:       shortUrlKVBucket,
 		Description:  "short url mappings",
@@ -71,6 +75,7 @@ func setupShortUrlKV(ctx context.Context, nc *nats.Conn) (jetstream.KeyValue, er
 		History:      1,
 		Storage:      jetstream.FileStorage,
 		Compression:  false,
+		Replicas:     replicas,
 	}
 
 	maxRetries, retryDelay := core.DefaultKVRetryConfig()

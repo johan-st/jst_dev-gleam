@@ -16,6 +16,7 @@ import (
 type JetStreamConfig struct {
 	// Replicas is the number of replicas for streams and KV buckets
 	// Default is 1 for single node, can be increased for clusters
+	// When set to 0, NATS will auto-determine based on cluster size
 	Replicas int
 }
 
@@ -26,11 +27,12 @@ var (
 
 // GetJetStreamConfig returns the singleton JetStream configuration
 // Reads from JETSTREAM_REPLICAS environment variable, defaults to 1
+// Set to 0 to let NATS auto-determine replicas based on cluster size
 func GetJetStreamConfig() *JetStreamConfig {
 	jsConfigOnce.Do(func() {
 		replicas := 1
 		if r := os.Getenv("JETSTREAM_REPLICAS"); r != "" {
-			if n, err := strconv.Atoi(r); err == nil && n > 0 {
+			if n, err := strconv.Atoi(r); err == nil && n >= 0 {
 				replicas = n
 			}
 		}
@@ -43,11 +45,67 @@ func GetJetStreamConfig() *JetStreamConfig {
 
 // GetReplicas returns the configured replica count
 // For fat node clusters, this should match the number of nodes
+// Returns 0 to indicate NATS should auto-determine based on cluster size
 func (c *JetStreamConfig) GetReplicas() int {
-	if c.Replicas < 1 {
+	if c.Replicas < 0 {
 		return 1
 	}
 	return c.Replicas
+}
+
+// GetReplicasForCluster returns the appropriate replica count based on cluster size
+// Uses min(configuredReplicas, clusterSize) to avoid replica errors
+// If replicas is 0, returns min(clusterSize, 3) for automatic scaling
+func GetReplicasForCluster(nc *nats.Conn) int {
+	config := GetJetStreamConfig()
+	configuredReplicas := config.GetReplicas()
+
+	// Get cluster size from JetStream
+	js, err := jetstream.New(nc)
+	if err != nil {
+		// If we can't get JetStream, fallback to configured value
+		if configuredReplicas == 0 {
+			return 1
+		}
+		return configuredReplicas
+	}
+
+	// Get account info to determine cluster size
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	info, err := js.AccountInfo(ctx)
+	if err != nil {
+		// If we can't get account info, assume single node
+		if configuredReplicas == 0 {
+			return 1
+		}
+		return configuredReplicas
+	}
+
+	// Determine actual cluster size from JetStream cluster info
+	// The API field returns the number of JetStream-enabled servers
+	clusterSize := 1
+	if info.Tier.Streams > 0 || info.Tier.Memory > 0 || info.Tier.Store > 0 {
+		// We're connected to JetStream, try to determine cluster size
+		// from discovered servers
+		servers := nc.DiscoveredServers()
+		clusterSize = len(servers) + 1 // Add 1 for the connected server
+	}
+
+	// If auto-mode (replicas=0), use min(clusterSize, 3)
+	if configuredReplicas == 0 {
+		if clusterSize > 3 {
+			return 3
+		}
+		return clusterSize
+	}
+
+	// Otherwise use min(configuredReplicas, clusterSize)
+	if configuredReplicas > clusterSize {
+		return clusterSize
+	}
+	return configuredReplicas
 }
 
 // CreateKeyValueWithRetry creates a JetStream key-value bucket with retry logic.

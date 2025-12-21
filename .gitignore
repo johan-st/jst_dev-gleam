@@ -8,3 +8,4 @@ build
 !build/index.html
 server/server
 .worktree
+.cluster-test

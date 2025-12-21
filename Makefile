@@ -1,4 +1,4 @@
-.PHONY: help check-tools srv-lint srv-test front-test srv-build front-build front-dev srv-dev build dev check srv-fmt front-fmt fmt
+.PHONY: help check-tools srv-lint srv-test front-test srv-build front-build front-dev srv-dev build dev check srv-fmt front-fmt fmt cluster-start cluster-stop cluster-status cluster-logs cluster-health partition-test integration-test
 
 # Configurable tool paths
 GOLANGCI_LINT ?= $(HOME)/go/bin/golangci-lint
@@ -84,3 +84,32 @@ preview: ## Deploy to preview environment
 
 preview-stop: ## Stop preview environment
 	fly -a jst-dev-preview scale count 0 -y
+
+# --- CLUSTER TESTING ---
+
+cluster-start: ## Start 3-node local cluster for testing
+	./scripts/cluster-test.sh start
+
+cluster-stop: ## Stop local cluster
+	./scripts/cluster-test.sh stop
+
+cluster-status: ## Show cluster status
+	./scripts/cluster-test.sh status
+
+cluster-logs: ## Show cluster logs (use NODE=node2 for specific node)
+	./scripts/cluster-test.sh logs $(or $(NODE),node1)
+
+cluster-health: ## Check cluster health
+	./scripts/cluster-test.sh health
+
+cluster-clean: ## Stop cluster and clean all data
+	./scripts/cluster-test.sh clean
+
+partition-test: ## Run network partition recovery tests
+	./scripts/partition-test.sh all
+
+partition-test-single: ## Run single partition test (TEST=node-failure|minority|rolling|majority)
+	./scripts/partition-test.sh $(or $(TEST),node-failure)
+
+integration-test: ## Run Go integration tests (requires cluster running)
+	cd server && go test -v -tags=integration -timeout=5m ./integration_test/...

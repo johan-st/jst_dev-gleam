@@ -62,8 +62,12 @@ func newRoomRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (core.Re
 // setupRoomKV initializes and returns a JetStream key-value store bucket named "convo_room" for storing rooms in JSON format.
 // The bucket is configured with a 16KB maximum value size, 32 history entries, and file storage.
 // Uses retry logic to handle JetStream cluster startup delays (meta leader election).
+// Replicas are automatically determined based on cluster size for fault tolerance.
 // Returns the created key-value store or an error if initialization fails.
 func setupRoomKV(ctx context.Context, nc *nats.Conn) (jetstream.KeyValue, error) {
+	// Get cluster-aware replica count
+	replicas := core.GetReplicasForCluster(nc)
+
 	cfg := jetstream.KeyValueConfig{
 		Bucket:       roomKVBucket,
 		Description:  "conversation rooms by id",
@@ -72,6 +76,7 @@ func setupRoomKV(ctx context.Context, nc *nats.Conn) (jetstream.KeyValue, error)
 		History:      32,
 		Storage:      jetstream.FileStorage,
 		Compression:  true,
+		Replicas:     replicas,
 	}
 
 	maxRetries, retryDelay := core.DefaultKVRetryConfig()

@@ -1844,13 +1844,25 @@ func handleHealthReady(nc *nats.Conn) http.Handler {
 // handleHealthCluster returns information about the NATS cluster
 // Useful for debugging fat node clustering
 func handleHealthCluster(nc *nats.Conn) http.Handler {
+	type JetStreamInfo struct {
+		Enabled  bool   `json:"enabled"`
+		Memory   uint64 `json:"memory_bytes,omitempty"`
+		Storage  uint64 `json:"storage_bytes,omitempty"`
+		Streams  int    `json:"streams,omitempty"`
+		Consumer int    `json:"consumers,omitempty"`
+		Replicas int    `json:"configured_replicas,omitempty"`
+		Domain   string `json:"domain,omitempty"`
+	}
+
 	type ClusterInfo struct {
-		Status      string   `json:"status"`
-		ServerName  string   `json:"server_name,omitempty"`
-		ServerID    string   `json:"server_id,omitempty"`
-		ConnectedTo string   `json:"connected_to,omitempty"`
-		Cluster     string   `json:"cluster,omitempty"`
-		Servers     []string `json:"servers,omitempty"`
+		Status      string         `json:"status"`
+		ServerName  string         `json:"server_name,omitempty"`
+		ServerID    string         `json:"server_id,omitempty"`
+		ConnectedTo string         `json:"connected_to,omitempty"`
+		Cluster     string         `json:"cluster,omitempty"`
+		Servers     []string       `json:"servers,omitempty"`
+		ClusterSize int            `json:"cluster_size"`
+		JetStream   *JetStreamInfo `json:"jetstream,omitempty"`
 		Stats       struct {
 			InMsgs     uint64 `json:"in_msgs"`
 			OutMsgs    uint64 `json:"out_msgs"`
@@ -1881,6 +1893,7 @@ func handleHealthCluster(nc *nats.Conn) http.Handler {
 			info.Servers = servers
 			info.ServerID = nc.ConnectedServerId()
 			info.ServerName = nc.ConnectedServerName()
+			info.ClusterSize = len(servers) + 1 // Include self
 
 			// Get stats
 			stats := nc.Stats()
@@ -1889,6 +1902,28 @@ func handleHealthCluster(nc *nats.Conn) http.Handler {
 			info.Stats.InBytes = stats.InBytes
 			info.Stats.OutBytes = stats.OutBytes
 			info.Stats.Reconnects = stats.Reconnects
+
+			// Get JetStream info
+			js, err := nc.JetStream()
+			if err == nil {
+				jsInfo := &JetStreamInfo{Enabled: true}
+
+				// Get account info for JetStream stats
+				accountInfo, err := js.AccountInfo()
+				if err == nil {
+					jsInfo.Memory = accountInfo.Memory
+					jsInfo.Storage = accountInfo.Store
+					jsInfo.Streams = accountInfo.Streams
+					jsInfo.Consumer = accountInfo.Consumers
+					jsInfo.Domain = accountInfo.Domain
+
+					// Get configured replica count
+					jsConfig := core.GetJetStreamConfig()
+					jsInfo.Replicas = jsConfig.GetReplicas()
+				}
+
+				info.JetStream = jsInfo
+			}
 		}
 
 		respBytes, err := json.Marshal(info)

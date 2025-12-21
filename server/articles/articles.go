@@ -70,8 +70,12 @@ func NewRepo(ctx context.Context, nc *nats.Conn, l *jst_log.Logger) (core.Repo[A
 // setup initializes and returns a JetStream key-value store bucket named "article" for storing articles in JSON format.
 // The bucket is configured with a 5MB maximum value size, 64 history entries, and file storage.
 // Uses retry logic to handle JetStream cluster startup delays (meta leader election).
+// Replicas are automatically determined based on cluster size for fault tolerance.
 // Returns the created key-value store or an error if initialization fails.
 func setup(ctx context.Context, nc *nats.Conn) (jetstream.KeyValue, error) {
+	// Get cluster-aware replica count
+	replicas := core.GetReplicasForCluster(nc)
+
 	cfg := jetstream.KeyValueConfig{
 		Bucket:       articleKVBucket,
 		Description:  "articles in json format",
@@ -80,6 +84,7 @@ func setup(ctx context.Context, nc *nats.Conn) (jetstream.KeyValue, error) {
 		History:      64,
 		Storage:      jetstream.FileStorage,
 		Compression:  true,
+		Replicas:     replicas,
 	}
 
 	maxRetries, retryDelay := core.DefaultKVRetryConfig()

@@ -211,7 +211,7 @@ func run(
 
 	// - web
 	l.Debug("http server, start")
-	httpServer := web.New(ctx, nc, conf.WebJwtSecret, lRoot.WithBreadcrumb("http"), articleRepo, conf.Flags.ProxyFrontend, conf.Flags.SlowSocket)
+	httpServer := web.New(ctx, nc, conf.WebJwtSecret, lRoot.WithBreadcrumb("http"), articleRepo, conf.Flags.ProxyFrontend, conf.Flags.SlowSocket, conf.WebPort)
 	core.Run(ctx, cleanShutdown, httpServer)
 
 	// - time ticker publisher (NATS core)

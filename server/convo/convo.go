@@ -81,6 +81,8 @@ func (c *Convo) Run(ctx context.Context) error {
 
 	// Create/Update stream for conversation messages per room: convo_message.<room>
 	// Uses retry logic to handle JetStream cluster startup delays
+	// Replicas are automatically determined based on cluster size for fault tolerance
+	replicas := core.GetReplicasForCluster(c.nc)
 	streamConf := jetstream.StreamConfig{
 		Name:        "convo_message",
 		Description: "conversation messages per room",
@@ -88,6 +90,7 @@ func (c *Convo) Run(ctx context.Context) error {
 		Storage:     jetstream.FileStorage,
 		MaxAge:      7 * 24 * time.Hour,
 		MaxBytes:    1024 * 1024 * 50, // 50 MB
+		Replicas:    replicas,
 	}
 	maxRetries, retryDelay := core.DefaultKVRetryConfig()
 	if _, err := core.CreateStreamWithRetry(ctx, c.nc, streamConf, maxRetries, retryDelay); err != nil {
